@@ -12,7 +12,7 @@ RUN --mount=type=cache,id=openclaw-bridge-apt-cache,target=/var/cache/apt,sharin
     rm -rf /var/lib/apt/lists/*
 
 # 2) Switch to HTTPS mirror after certs are available
-RUN sed -i 's|http://mirrors.tuna.tsinghua.edu.cn|https://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources
+RUN sed -i 's|http://mirrors.aliyun.com|https://mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
 
 # 3) Use domestic npm mirror
 RUN npm config set registry https://registry.npmmirror.com
@@ -66,8 +66,8 @@ RUN git config --global url."https://github.com/".insteadOf "git@github.com:" &&
     git config --global url."https://github.com/".insteadOf "git+ssh://git@github.com/"
 
 # 8) Use domestic pip mirror
-RUN pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip3 config set global.trusted-host pypi.tuna.tsinghua.edu.cn
+RUN pip3 config set global.index-url https://mirrors.aliyun.com/pypi/simple && \
+    pip3 config set global.trusted-host https://mirrors.aliyun.com
 
 WORKDIR /tmp/base
 
