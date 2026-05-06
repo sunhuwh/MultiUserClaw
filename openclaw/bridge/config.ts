@@ -141,9 +141,12 @@ export function writeOpenclawConfig(cfg: BridgeConfig): void {
       if (!existing.agents) existing.agents = {};
       if (!existing.agents.defaults) existing.agents.defaults = {};
       const currentModel = existing.agents.defaults.model;
+      console.log("[bridge] existing.agents.defaults.model 1: ${existing.agents.defaults.model}");
       if (!currentModel || currentModel.startsWith("platform-proxy/")) {
         existing.agents.defaults.model = openclawConfig.agents.defaults.model;
       }
+      
+      console.log("[bridge] existing.agents.defaults.model 2: ${existing.agents.defaults.model}");
 
       // --- agents.defaults.models: ensure platform-proxy model is in the allowlist ---
       // If models map exists (whitelist mode), add our platform-proxy model so it's allowed.
