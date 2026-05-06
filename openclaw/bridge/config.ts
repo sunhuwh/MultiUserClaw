@@ -199,10 +199,10 @@ export function writeOpenclawConfig(cfg: BridgeConfig): void {
       if (!Array.isArray(existing.plugins.allow)) {
         existing.plugins.allow = [];
       }
-
       fs.writeFileSync(configPath, JSON.stringify(existing, null, 2), "utf-8");
     } catch {
       // Corrupted file, overwrite
+      console.info("[bridge] config.ts error catch");
       fs.writeFileSync(configPath, JSON.stringify(openclawConfig, null, 2), "utf-8");
     }
   } else {
