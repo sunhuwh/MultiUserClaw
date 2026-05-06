@@ -164,6 +164,7 @@ export function writeOpenclawConfig(cfg: BridgeConfig): void {
       // - No model: set to platform-proxy default
       // - Has model without platform-proxy/ prefix: add the prefix so openclaw can resolve the provider
       // - Already has platform-proxy/ prefix: leave untouched
+      console.log("existing.agents.list 的类型:", Array.isArray(existing.agents.list) ? "数组" : typeof existing.agents.list);
       if (Array.isArray(existing.agents.list)) {
         for (const agent of existing.agents.list) {
           if (!agent.model) {
