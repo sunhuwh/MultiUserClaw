@@ -162,7 +162,7 @@ export function writeOpenclawConfig(cfg: BridgeConfig): void {
       if (Array.isArray(existing.agents.list)) {
         for (const agent of existing.agents.list) {
           if (!agent.model) {
-            agent.model = proxyModel;
+            agent.model = existing.agents.defaults.model;
           } else if (typeof agent.model === "string" && !agent.model.startsWith("platform-proxy/")) {
             agent.model = `platform-proxy/${agent.model}`;
           }
