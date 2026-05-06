@@ -165,8 +165,10 @@ export function writeOpenclawConfig(cfg: BridgeConfig): void {
       if (Array.isArray(existing.agents.list)) {
         for (const agent of existing.agents.list) {
           if (!agent.model) {
+            console.log("[bridge] agent model is null");
             agent.model = existing.agents.defaults.model;
           } else if (typeof agent.model === "string" && !agent.model.startsWith("platform-proxy/")) {
+            console.log("[bridge] agent model is not null");
             agent.model = `platform-proxy/${agent.model}`;
           }
         }
