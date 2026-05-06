@@ -60,6 +60,7 @@ export function loadConfig(): BridgeConfig {
  * Write openclaw config file so the gateway uses our platform LLM proxy.
  */
 export function writeOpenclawConfig(cfg: BridgeConfig): void {
+  console.log("✅ writeOpenclawConfig");
   const configDir = cfg.openclawHome;
   fs.mkdirSync(configDir, { recursive: true });
 
@@ -140,6 +141,7 @@ export function writeOpenclawConfig(cfg: BridgeConfig): void {
     // - 已配置非 platform-proxy/ 的模型：用户自选的第三方模型，保留不覆盖
       if (!existing.agents) existing.agents = {};
       if (!existing.agents.defaults) existing.agents.defaults = {};
+      console.info("[bridge] config.ts 001")
       const currentModel = existing.agents.defaults.model;
       console.log(`[bridge] existing.agents.defaults.model 1: ${existing.agents.defaults.model}`);
       if (!currentModel || currentModel.startsWith("platform-proxy/")) {
@@ -206,6 +208,7 @@ export function writeOpenclawConfig(cfg: BridgeConfig): void {
       fs.writeFileSync(configPath, JSON.stringify(openclawConfig, null, 2), "utf-8");
     }
   } else {
+    console.info("config_local not exist");
     fs.writeFileSync(configPath, JSON.stringify(openclawConfig, null, 2), "utf-8");
   }
 
