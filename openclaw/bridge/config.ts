@@ -167,6 +167,7 @@ export function writeOpenclawConfig(cfg: BridgeConfig): void {
       console.log("existing.agents.list 的类型:", Array.isArray(existing.agents.list) ? "数组" : typeof existing.agents.list);
       if (Array.isArray(existing.agents.list)) {
         for (const agent of existing.agents.list) {
+          console.log(`[bridge] agent.model: ${agent.model}`)
           if (!agent.model) {
             console.log("[bridge] agent model is null");
             agent.model = existing.agents.defaults.model;
