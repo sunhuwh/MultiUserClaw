@@ -1,120 +1,167 @@
-services:
-  openclaw-gateway:
-    image: ${OPENCLAW_IMAGE:-openclaw:local}
-    build: .
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      HOME: /home/node
-      TERM: xterm-256color
-      # Pin container-side workspace and config paths so host values written to
-      # `.env` (used by Compose for the bind-mount source below) cannot leak
-      # into runtime code that resolves these env vars inside the container.
-      # Without this override, a macOS host path like /Users/<you>/.openclaw/...
-      # imported from .env caused first-reply `mkdir '/Users'` EACCES failures
-      # in Linux Docker (#77436).
-      OPENCLAW_CONFIG_DIR: /home/node/.openclaw
-      OPENCLAW_WORKSPACE_DIR: /home/node/.openclaw/workspace
-      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-}
-      OPENCLAW_ALLOW_INSECURE_PRIVATE_WS: ${OPENCLAW_ALLOW_INSECURE_PRIVATE_WS:-}
-      # Empty means auto: Bonjour disables itself in detected containers.
-      # Set 0 only on host/macvlan/mDNS-capable networks; set 1 to force off.
-      OPENCLAW_DISABLE_BONJOUR: ${OPENCLAW_DISABLE_BONJOUR:-}
-      # OpenTelemetry export is outbound OTLP/HTTP from the Gateway. Prometheus
-      # uses the existing authenticated Gateway route; it does not need a port.
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
-      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-}
-      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: ${OTEL_EXPORTER_OTLP_METRICS_ENDPOINT:-}
-      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: ${OTEL_EXPORTER_OTLP_LOGS_ENDPOINT:-}
-      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}
-      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-}
-      OTEL_SEMCONV_STABILITY_OPT_IN: ${OTEL_SEMCONV_STABILITY_OPT_IN:-}
-      OPENCLAW_OTEL_PRELOADED: ${OPENCLAW_OTEL_PRELOADED:-}
-      CLAUDE_AI_SESSION_KEY: ${CLAUDE_AI_SESSION_KEY:-}
-      CLAUDE_WEB_SESSION_KEY: ${CLAUDE_WEB_SESSION_KEY:-}
-      CLAUDE_WEB_COOKIE: ${CLAUDE_WEB_COOKIE:-}
-      TZ: ${OPENCLAW_TZ:-UTC}
-    volumes:
-      - ${OPENCLAW_CONFIG_DIR:-${HOME:-/tmp}/.openclaw}:/home/node/.openclaw
-      - ${OPENCLAW_WORKSPACE_DIR:-${HOME:-/tmp}/.openclaw/workspace}:/home/node/.openclaw/workspace
-      ## Uncomment the lines below to enable sandbox isolation
-      ## (agents.defaults.sandbox). Requires Docker CLI in the image
-      ## (build with --build-arg OPENCLAW_INSTALL_DOCKER_CLI=1) or use
-      ## scripts/docker/setup.sh with OPENCLAW_SANDBOX=1 for automated setup.
-      ## Set DOCKER_GID to the host's docker group GID (run: stat -c '%g' /var/run/docker.sock).
-      # - /var/run/docker.sock:/var/run/docker.sock
-    # group_add:
-    #   - "${DOCKER_GID:-999}"
-    # Let bundled local-model providers reach host-side LM Studio/Ollama via
-    # http://host.docker.internal:<port>. Docker Desktop usually provides this
-    # alias; the host-gateway mapping makes it work on Linux Docker Engine too.
-    cap_drop:
-      - NET_RAW
-      - NET_ADMIN
-    security_opt:
-      - no-new-privileges:true
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    ports:
-      - "${OPENCLAW_GATEWAY_PORT:-18789}:18789"
-      - "${OPENCLAW_BRIDGE_PORT:-18790}:18790"
-    init: true
-    restart: unless-stopped
-    command:
-      [
-        "node",
-        "dist/index.js",
-        "gateway",
-        "--bind",
-        "${OPENCLAW_GATEWAY_BIND:-lan}",
-        "--port",
-        "18789",
-      ]
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "node",
-          "-e",
-          "fetch('http://127.0.0.1:18789/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
-        ]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
+# OpenClaw Multi-Tenant Deployment
+#
+# Architecture:
+#   frontend (public:3000) → gateway (internal+external) → per-user containers (internal only)
+#                                  ↕
+#                            postgres (internal)
+#
+# User containers are created dynamically by the gateway via Docker API,
+# NOT defined in this compose file.
 
-  openclaw-cli:
-    image: ${OPENCLAW_IMAGE:-openclaw:local}
-    network_mode: "service:openclaw-gateway"
-    env_file:
-      - path: .env
-        required: false
-    cap_drop:
-      - NET_RAW
-      - NET_ADMIN
-    security_opt:
-      - no-new-privileges:true
+name: openclaw
+
+services:
+  postgres:
+    container_name: openclaw-postgres
+    image: postgres:16-alpine
     environment:
-      HOME: /home/node
-      TERM: xterm-256color
-      # Pin container-side workspace and config paths so host values written to
-      # `.env` cannot leak into runtime code via the env_file import (#77436).
-      OPENCLAW_CONFIG_DIR: /home/node/.openclaw
-      OPENCLAW_WORKSPACE_DIR: /home/node/.openclaw/workspace
-      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-}
-      OPENCLAW_ALLOW_INSECURE_PRIVATE_WS: ${OPENCLAW_ALLOW_INSECURE_PRIVATE_WS:-}
-      BROWSER: echo
-      CLAUDE_AI_SESSION_KEY: ${CLAUDE_AI_SESSION_KEY:-}
-      CLAUDE_WEB_SESSION_KEY: ${CLAUDE_WEB_SESSION_KEY:-}
-      CLAUDE_WEB_COOKIE: ${CLAUDE_WEB_COOKIE:-}
-      TZ: ${OPENCLAW_TZ:-UTC}
+      POSTGRES_USER: ${POSTGRES_USER:-nanobot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nanobot}
+      POSTGRES_DB: ${POSTGRES_DB:-nanobot_platform}
+    ports:
+      - "15432:5432"
     volumes:
-      - ${OPENCLAW_CONFIG_DIR:-${HOME:-/tmp}/.openclaw}:/home/node/.openclaw
-      - ${OPENCLAW_WORKSPACE_DIR:-${HOME:-/tmp}/.openclaw/workspace}:/home/node/.openclaw/workspace
-    stdin_open: true
-    tty: true
-    init: true
-    entrypoint: ["node", "dist/index.js"]
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - openclaw-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nanobot} -d ${POSTGRES_DB:-nanobot_platform}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  gateway:
+    container_name: openclaw-gateway
+    build: ./platform
+    ports:
+      - "8080:8080"
+    environment:
+      PLATFORM_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nanobot}:${POSTGRES_PASSWORD:-nanobot}@postgres:5432/${POSTGRES_DB:-nanobot_platform}
+      PLATFORM_JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+
+      # 启动时自动创建管理员账号
+      PLATFORM_ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      PLATFORM_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+
+      # LLM API Keys — ONLY here, never in user containers
+      PLATFORM_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      PLATFORM_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      PLATFORM_OPENAI_API_BASE: ${OPENAI_API_BASE:-}
+      PLATFORM_DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      PLATFORM_OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      PLATFORM_DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      PLATFORM_MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
+      PLATFORM_MINIMAX_API_BASE: ${MINIMAX_API_BASE:-}
+      PLATFORM_AIHUBMIX_API_KEY: ${AIHUBMIX_API_KEY:-}
+      PLATFORM_MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
+      PLATFORM_KIMI_API_KEY: ${KIMI_API_KEY:-}
+      PLATFORM_ZHIPU_API_KEY: ${ZHIPU_API_KEY:-}
+      PLATFORM_DOUBAO_API_KEY: ${DOUBAO_API_KEY:-}
+
+      # Self-hosted vLLM
+      PLATFORM_HOSTED_VLLM_API_KEY: ${HOSTED_VLLM_API_KEY:-}
+      PLATFORM_HOSTED_VLLM_API_BASE: ${HOSTED_VLLM_API_BASE:-}
+
+      PLATFORM_DEFAULT_MODEL: ${DEFAULT_MODEL:-dashscope/qwen3-coder-plus}
+      PLATFORM_OPENCLAW_IMAGE: openclaw:latest
+      PLATFORM_DEPLOY_VERSION: ${DEPLOY_VERSION:-}
+      PLATFORM_CONTAINER_NETWORK: openclaw-internal
+      PLATFORM_SHARED_OPENCLAW_ENABLED: ${PLATFORM_SHARED_OPENCLAW_ENABLED:-true}
+      PLATFORM_SHARED_OPENCLAW_URL: ${PLATFORM_SHARED_OPENCLAW_URL:-http://shared-openclaw:18080}
+      PLATFORM_SHARED_OPENCLAW_SYSTEM_TOKEN: ${PLATFORM_SHARED_OPENCLAW_SYSTEM_TOKEN:-shared-openclaw-system-token}
+      PLATFORM_CONTAINER_TZ: ${CONTAINER_TZ:-Asia/Shanghai}
+      PLATFORM_CONTAINER_MEMORY_LIMIT: ${PLATFORM_CONTAINER_MEMORY_LIMIT:-2g}
+      PLATFORM_CONTAINER_SHM_SIZE: ${PLATFORM_CONTAINER_SHM_SIZE:-1g}
+      PLATFORM_CONTAINER_DATA_DIR: /data/openclaw-users
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker API access for container management
+      - userdata:/data/openclaw-users
+    networks:
+      - openclaw-internal   # talk to postgres + user containers
+      - openclaw-external   # accept traffic from frontend / public
     depends_on:
-      - openclaw-gateway
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    container_name: openclaw-frontend
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
+    ports:
+      - "3080:3000"
+    networks:
+      - openclaw-external
+    depends_on:
+      - gateway
+
+  shared-openclaw:
+    container_name: openclaw-shared
+    image: openclaw:latest
+    command: ["node", "bridge/dist/bridge/start.js"]
+    environment:
+      NANOBOT_PROXY__URL: http://gateway:8080/llm/v1
+      NANOBOT_PROXY__TOKEN: ${PLATFORM_SHARED_OPENCLAW_SYSTEM_TOKEN:-shared-openclaw-system-token}
+      NANOBOT_AGENTS__DEFAULTS__MODEL: ${DEFAULT_MODEL:-dashscope/qwen3-coder-plus}
+      DEPLOY_VERSION: ${DEPLOY_VERSION:-}
+      TZ: ${CONTAINER_TZ:-Asia/Shanghai}
+      BRIDGE_ENABLE_CHANNELS: "0"
+    volumes:
+      - shared_openclaw_data:/root/.openclaw
+    networks:
+      - openclaw-internal
+    depends_on:
+      - gateway
+
+  manage-front:
+    container_name: openclaw-manage
+    build: ./manage_front
+    ports:
+      - "3081:3000"
+    environment:
+      - API_URL=http://gateway:8080
+    networks:
+      - openclaw-external
+    depends_on:
+      - gateway
+
+  simple-front:
+    container_name: openclaw-simple
+    build:
+      context: ./simple_front
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
+    ports:
+      - "3082:3000"
+    networks:
+      - openclaw-external
+    depends_on:
+      - gateway
+
+  share-openclaw-front:
+    container_name: openclaw-share-front
+    build:
+      context: ./share_openclaw_front
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
+    ports:
+      - "3083:3000"
+    networks:
+      - openclaw-external
+    depends_on:
+      - gateway
+
+networks:
+  openclaw-internal:
+    name: openclaw-internal    # explicit name — prevents Compose project-name prefix
+    driver: bridge
+    internal: false  # allow internet access for user containers to download tools
+  openclaw-external:
+    name: openclaw-external
+    driver: bridge
+
+volumes:
+  pgdata:
+  userdata:
+  shared_openclaw_data:
