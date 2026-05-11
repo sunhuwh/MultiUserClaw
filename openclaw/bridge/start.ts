@@ -112,6 +112,7 @@ class GatewayManager {
 
       // Re-read and write config (may have changed via settings API)
       const config = loadConfig();
+      console.info("[bridge] writeOpenclawConfig before")
       writeOpenclawConfig(config);
       console.log("[bridge] Refreshed openclaw config");
 
