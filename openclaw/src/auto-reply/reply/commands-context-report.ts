@@ -12,6 +12,7 @@ import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
 import { estimateTokensFromChars } from "../../utils/cjk-chars.js";
 import type { ReplyPayload } from "../types.js";
 import type { HandleCommandsParams } from "./commands-types.js";
+import { renderContextTreemapPng } from "./context-treemap.js";
 
 function formatInt(n: number): string {
   return new Intl.NumberFormat("en-US").format(n);
@@ -42,14 +43,21 @@ function formatListTop(
   return { lines, omitted };
 }
 
+function resolveRunContextReport(params: HandleCommandsParams): SessionSystemPromptReport | null {
+  const targetSessionEntry = params.sessionStore?.[params.sessionKey] ?? params.sessionEntry;
+  const existing = targetSessionEntry?.systemPromptReport;
+  return existing?.source === "run" ? existing : null;
+}
+
 async function resolveContextReport(
   params: HandleCommandsParams,
 ): Promise<SessionSystemPromptReport> {
-  const existing = params.sessionEntry?.systemPromptReport;
-  if (existing && existing.source === "run") {
-    return existing;
+  const runReport = resolveRunContextReport(params);
+  if (runReport) {
+    return runReport;
   }
 
+  const targetSessionEntry = params.sessionStore?.[params.sessionKey] ?? params.sessionEntry;
   const bootstrapMaxChars = resolveBootstrapMaxChars(params.cfg);
   const bootstrapTotalMaxChars = resolveBootstrapTotalMaxChars(params.cfg);
   const { resolveCommandsSystemPromptBundle } = await import("./commands-system-prompt.js");
@@ -59,7 +67,7 @@ async function resolveContextReport(
   return buildSystemPromptReport({
     source: "estimate",
     generatedAt: Date.now(),
-    sessionId: params.sessionEntry?.sessionId,
+    sessionId: targetSessionEntry?.sessionId,
     sessionKey: params.sessionKey,
     provider: params.provider,
     model: params.model,
@@ -76,8 +84,9 @@ async function resolveContextReport(
 }
 
 export async function buildContextReply(params: HandleCommandsParams): Promise<ReplyPayload> {
+  const targetSessionEntry = params.sessionStore?.[params.sessionKey] ?? params.sessionEntry;
   const args = parseContextArgs(params.command.commandBodyNormalized);
-  const sub = normalizeLowercaseStringOrEmpty(args.split(/\s+/).filter(Boolean)[0]);
+  const sub = normalizeLowercaseStringOrEmpty(args.split(/\s+/).find(Boolean));
 
   if (!sub || sub === "help") {
     return {
@@ -89,6 +98,7 @@ export async function buildContextReply(params: HandleCommandsParams): Promise<R
         "Try:",
         "- /context list   (short breakdown)",
         "- /context detail (per-file + per-tool + per-skill + system prompt size)",
+        "- /context map    (WinDirStat-style treemap image)",
         "- /context json   (same, machine-readable)",
         "",
         "Inline shortcut = a command token inside a normal message (e.g. “hey /status”). It runs immediately (allowlisted senders only) and is stripped before the model sees the remaining text.",
@@ -96,15 +106,42 @@ export async function buildContextReply(params: HandleCommandsParams): Promise<R
     };
   }
 
-  const report = await resolveContextReport(params);
-  const cachedContextUsageTokens = resolveFreshSessionTotalTokens(params.sessionEntry);
+  const cachedContextUsageTokens = resolveFreshSessionTotalTokens(targetSessionEntry);
   const session = {
-    totalTokens: params.sessionEntry?.totalTokens ?? null,
-    totalTokensFresh: params.sessionEntry?.totalTokensFresh ?? null,
-    inputTokens: params.sessionEntry?.inputTokens ?? null,
-    outputTokens: params.sessionEntry?.outputTokens ?? null,
+    totalTokens: targetSessionEntry?.totalTokens ?? null,
+    totalTokensFresh: targetSessionEntry?.totalTokensFresh ?? null,
+    inputTokens: targetSessionEntry?.inputTokens ?? null,
+    outputTokens: targetSessionEntry?.outputTokens ?? null,
     contextTokens: params.contextTokens ?? null,
   } as const;
+
+  if (sub === "map") {
+    const report = resolveRunContextReport(params);
+    if (!report) {
+      return {
+        text: [
+          "Context treemap unavailable.",
+          "No actual run context is cached for this session yet.",
+          "Send a normal message, then run /context map again.",
+        ].join("\n"),
+      };
+    }
+    const treemap = await renderContextTreemapPng({
+      report,
+      session: {
+        cachedContextTokens: cachedContextUsageTokens ?? null,
+        contextWindowTokens: session.contextTokens,
+      },
+    });
+    return {
+      text: treemap.caption,
+      mediaUrl: treemap.path,
+      trustedLocalMedia: true,
+      sensitiveMedia: true,
+    };
+  }
+
+  const report = await resolveContextReport(params);
 
   if (sub === "json") {
     return { text: JSON.stringify({ report, session }, null, 2) };
@@ -114,7 +151,7 @@ export async function buildContextReply(params: HandleCommandsParams): Promise<R
     return {
       text: [
         "Unknown /context mode.",
-        "Use: /context, /context list, /context detail, or /context json",
+        "Use: /context, /context list, /context detail, /context map, or /context json",
       ].join("\n"),
     };
   }

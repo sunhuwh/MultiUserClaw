@@ -1,15 +1,14 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { recordSessionMetaFromInbound } from "openclaw/plugin-sdk/config-runtime";
 import {
   __testing as sessionBindingTesting,
   registerSessionBindingAdapter,
-} from "openclaw/plugin-sdk/conversation-runtime";
+} from "openclaw/plugin-sdk/session-binding-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { installMatrixMonitorTestRuntime } from "../../test-runtime.js";
 import { MATRIX_OPENCLAW_FINALIZED_PREVIEW_KEY } from "../send/types.js";
-import { createMatrixRoomMessageHandler } from "./handler.js";
+import { createMatrixRoomMessageHandler, MatrixRetryableInboundError } from "./handler.js";
 import {
   createMatrixHandlerTestHarness,
   createMatrixReactionEvent,
@@ -54,6 +53,42 @@ vi.mock("./replies.js", () => ({
   deliverMatrixReplies: deliverMatrixRepliesMock,
 }));
 
+function writeMatrixSessionMeta(
+  storePath: string,
+  sessionKey: string,
+  origin: {
+    chatType: "direct" | "group";
+    from: string;
+    to: string;
+    nativeChannelId?: string;
+    nativeDirectUserId?: string;
+  },
+): void {
+  const store = fs.existsSync(storePath)
+    ? (JSON.parse(fs.readFileSync(storePath, "utf8")) as Record<string, Record<string, unknown>>)
+    : {};
+  const existing = store[sessionKey] ?? {
+    sessionId: `sess-${Object.keys(store).length + 1}`,
+    updatedAt: Date.now(),
+  };
+  const existingOrigin =
+    typeof existing.origin === "object" && existing.origin !== null
+      ? (existing.origin as Record<string, unknown>)
+      : {};
+  store[sessionKey] = {
+    ...existing,
+    origin: {
+      ...existingOrigin,
+      provider: "matrix",
+      surface: "matrix",
+      accountId: "ops",
+      ...origin,
+    },
+  };
+  fs.mkdirSync(path.dirname(storePath), { recursive: true });
+  fs.writeFileSync(storePath, JSON.stringify(store, null, 2), "utf8");
+}
+
 beforeEach(() => {
   sessionBindingTesting.resetSessionBindingAdaptersForTests();
   installMatrixMonitorTestRuntime();
@@ -90,6 +125,112 @@ function createReactionHarness(params?: {
     isDirectMessage: params?.isDirectMessage,
     getMemberDisplayName: async () => params?.senderName ?? "sender",
   });
+}
+
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  expect(value, label).toBeTypeOf("object");
+  expect(value, label).not.toBeNull();
+  return value as Record<string, unknown>;
+}
+
+function requireArray(value: unknown, label: string): Array<unknown> {
+  expect(Array.isArray(value), label).toBe(true);
+  return value as Array<unknown>;
+}
+
+function mockCalls(mock: unknown, label: string): Array<Array<unknown>> {
+  const mockState = (mock as { mock?: { calls?: Array<Array<unknown>> } }).mock;
+  expect(mockState, `${label}.mock`).toBeDefined();
+  expect(Array.isArray(mockState?.calls), `${label}.mock.calls`).toBe(true);
+  return mockState?.calls ?? [];
+}
+
+function callArg(mock: unknown, callIndex: number, argIndex: number, label: string) {
+  const call = mockCalls(mock, label).at(callIndex);
+  expect(call, label).toBeDefined();
+  return call?.[argIndex];
+}
+
+function lastCallArg(mock: unknown, argIndex: number, label: string) {
+  const calls = mockCalls(mock, label);
+  return callArg(mock, calls.length - 1, argIndex, label);
+}
+
+function expectMockCallWithFields(mock: unknown, fields: Record<string, unknown>) {
+  const matched = mockCalls(mock, "mock calls").some(([value]) => {
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+    const record = value as Record<string, unknown>;
+    return Object.entries(fields).every(([key, expected]) => Object.is(record[key], expected));
+  });
+  expect(matched).toBe(true);
+}
+
+function expectNoticeSent(mock: unknown) {
+  const message = requireRecord(callArg(mock, 0, 1, "notice content"), "notice content");
+  expect(message.msgtype).toBe("m.notice");
+  expect(String(message.body)).toContain("channels.matrix.dm.sessionScope");
+}
+
+function expectRuntimeErrorContaining(mock: unknown, text: string) {
+  const matched = mockCalls(mock, "runtime error").some(([message]) =>
+    String(message).includes(text),
+  );
+  expect(matched).toBe(true);
+}
+
+function findMockCall(mock: unknown, label: string, predicate: (call: Array<unknown>) => boolean) {
+  const call = mockCalls(mock, label).find(predicate);
+  expect(call, label).toBeDefined();
+  return call as Array<unknown>;
+}
+
+function expectMatrixEdit(roomId: string, eventId: string, body: string) {
+  const call = findMockCall(
+    editMessageMatrixMock,
+    `edit call for ${eventId}`,
+    ([room, editedEventId, editedBody]) =>
+      room === roomId && editedEventId === eventId && editedBody === body,
+  );
+  expect(call[3], "edit options").toBeDefined();
+}
+
+function expectFinalizedPreviewEdit(eventId: string, text: string) {
+  const call = findMockCall(
+    editMessageMatrixMock,
+    `edit call for ${eventId}`,
+    ([room, editedEventId, body]) =>
+      room === "!room:example.org" && editedEventId === eventId && body === text,
+  );
+  const options = requireRecord(call[3], "edit options");
+  expect(options.extraContent).toEqual({ [MATRIX_OPENCLAW_FINALIZED_PREVIEW_KEY]: true });
+}
+
+function expectEditLiveFlag(eventId: string, text: string, expected: boolean | undefined) {
+  const call = findMockCall(
+    editMessageMatrixMock,
+    `edit live flag call for ${eventId}`,
+    ([room, editedEventId, body]) =>
+      room === "!room:example.org" && editedEventId === eventId && body === text,
+  );
+  const options = requireRecord(call[3], "edit options");
+  if (expected === undefined) {
+    expect(Object.hasOwn(options, "live")).toBe(false);
+  } else {
+    expect(options.live).toBe(expected);
+  }
+}
+
+function expectDeliveredMediaReply() {
+  const payload = requireRecord(
+    lastCallArg(deliverMatrixRepliesMock, 0, "deliver replies payload"),
+    "deliver replies payload",
+  );
+  const replies = requireArray(payload.replies, "deliver replies");
+  const reply = requireRecord(replies[0], "media reply");
+  expect(reply.mediaUrl).toBe("https://example.com/image.png");
+  expect(reply.text).toBeUndefined();
 }
 
 describe("matrix monitor handler pairing account scope", () => {
@@ -155,6 +296,94 @@ describe("matrix monitor handler pairing account scope", () => {
     }
   });
 
+  it("pins direct-message main route updates to the configured owner", async () => {
+    const { handler, recordInboundSession } = createMatrixHandlerTestHarness({
+      cfg: {
+        channels: {
+          matrix: {
+            dm: { allowFrom: ["@owner:example.org"] },
+          },
+        },
+      },
+      dmPolicy: "allowlist",
+      allowFrom: ["@owner:example.org"],
+      allowFromResolvedEntries: [{ input: "@owner:example.org", id: "@owner:example.org" }],
+      isDirectMessage: true,
+    });
+
+    await handler(
+      "!dm:example.org",
+      createMatrixTextMessageEvent({
+        eventId: "$owner-dm",
+        sender: "@owner:example.org",
+        body: "hello",
+      }),
+    );
+
+    const inbound = requireRecord(
+      callArg(recordInboundSession, 0, 0, "record inbound session"),
+      "record inbound session",
+    );
+    const route = requireRecord(inbound.updateLastRoute, "last route update");
+    expect(route.channel).toBe("matrix");
+    expect(route.to).toBe("room:!dm:example.org");
+    const ownerPin = requireRecord(route.mainDmOwnerPin, "main DM owner pin");
+    expect(ownerPin.ownerRecipient).toBe("@owner:example.org");
+    expect(ownerPin.senderRecipient).toBe("@owner:example.org");
+  });
+
+  it("uses live dmScope when deciding whether to pin main DM route updates", async () => {
+    const startupCfg = {
+      session: { dmScope: "main" },
+      channels: {
+        matrix: {
+          dm: { allowFrom: ["@owner:example.org"] },
+        },
+      },
+    };
+    const liveCfg = {
+      session: { dmScope: "per-channel-peer" },
+      channels: {
+        matrix: {
+          dm: { allowFrom: ["@owner:example.org"] },
+        },
+      },
+    };
+    const { handler, recordInboundSession } = createMatrixHandlerTestHarness({
+      cfg: startupCfg,
+      liveCfg,
+      dmPolicy: "allowlist",
+      allowFrom: ["@owner:example.org"],
+      allowFromResolvedEntries: [{ input: "@owner:example.org", id: "@owner:example.org" }],
+      isDirectMessage: true,
+    });
+
+    await handler(
+      "!dm:example.org",
+      createMatrixTextMessageEvent({
+        eventId: "$owner-dm-live-scope",
+        sender: "@owner:example.org",
+        body: "hello",
+      }),
+    );
+
+    expect(recordInboundSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        updateLastRoute: expect.objectContaining({
+          channel: "matrix",
+          to: "room:!dm:example.org",
+          mainDmOwnerPin: undefined,
+        }),
+      }),
+    );
+    const inbound = requireRecord(
+      callArg(recordInboundSession, 0, 0, "record inbound session"),
+      "record inbound session",
+    );
+    const route = requireRecord(inbound.updateLastRoute, "last route update");
+    expect(route.mainDmOwnerPin).toBeUndefined();
+  });
+
   it("sends pairing reminders for pending requests with cooldown", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-01T10:00:00.000Z"));
@@ -180,9 +409,9 @@ describe("matrix monitor handler pairing account scope", () => {
       await handler("!room:example.org", makeEvent("$event1"));
       await handler("!room:example.org", makeEvent("$event2"));
       expect(sendMessageMatrixMock).toHaveBeenCalledTimes(1);
-      expect(sendMessageMatrixMock.mock.calls[0]?.[1]).toContain(
-        "Pairing request is still pending approval.",
-      );
+      const pairingReminder = sendMessageMatrixMock.mock.calls[0]?.[1];
+      expect(typeof pairingReminder).toBe("string");
+      expect(pairingReminder).toContain("Pairing request is still pending approval.");
 
       await vi.advanceTimersByTimeAsync(5 * 60_000 + 1);
       await handler("!room:example.org", makeEvent("$event3"));
@@ -253,12 +482,7 @@ describe("matrix monitor handler pairing account scope", () => {
       }),
     );
 
-    expect(resolveAgentRoute).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: "matrix",
-        accountId: "ops",
-      }),
-    );
+    expectMockCallWithFields(resolveAgentRoute, { channel: "matrix", accountId: "ops" });
   });
 
   it("does not enqueue delivered text messages into system events", async () => {
@@ -445,6 +669,111 @@ describe("matrix monitor handler pairing account scope", () => {
     expect(recordInboundSession).not.toHaveBeenCalled();
   });
 
+  it("blocks room control commands from DM-only paired senders", async () => {
+    const readAllowFromStore = vi.fn(async () => ["@user:example.org"]);
+    const { handler, finalizeInboundContext, recordInboundSession } =
+      createMatrixHandlerTestHarness({
+        isDirectMessage: false,
+        readAllowFromStore,
+        roomsConfig: {
+          "!room:example.org": { requireMention: false },
+        },
+        shouldHandleTextCommands: () => true,
+        hasControlCommand: () => true,
+        cfg: {
+          commands: {
+            useAccessGroups: true,
+          },
+        },
+        getMemberDisplayName: async () => "sender",
+      });
+
+    await handler(
+      "!room:example.org",
+      createMatrixTextMessageEvent({
+        eventId: "$dm-only-room-command",
+        body: "/config",
+      }),
+    );
+
+    expect(recordInboundSession).not.toHaveBeenCalled();
+    expect(finalizeInboundContext).not.toHaveBeenCalled();
+    expect(readAllowFromStore).not.toHaveBeenCalled();
+  });
+
+  it("blocks room control commands from configured DM-only senders", async () => {
+    const hasControlCommand = vi.fn((text?: string) => text === "/new");
+    const { handler, finalizeInboundContext, recordInboundSession } =
+      createMatrixHandlerTestHarness({
+        isDirectMessage: false,
+        roomsConfig: {
+          "!room:example.org": { requireMention: false },
+        },
+        shouldHandleTextCommands: () => true,
+        hasControlCommand,
+        cfg: {
+          commands: {
+            useAccessGroups: true,
+          },
+          channels: {
+            matrix: {
+              dm: { allowFrom: ["@observer:example.org"] },
+              groupAllowFrom: ["@driver:example.org"],
+            },
+          },
+        },
+        groupPolicy: "open",
+        getMemberDisplayName: async () => "observer",
+      });
+
+    await handler(
+      "!room:example.org",
+      createMatrixTextMessageEvent({
+        eventId: "$dm-configured-room-command",
+        sender: "@observer:example.org",
+        body: "@bot:example.org /new",
+      }),
+    );
+
+    expect(callArg(hasControlCommand, 0, 0, "control command")).toBe("/new");
+    expect(callArg(hasControlCommand, 0, 1, "control command")).toBeDefined();
+    expect(recordInboundSession).not.toHaveBeenCalled();
+    expect(finalizeInboundContext).not.toHaveBeenCalled();
+  });
+
+  it("strips the Matrix self user id before room slash command detection", async () => {
+    const hasControlCommand = vi.fn((text?: string) => text === "/new");
+    const { handler, finalizeInboundContext, recordInboundSession } =
+      createMatrixHandlerTestHarness({
+        cfg: { commands: { useAccessGroups: false } },
+        isDirectMessage: false,
+        mentionRegexes: [],
+        shouldHandleTextCommands: () => true,
+        hasControlCommand,
+        getMemberDisplayName: async () => "sender",
+      });
+
+    await handler(
+      "!room:example.org",
+      createMatrixTextMessageEvent({
+        eventId: "$mxid-command",
+        body: "@bot:example.org /new",
+      }),
+    );
+
+    expect(callArg(hasControlCommand, 0, 0, "control command")).toBe("/new");
+    expect(callArg(hasControlCommand, 0, 1, "control command")).toBeDefined();
+    const context = requireRecord(
+      callArg(finalizeInboundContext, 0, 0, "finalized context"),
+      "finalized context",
+    );
+    expect(context.RawBody).toBe("@bot:example.org /new");
+    expect(context.CommandBody).toBe("/new");
+    expect(context.BodyForAgent).toBe("@bot:example.org /new");
+    expect(context.BodyForCommands).toBe("/new");
+    expect(recordInboundSession).toHaveBeenCalled();
+  });
+
   it("processes room messages mentioned via displayName in formatted_body", async () => {
     const recordInboundSession = vi.fn(async () => {});
     const { handler } = createMatrixHandlerTestHarness({
@@ -461,6 +790,30 @@ describe("matrix monitor handler pairing account scope", () => {
           msgtype: "m.text",
           body: "Tom Servo: hello",
           formatted_body: '<a href="https://matrix.to/#/@bot:example.org">Tom Servo</a>: hello',
+        },
+      }),
+    );
+
+    expect(recordInboundSession).toHaveBeenCalled();
+  });
+
+  it("processes room messages mentioned via @displayName in Unicode formatted_body", async () => {
+    const recordInboundSession = vi.fn(async () => {});
+    const { handler } = createMatrixHandlerTestHarness({
+      isDirectMessage: false,
+      getMemberDisplayName: async () => "欢欢",
+      recordInboundSession,
+    });
+
+    await handler(
+      "!room:example.org",
+      createMatrixRoomMessageEvent({
+        eventId: "$unicode-display-name-mention",
+        content: {
+          msgtype: "m.text",
+          body: "@欢欢 please reply",
+          formatted_body: '<a href="https://matrix.to/#/@bot:example.org">@欢欢</a> please reply',
+          "m.mentions": { user_ids: ["@bot:example.org"] },
         },
       }),
     );
@@ -506,6 +859,32 @@ describe("matrix monitor handler pairing account scope", () => {
 
     expect(recordInboundSession).not.toHaveBeenCalled();
     expect(resolveAgentRoute).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops root events that carry a bundled replacement relation", async () => {
+    const { handler, recordInboundSession } = createMatrixHandlerTestHarness({
+      isDirectMessage: false,
+      mentionRegexes: [/@bot/i],
+      getMemberDisplayName: async () => "sender",
+    });
+
+    await handler(
+      "!room:example.org",
+      createMatrixTextMessageEvent({
+        eventId: "$edited-root",
+        body: "@bot please reply",
+        mentions: { user_ids: ["@bot:example.org"] },
+        unsigned: {
+          "m.relations": {
+            "m.replace": {
+              event_id: "$edit",
+            },
+          },
+        },
+      }),
+    );
+
+    expect(recordInboundSession).not.toHaveBeenCalled();
   });
 
   it("skips media downloads for unmentioned group media messages", async () => {
@@ -628,17 +1007,13 @@ describe("matrix monitor handler pairing account scope", () => {
       }),
     );
 
-    expect(finalizeInboundContext).toHaveBeenCalledWith(
-      expect.objectContaining({
-        MessageThreadId: "$root",
-        ThreadStarterBody: "Matrix thread root $root from Alice:\nRoot topic",
-      }),
+    const context = requireRecord(
+      callArg(finalizeInboundContext, 0, 0, "finalized context"),
+      "finalized context",
     );
-    expect(recordInboundSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionKey: "agent:ops:main:thread:$root",
-      }),
-    );
+    expect(context.MessageThreadId).toBe("$root");
+    expect(context.ThreadStarterBody).toBe("Matrix thread root $root from Alice:\nRoot topic");
+    expectMockCallWithFields(recordInboundSession, { sessionKey: "agent:ops:main:thread:$root" });
   });
 
   it("keeps threaded DMs flat when dm threadReplies is off", async () => {
@@ -674,18 +1049,14 @@ describe("matrix monitor handler pairing account scope", () => {
       }),
     );
 
-    expect(finalizeInboundContext).toHaveBeenCalledWith(
-      expect.objectContaining({
-        MessageThreadId: undefined,
-        ReplyToId: "$root",
-        ThreadStarterBody: "Matrix thread root $root from Alice:\nRoot topic",
-      }),
+    const context = requireRecord(
+      callArg(finalizeInboundContext, 0, 0, "finalized context"),
+      "finalized context",
     );
-    expect(recordInboundSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionKey: "agent:ops:main",
-      }),
-    );
+    expect(context.MessageThreadId).toBeUndefined();
+    expect(context.ReplyToId).toBe("$root");
+    expect(context.ThreadStarterBody).toBe("Matrix thread root $root from Alice:\nRoot topic");
+    expectMockCallWithFields(recordInboundSession, { sessionKey: "agent:ops:main" });
   });
 
   it("posts a one-time notice when another Matrix DM room already owns the shared DM session", async () => {
@@ -694,21 +1065,11 @@ describe("matrix monitor handler pairing account scope", () => {
     const sendNotice = vi.fn(async () => "$notice");
 
     try {
-      await recordSessionMetaFromInbound({
-        storePath,
-        sessionKey: "agent:ops:main",
-        ctx: {
-          SessionKey: "agent:ops:main",
-          AccountId: "ops",
-          ChatType: "direct",
-          Provider: "matrix",
-          Surface: "matrix",
-          From: "matrix:@user:example.org",
-          To: "room:!other:example.org",
-          NativeChannelId: "!other:example.org",
-          OriginatingChannel: "matrix",
-          OriginatingTo: "room:!other:example.org",
-        },
+      writeMatrixSessionMeta(storePath, "agent:ops:main", {
+        chatType: "direct",
+        from: "matrix:@user:example.org",
+        to: "room:!other:example.org",
+        nativeChannelId: "!other:example.org",
       });
 
       const { handler } = createMatrixHandlerTestHarness({
@@ -727,13 +1088,9 @@ describe("matrix monitor handler pairing account scope", () => {
         }),
       );
 
-      expect(sendNotice).toHaveBeenCalledWith(
-        "!dm:example.org",
-        expect.objectContaining({
-          msgtype: "m.notice",
-          body: expect.stringContaining("channels.matrix.dm.sessionScope"),
-        }),
-      );
+      expect(callArg(sendNotice, 0, 0, "send notice")).toBe("!dm:example.org");
+      expect(callArg(sendNotice, 0, 1, "send notice")).toBeDefined();
+      expectNoticeSent(sendNotice);
 
       await handler(
         "!dm:example.org",
@@ -755,21 +1112,11 @@ describe("matrix monitor handler pairing account scope", () => {
     const sendNotice = vi.fn(async () => "$notice");
 
     try {
-      await recordSessionMetaFromInbound({
-        storePath,
-        sessionKey: "agent:ops:matrix:direct:@user:example.org",
-        ctx: {
-          SessionKey: "agent:ops:matrix:direct:@user:example.org",
-          AccountId: "ops",
-          ChatType: "direct",
-          Provider: "matrix",
-          Surface: "matrix",
-          From: "matrix:@user:example.org",
-          To: "room:!other:example.org",
-          NativeChannelId: "!other:example.org",
-          OriginatingChannel: "matrix",
-          OriginatingTo: "room:!other:example.org",
-        },
+      writeMatrixSessionMeta(storePath, "agent:ops:matrix:direct:@user:example.org", {
+        chatType: "direct",
+        from: "matrix:@user:example.org",
+        to: "room:!other:example.org",
+        nativeChannelId: "!other:example.org",
       });
 
       const { handler } = createMatrixHandlerTestHarness({
@@ -796,13 +1143,9 @@ describe("matrix monitor handler pairing account scope", () => {
         }),
       );
 
-      expect(sendNotice).toHaveBeenCalledWith(
-        "!dm:example.org",
-        expect.objectContaining({
-          msgtype: "m.notice",
-          body: expect.stringContaining("channels.matrix.dm.sessionScope"),
-        }),
-      );
+      expect(callArg(sendNotice, 0, 0, "send notice")).toBe("!dm:example.org");
+      expect(callArg(sendNotice, 0, 1, "send notice")).toBeDefined();
+      expectNoticeSent(sendNotice);
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
@@ -814,21 +1157,11 @@ describe("matrix monitor handler pairing account scope", () => {
     const sendNotice = vi.fn(async () => "$notice");
 
     try {
-      await recordSessionMetaFromInbound({
-        storePath,
-        sessionKey: "agent:ops:main",
-        ctx: {
-          SessionKey: "agent:ops:main",
-          AccountId: "ops",
-          ChatType: "direct",
-          Provider: "matrix",
-          Surface: "matrix",
-          From: "matrix:@user:example.org",
-          To: "room:!other:example.org",
-          NativeChannelId: "!other:example.org",
-          OriginatingChannel: "matrix",
-          OriginatingTo: "room:!other:example.org",
-        },
+      writeMatrixSessionMeta(storePath, "agent:ops:main", {
+        chatType: "direct",
+        from: "matrix:@user:example.org",
+        to: "room:!other:example.org",
+        nativeChannelId: "!other:example.org",
       });
 
       const { handler } = createMatrixHandlerTestHarness({
@@ -863,13 +1196,9 @@ describe("matrix monitor handler pairing account scope", () => {
         }),
       );
 
-      expect(sendNotice).toHaveBeenCalledWith(
-        "!dm:example.org",
-        expect.objectContaining({
-          msgtype: "m.notice",
-          body: expect.stringContaining("channels.matrix.dm.sessionScope"),
-        }),
-      );
+      expect(callArg(sendNotice, 0, 0, "send notice")).toBe("!dm:example.org");
+      expect(callArg(sendNotice, 0, 1, "send notice")).toBeDefined();
+      expectNoticeSent(sendNotice);
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
@@ -881,37 +1210,17 @@ describe("matrix monitor handler pairing account scope", () => {
     const sendNotice = vi.fn(async () => "$notice");
 
     try {
-      await recordSessionMetaFromInbound({
-        storePath,
-        sessionKey: "agent:ops:main",
-        ctx: {
-          SessionKey: "agent:ops:main",
-          AccountId: "ops",
-          ChatType: "direct",
-          Provider: "matrix",
-          Surface: "matrix",
-          From: "matrix:@user:example.org",
-          To: "room:!other:example.org",
-          NativeChannelId: "!other:example.org",
-          OriginatingChannel: "matrix",
-          OriginatingTo: "room:!other:example.org",
-        },
+      writeMatrixSessionMeta(storePath, "agent:ops:main", {
+        chatType: "direct",
+        from: "matrix:@user:example.org",
+        to: "room:!other:example.org",
+        nativeChannelId: "!other:example.org",
       });
-      await recordSessionMetaFromInbound({
-        storePath,
-        sessionKey: "agent:ops:main",
-        ctx: {
-          SessionKey: "agent:ops:main",
-          AccountId: "ops",
-          ChatType: "direct",
-          Provider: "matrix",
-          Surface: "matrix",
-          From: "matrix:@other:example.org",
-          To: "room:@other:example.org",
-          NativeDirectUserId: "@user:example.org",
-          OriginatingChannel: "matrix",
-          OriginatingTo: "room:@other:example.org",
-        },
+      writeMatrixSessionMeta(storePath, "agent:ops:main", {
+        chatType: "direct",
+        from: "matrix:@other:example.org",
+        to: "room:@other:example.org",
+        nativeDirectUserId: "@user:example.org",
       });
 
       const { handler } = createMatrixHandlerTestHarness({
@@ -930,13 +1239,9 @@ describe("matrix monitor handler pairing account scope", () => {
         }),
       );
 
-      expect(sendNotice).toHaveBeenCalledWith(
-        "!dm:example.org",
-        expect.objectContaining({
-          msgtype: "m.notice",
-          body: expect.stringContaining("channels.matrix.dm.sessionScope"),
-        }),
-      );
+      expect(callArg(sendNotice, 0, 0, "send notice")).toBe("!dm:example.org");
+      expect(callArg(sendNotice, 0, 1, "send notice")).toBeDefined();
+      expectNoticeSent(sendNotice);
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
@@ -948,21 +1253,11 @@ describe("matrix monitor handler pairing account scope", () => {
     const sendNotice = vi.fn(async () => "$notice");
 
     try {
-      await recordSessionMetaFromInbound({
-        storePath,
-        sessionKey: "agent:ops:main",
-        ctx: {
-          SessionKey: "agent:ops:main",
-          AccountId: "ops",
-          ChatType: "group",
-          Provider: "matrix",
-          Surface: "matrix",
-          From: "matrix:channel:!group:example.org",
-          To: "room:!group:example.org",
-          NativeChannelId: "!group:example.org",
-          OriginatingChannel: "matrix",
-          OriginatingTo: "room:!group:example.org",
-        },
+      writeMatrixSessionMeta(storePath, "agent:ops:main", {
+        chatType: "group",
+        from: "matrix:channel:!group:example.org",
+        to: "room:!group:example.org",
+        nativeChannelId: "!group:example.org",
       });
 
       const { handler } = createMatrixHandlerTestHarness({
@@ -1026,11 +1321,9 @@ describe("matrix monitor handler pairing account scope", () => {
       );
 
       expect(sendNotice).not.toHaveBeenCalled();
-      expect(recordInboundSession).toHaveBeenCalledWith(
-        expect.objectContaining({
-          sessionKey: "agent:ops:matrix:channel:!dm:example.org",
-        }),
-      );
+      expectMockCallWithFields(recordInboundSession, {
+        sessionKey: "agent:ops:matrix:channel:!dm:example.org",
+      });
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
@@ -1129,14 +1422,13 @@ describe("matrix monitor handler pairing account scope", () => {
       }),
     );
 
-    const finalized = vi.mocked(finalizeInboundContext).mock.calls.at(-1)?.[0];
-    expect(finalized).toEqual(
-      expect.objectContaining({
-        GroupSubject: "Ops Room",
-        GroupId: "!room:example.org",
-      }),
+    const finalized = requireRecord(
+      lastCallArg(finalizeInboundContext, 0, "finalized context"),
+      "finalized context",
     );
-    expect(finalized).not.toHaveProperty("GroupChannel");
+    expect(finalized.GroupChannel).toBe("!room:example.org");
+    expect(finalized.GroupSubject).toBe("Ops Room");
+    expect(finalized.GroupId).toBe("!room:example.org");
   });
 
   it("routes bound Matrix threads to the target session key", async () => {
@@ -1194,11 +1486,7 @@ describe("matrix monitor handler pairing account scope", () => {
       }),
     );
 
-    expect(recordInboundSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionKey: "agent:bound:session-1",
-      }),
-    );
+    expectMockCallWithFields(recordInboundSession, { sessionKey: "agent:bound:session-1" });
     expect(touch).toHaveBeenCalledTimes(1);
   });
 
@@ -1360,6 +1648,7 @@ describe("matrix monitor handler pairing account scope", () => {
       replyToMode: "off",
       threadReplies: "inbound",
       streaming: "off",
+      previewToolProgressEnabled: false,
       blockStreamingEnabled: false,
       dmEnabled: true,
       dmPolicy: "open",
@@ -1402,12 +1691,7 @@ describe("matrix monitor handler pairing account scope", () => {
       }),
     );
 
-    expect(resolveAgentRoute).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: "matrix",
-        accountId: "ops",
-      }),
-    );
+    expectMockCallWithFields(resolveAgentRoute, { channel: "matrix", accountId: "ops" });
     expect(enqueueSystemEvent).toHaveBeenCalledWith(
       "Matrix reaction added: 👍 by sender on msg $msg1",
       {
@@ -1485,7 +1769,7 @@ describe("matrix monitor handler pairing account scope", () => {
         channels: {
           matrix: {
             threadReplies: "always",
-            dm: { threadReplies: "off" },
+            dm: { allowFrom: ["*"], threadReplies: "off" },
           },
         },
       },
@@ -1684,6 +1968,309 @@ describe("matrix monitor handler pairing account scope", () => {
   });
 });
 
+describe("matrix monitor handler live allowlist reload", () => {
+  type MatrixHandler = ReturnType<typeof createMatrixHandlerTestHarness>["handler"];
+
+  const createDispatchReplyFromConfig = () =>
+    vi.fn(async () => ({
+      queuedFinal: false,
+      counts: { final: 0, block: 0, tool: 0 },
+    }));
+
+  const sendLiveAllowlistMessage = async (
+    handler: MatrixHandler,
+    params: {
+      eventId: string;
+      sender: string;
+      body: string;
+      roomId?: string;
+      mentions?: MatrixRawEvent["content"]["m.mentions"];
+    },
+  ) => {
+    await handler(
+      params.roomId ?? "!dm:example.org",
+      createMatrixTextMessageEvent({
+        eventId: params.eventId,
+        sender: params.sender,
+        body: params.body,
+        ...(params.mentions ? { mentions: params.mentions } : {}),
+      }),
+    );
+  };
+
+  it("accepts a DM sender added to live dm.allowFrom", async () => {
+    const dispatchReplyFromConfig = createDispatchReplyFromConfig();
+    const cfg = {
+      channels: {
+        matrix: {
+          dm: { allowFrom: [] as string[] },
+        },
+      },
+    };
+    const { handler } = createMatrixHandlerTestHarness({
+      cfg,
+      dmPolicy: "allowlist",
+      isDirectMessage: true,
+      allowFrom: [],
+      allowFromResolvedEntries: [],
+      dispatchReplyFromConfig,
+    });
+
+    await sendLiveAllowlistMessage(handler, {
+      eventId: "$dm-add-before",
+      sender: "@alice:example.org",
+      body: "hello",
+    });
+    expect(dispatchReplyFromConfig).not.toHaveBeenCalled();
+
+    cfg.channels.matrix.dm.allowFrom = ["@alice:example.org"];
+    await sendLiveAllowlistMessage(handler, {
+      eventId: "$dm-add-after",
+      sender: "@alice:example.org",
+      body: "hello again",
+    });
+
+    expect(dispatchReplyFromConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks a DM sender removed from live dm.allowFrom", async () => {
+    const dispatchReplyFromConfig = createDispatchReplyFromConfig();
+    const cfg = {
+      channels: {
+        matrix: {
+          dm: { allowFrom: ["@alice:example.org"] },
+        },
+      },
+    };
+    const { handler } = createMatrixHandlerTestHarness({
+      cfg,
+      dmPolicy: "allowlist",
+      isDirectMessage: true,
+      allowFrom: ["@alice:example.org"],
+      allowFromResolvedEntries: [{ input: "@alice:example.org", id: "@alice:example.org" }],
+      dispatchReplyFromConfig,
+    });
+
+    await sendLiveAllowlistMessage(handler, {
+      eventId: "$dm-remove-before",
+      sender: "@alice:example.org",
+      body: "hello",
+    });
+    expect(dispatchReplyFromConfig).toHaveBeenCalledTimes(1);
+
+    cfg.channels.matrix.dm.allowFrom = [];
+    await sendLiveAllowlistMessage(handler, {
+      eventId: "$dm-remove-after",
+      sender: "@alice:example.org",
+      body: "hello again",
+    });
+
+    expect(dispatchReplyFromConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks a DM sender after live wildcard removal", async () => {
+    const dispatchReplyFromConfig = createDispatchReplyFromConfig();
+    const cfg = {
+      channels: {
+        matrix: {
+          dm: { allowFrom: ["*"] },
+        },
+      },
+    };
+    const { handler } = createMatrixHandlerTestHarness({
+      cfg,
+      dmPolicy: "allowlist",
+      isDirectMessage: true,
+      allowFrom: ["*"],
+      allowFromResolvedEntries: [],
+      dispatchReplyFromConfig,
+    });
+
+    await sendLiveAllowlistMessage(handler, {
+      eventId: "$dm-wildcard-before",
+      sender: "@alice:example.org",
+      body: "hello",
+    });
+    expect(dispatchReplyFromConfig).toHaveBeenCalledTimes(1);
+
+    cfg.channels.matrix.dm.allowFrom = [];
+    await sendLiveAllowlistMessage(handler, {
+      eventId: "$dm-wildcard-after",
+      sender: "@alice:example.org",
+      body: "hello again",
+    });
+
+    expect(dispatchReplyFromConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses account-scoped live dm.allowFrom overrides", async () => {
+    const dispatchReplyFromConfig = createDispatchReplyFromConfig();
+    const cfg = {
+      channels: {
+        matrix: {
+          dm: { allowFrom: ["@base:example.org"] },
+          accounts: {
+            ops: {
+              dm: { allowFrom: ["@alice:example.org"] },
+            },
+          },
+        },
+      },
+    };
+    const { handler } = createMatrixHandlerTestHarness({
+      cfg,
+      accountId: "ops",
+      dmPolicy: "allowlist",
+      isDirectMessage: true,
+      allowFrom: ["@alice:example.org"],
+      allowFromResolvedEntries: [{ input: "@alice:example.org", id: "@alice:example.org" }],
+      dispatchReplyFromConfig,
+    });
+
+    await sendLiveAllowlistMessage(handler, {
+      eventId: "$dm-account-before",
+      sender: "@alice:example.org",
+      body: "hello",
+    });
+    expect(dispatchReplyFromConfig).toHaveBeenCalledTimes(1);
+
+    cfg.channels.matrix.accounts.ops.dm.allowFrom = [];
+    await sendLiveAllowlistMessage(handler, {
+      eventId: "$dm-account-after",
+      sender: "@alice:example.org",
+      body: "hello again",
+    });
+
+    expect(dispatchReplyFromConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps startup-resolved display names only while the raw input remains configured", async () => {
+    const dispatchReplyFromConfig = createDispatchReplyFromConfig();
+    const cfg = {
+      channels: {
+        matrix: {
+          dm: { allowFrom: ["Alice"] },
+        },
+      },
+    };
+    const { handler } = createMatrixHandlerTestHarness({
+      cfg,
+      dmPolicy: "allowlist",
+      isDirectMessage: true,
+      allowFrom: ["@alice:example.org"],
+      allowFromResolvedEntries: [{ input: "Alice", id: "@alice:example.org" }],
+      dispatchReplyFromConfig,
+    });
+
+    await sendLiveAllowlistMessage(handler, {
+      eventId: "$dm-name-before",
+      sender: "@alice:example.org",
+      body: "hello",
+    });
+    expect(dispatchReplyFromConfig).toHaveBeenCalledTimes(1);
+
+    cfg.channels.matrix.dm.allowFrom = [];
+    await sendLiveAllowlistMessage(handler, {
+      eventId: "$dm-name-after",
+      sender: "@alice:example.org",
+      body: "hello again",
+    });
+
+    expect(dispatchReplyFromConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts a DM sender added as a live-resolved display name", async () => {
+    const dispatchReplyFromConfig = createDispatchReplyFromConfig();
+    const resolveLiveUserAllowlist = vi.fn(
+      async (params: { entries?: ReadonlyArray<string | number> }) => {
+        const entries = (params.entries ?? []).map(String);
+        return entries.includes("Alice") ? ["@alice:example.org"] : [];
+      },
+    );
+    const cfg = {
+      channels: {
+        matrix: {
+          dm: { allowFrom: [] as string[] },
+        },
+      },
+    };
+    const { handler } = createMatrixHandlerTestHarness({
+      cfg,
+      dmPolicy: "allowlist",
+      isDirectMessage: true,
+      allowFrom: [],
+      allowFromResolvedEntries: [],
+      dispatchReplyFromConfig,
+      resolveLiveUserAllowlist,
+    });
+
+    await sendLiveAllowlistMessage(handler, {
+      eventId: "$dm-live-name-before",
+      sender: "@alice:example.org",
+      body: "hello",
+    });
+    expect(dispatchReplyFromConfig).not.toHaveBeenCalled();
+
+    cfg.channels.matrix.dm.allowFrom = ["Alice"];
+    await sendLiveAllowlistMessage(handler, {
+      eventId: "$dm-live-name-after",
+      sender: "@alice:example.org",
+      body: "hello again",
+    });
+
+    const liveAllowlistRequest = requireRecord(
+      lastCallArg(resolveLiveUserAllowlist, 0, "live allowlist request"),
+      "live allowlist request",
+    );
+    expect(liveAllowlistRequest.accountId).toBe("ops");
+    expect(liveAllowlistRequest.entries).toEqual(["Alice"]);
+    expect(dispatchReplyFromConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks a room sender removed from live groupAllowFrom while the group list remains configured", async () => {
+    const dispatchReplyFromConfig = createDispatchReplyFromConfig();
+    const cfg = {
+      channels: {
+        matrix: {
+          groupAllowFrom: ["@alice:example.org", "@bob:example.org"],
+        },
+      },
+    };
+    const { handler } = createMatrixHandlerTestHarness({
+      cfg,
+      isDirectMessage: false,
+      groupPolicy: "allowlist",
+      roomsConfig: { "*": {} },
+      groupAllowFrom: ["@alice:example.org", "@bob:example.org"],
+      groupAllowFromResolvedEntries: [
+        { input: "@alice:example.org", id: "@alice:example.org" },
+        { input: "@bob:example.org", id: "@bob:example.org" },
+      ],
+      dispatchReplyFromConfig,
+    });
+
+    await sendLiveAllowlistMessage(handler, {
+      roomId: "!room:example.org",
+      eventId: "$group-remove-before",
+      sender: "@alice:example.org",
+      body: "@room hello",
+      mentions: { room: true },
+    });
+    expect(dispatchReplyFromConfig).toHaveBeenCalledTimes(1);
+
+    cfg.channels.matrix.groupAllowFrom = ["@bob:example.org"];
+    await sendLiveAllowlistMessage(handler, {
+      roomId: "!room:example.org",
+      eventId: "$group-remove-after",
+      sender: "@alice:example.org",
+      body: "@room hello again",
+      mentions: { room: true },
+    });
+
+    expect(dispatchReplyFromConfig).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("matrix monitor handler durable inbound dedupe", () => {
   it("skips replayed inbound events before session recording", async () => {
     const inboundDeduper = {
@@ -1818,10 +2405,10 @@ describe("matrix monitor handler durable inbound dedupe", () => {
       roomId: "!room:example.org",
       eventId: "$release-on-error",
     });
-    expect(runtime.error).toHaveBeenCalledWith(expect.stringContaining("matrix handler failed"));
+    expectRuntimeErrorContaining(runtime.error, "matrix handler failed");
   });
 
-  it("releases a claimed event when queued final delivery fails", async () => {
+  it("keeps replay committed when queued final delivery fails after a generic error", async () => {
     const inboundDeduper = {
       claimEvent: vi.fn(() => true),
       commitEvent: vi.fn(async () => undefined),
@@ -1858,18 +2445,16 @@ describe("matrix monitor handler durable inbound dedupe", () => {
       }),
     );
 
-    expect(inboundDeduper.commitEvent).not.toHaveBeenCalled();
-    expect(inboundDeduper.releaseEvent).toHaveBeenCalledWith({
+    expect(inboundDeduper.commitEvent).toHaveBeenCalledWith({
       roomId: "!room:example.org",
       eventId: "$release-on-final-delivery-error",
     });
-    expect(runtime.error).toHaveBeenCalledWith(
-      expect.stringContaining("matrix final reply failed"),
-    );
+    expect(inboundDeduper.releaseEvent).not.toHaveBeenCalled();
+    expectRuntimeErrorContaining(runtime.error, "matrix final reply failed");
   });
 
   it.each(["tool", "block"] as const)(
-    "releases a claimed event when queued %s delivery fails and no final reply exists",
+    "keeps replay committed when queued %s delivery fails after a generic error and no final reply exists",
     async (kind) => {
       const inboundDeduper = {
         claimEvent: vi.fn(() => true),
@@ -1911,14 +2496,103 @@ describe("matrix monitor handler durable inbound dedupe", () => {
         }),
       );
 
-      expect(inboundDeduper.commitEvent).not.toHaveBeenCalled();
-      expect(inboundDeduper.releaseEvent).toHaveBeenCalledWith({
+      expect(inboundDeduper.commitEvent).toHaveBeenCalledWith({
         roomId: "!room:example.org",
         eventId: `$release-on-${kind}-delivery-error`,
       });
-      expect(runtime.error).toHaveBeenCalledWith(
-        expect.stringContaining(`matrix ${kind} reply failed`),
+      expect(inboundDeduper.releaseEvent).not.toHaveBeenCalled();
+      expectRuntimeErrorContaining(runtime.error, `matrix ${kind} reply failed`);
+    },
+  );
+
+  it("releases a claimed event when queued final delivery fails with an explicit retryable error", async () => {
+    const inboundDeduper = {
+      claimEvent: vi.fn(() => true),
+      commitEvent: vi.fn(async () => undefined),
+      releaseEvent: vi.fn(),
+    };
+    const runtime = {
+      error: vi.fn(),
+    };
+    const { handler } = createMatrixHandlerTestHarness({
+      inboundDeduper,
+      runtime: runtime as never,
+      dispatchReplyFromConfig: vi.fn(async () => ({
+        queuedFinal: true,
+        counts: { final: 1, block: 0, tool: 0 },
+      })),
+      createReplyDispatcherWithTyping: (params) => ({
+        dispatcher: {
+          markComplete: () => {},
+          waitForIdle: async () => {
+            params?.onError?.(new MatrixRetryableInboundError("retry send"), { kind: "final" });
+          },
+        },
+        replyOptions: {},
+        markDispatchIdle: () => {},
+        markRunComplete: () => {},
+      }),
+    });
+
+    await handler(
+      "!room:example.org",
+      createMatrixTextMessageEvent({
+        eventId: "$retryable-final-delivery-error",
+        body: "hello",
+      }),
+    );
+
+    expect(inboundDeduper.commitEvent).not.toHaveBeenCalled();
+    expect(inboundDeduper.releaseEvent).toHaveBeenCalledWith({
+      roomId: "!room:example.org",
+      eventId: "$retryable-final-delivery-error",
+    });
+  });
+
+  it.each(["tool", "block"] as const)(
+    "releases a claimed event when queued %s delivery fails with an explicit retryable error and no final reply exists",
+    async (kind) => {
+      const inboundDeduper = {
+        claimEvent: vi.fn(() => true),
+        commitEvent: vi.fn(async () => undefined),
+        releaseEvent: vi.fn(),
+      };
+      const { handler } = createMatrixHandlerTestHarness({
+        inboundDeduper,
+        dispatchReplyFromConfig: vi.fn(async () => ({
+          queuedFinal: false,
+          counts: {
+            final: 0,
+            block: kind === "block" ? 1 : 0,
+            tool: kind === "tool" ? 1 : 0,
+          },
+        })),
+        createReplyDispatcherWithTyping: (params) => ({
+          dispatcher: {
+            markComplete: () => {},
+            waitForIdle: async () => {
+              params?.onError?.(new MatrixRetryableInboundError("retry send"), { kind });
+            },
+          },
+          replyOptions: {},
+          markDispatchIdle: () => {},
+          markRunComplete: () => {},
+        }),
+      });
+
+      await handler(
+        "!room:example.org",
+        createMatrixTextMessageEvent({
+          eventId: `$retryable-${kind}-delivery-error`,
+          body: "hello",
+        }),
       );
+
+      expect(inboundDeduper.commitEvent).not.toHaveBeenCalled();
+      expect(inboundDeduper.releaseEvent).toHaveBeenCalledWith({
+        roomId: "!room:example.org",
+        eventId: `$retryable-${kind}-delivery-error`,
+      });
     },
   );
 
@@ -1975,6 +2649,7 @@ describe("matrix monitor handler draft streaming", () => {
     info: { kind: string },
   ) => Promise<void>;
   type ReplyOpts = {
+    onReplyStart?: () => Promise<void> | void;
     onPartialReply?: (payload: { text: string }) => void;
     onBlockReplyQueued?: (
       payload: {
@@ -1984,16 +2659,52 @@ describe("matrix monitor handler draft streaming", () => {
       context?: { assistantMessageIndex?: number },
     ) => Promise<void> | void;
     onAssistantMessageStart?: () => void;
+    suppressDefaultToolProgressMessages?: boolean;
+    onToolStart?: (payload: { name?: string }) => Promise<void>;
+    onItemEvent?: (payload: {
+      progressText?: string;
+      summary?: string;
+      title?: string;
+      name?: string;
+    }) => Promise<void>;
+    onPlanUpdate?: (payload: {
+      phase: string;
+      explanation?: string;
+      steps?: string[];
+    }) => Promise<void>;
+    onApprovalEvent?: (payload: { phase: string; command?: string }) => Promise<void>;
+    onCommandOutput?: (payload: {
+      phase: string;
+      name?: string;
+      exitCode?: number;
+      title?: string;
+    }) => Promise<void>;
+    onPatchSummary?: (payload: {
+      phase: string;
+      summary?: string;
+      title?: string;
+    }) => Promise<void>;
     disableBlockStreaming?: boolean;
   };
 
   function createStreamingHarness(opts?: {
     replyToMode?: "off" | "first" | "all" | "batched";
     blockStreamingEnabled?: boolean;
-    streaming?: "partial" | "quiet";
+    streaming?: "partial" | "quiet" | "progress";
+    previewToolProgressEnabled?: boolean;
+    accountConfig?: import("../../types.js").MatrixConfig;
   }) {
     let capturedDeliver: DeliverFn | undefined;
     let capturedReplyOpts: ReplyOpts | undefined;
+    let resolveCaptured: (() => void) | undefined;
+    const captured = new Promise<void>((resolve) => {
+      resolveCaptured = resolve;
+    });
+    const notifyCaptured = () => {
+      if (capturedDeliver && capturedReplyOpts) {
+        resolveCaptured?.();
+      }
+    };
     // Gate that keeps the handler's model run alive until the test releases it.
     let resolveRunGate: (() => void) | undefined;
     const runGate = new Promise<void>((resolve) => {
@@ -2011,11 +2722,14 @@ describe("matrix monitor handler draft streaming", () => {
 
     const { handler } = createMatrixHandlerTestHarness({
       streaming: opts?.streaming ?? "quiet",
+      accountConfig: opts?.accountConfig,
+      previewToolProgressEnabled: opts?.previewToolProgressEnabled ?? false,
       blockStreamingEnabled: opts?.blockStreamingEnabled ?? false,
       replyToMode: opts?.replyToMode ?? "off",
       client: { redactEvent: redactEventMock },
       createReplyDispatcherWithTyping: (params: Record<string, unknown> | undefined) => {
         capturedDeliver = params?.deliver as DeliverFn | undefined;
+        notifyCaptured();
         return {
           dispatcher: {
             markComplete: () => {},
@@ -2028,6 +2742,7 @@ describe("matrix monitor handler draft streaming", () => {
       },
       dispatchReplyFromConfig: vi.fn(async (args: { replyOptions?: ReplyOpts }) => {
         capturedReplyOpts = args?.replyOptions;
+        notifyCaptured();
         // Block until the test is done exercising callbacks.
         await runGate;
         return { queuedFinal: true, counts: { final: 1, block: 0, tool: 0 } };
@@ -2049,12 +2764,7 @@ describe("matrix monitor handler draft streaming", () => {
         "!room:example.org",
         createMatrixTextMessageEvent({ eventId: "$msg1", body: "hello" }),
       );
-      // Wait for callbacks to be captured.
-      await vi.waitFor(() => {
-        if (!capturedDeliver || !capturedReplyOpts) {
-          throw new Error("Streaming callbacks not captured yet");
-        }
-      });
+      await captured;
       return {
         deliver: capturedDeliver!,
         opts: capturedReplyOpts!,
@@ -2083,16 +2793,121 @@ describe("matrix monitor handler draft streaming", () => {
     await deliver({ text: "Single block" }, { kind: "final" });
 
     expect(sendSingleTextMessageMatrixMock).toHaveBeenCalledTimes(1);
-    expect(editMessageMatrixMock).toHaveBeenCalledWith(
-      "!room:example.org",
-      "$draft1",
-      "Single block",
-      expect.objectContaining({
-        extraContent: { [MATRIX_OPENCLAW_FINALIZED_PREVIEW_KEY]: true },
-      }),
-    );
+    expectFinalizedPreviewEdit("$draft1", "Single block");
     expect(deliverMatrixRepliesMock).not.toHaveBeenCalled();
     expect(redactEventMock).not.toHaveBeenCalled();
+    await finish();
+  });
+
+  it("streams tool progress into the Matrix draft preview when enabled", async () => {
+    const { dispatch, redactEventMock } = createStreamingHarness({
+      previewToolProgressEnabled: true,
+    });
+    const { deliver, opts, finish } = await dispatch();
+
+    expect(opts.suppressDefaultToolProgressMessages).toBe(true);
+    await opts.onToolStart?.({ name: "read_file" });
+
+    await vi.waitFor(() => {
+      expect(sendSingleTextMessageMatrixMock).toHaveBeenCalledTimes(1);
+    });
+    expect(sendSingleTextMessageMatrixMock.mock.calls[0]?.[1]).toMatch(/\n`🧩 Read File`$/);
+
+    await deliver({ text: "Done" }, { kind: "final" });
+
+    expectFinalizedPreviewEdit("$draft1", "Done");
+    expect(deliverMatrixRepliesMock).not.toHaveBeenCalled();
+    expect(redactEventMock).not.toHaveBeenCalled();
+    await finish();
+  });
+
+  it("uses resolved Matrix account progress maxLines for draft text", async () => {
+    const { dispatch } = createStreamingHarness({
+      streaming: "progress",
+      previewToolProgressEnabled: true,
+      accountConfig: {
+        streaming: {
+          mode: "progress",
+          progress: {
+            label: "Pearling",
+            maxLines: 1,
+          },
+        },
+      } as never,
+    });
+    const { opts, finish } = await dispatch();
+
+    await opts.onReplyStart?.();
+    await opts.onItemEvent?.({ progressText: "first" });
+    await opts.onItemEvent?.({ progressText: "second" });
+
+    await vi.waitFor(() => {
+      expect(sendSingleTextMessageMatrixMock).toHaveBeenCalledTimes(1);
+    });
+    expect(sendSingleTextMessageMatrixMock.mock.calls[0]?.[1]).toBe("- `second`");
+    await finish();
+  });
+
+  it("keeps Matrix tool progress mentions inside code formatting", async () => {
+    const { dispatch } = createStreamingHarness({
+      previewToolProgressEnabled: true,
+      streaming: "partial",
+    });
+    const { opts, finish } = await dispatch();
+
+    await opts.onItemEvent?.({
+      progressText: "@room ping @alice:example.org [label](https://example.org)",
+    });
+
+    await vi.waitFor(() => {
+      expect(sendSingleTextMessageMatrixMock).toHaveBeenCalledTimes(1);
+    });
+    expect(sendSingleTextMessageMatrixMock.mock.calls[0]?.[1]).toMatch(
+      /\n- `@room ping @alice:example\.org \[label\]\(https:\/\/example\.org\)`$/,
+    );
+    await finish();
+  });
+
+  it("leaves Matrix tool progress on the default tool delivery path when disabled", async () => {
+    const { dispatch } = createStreamingHarness({
+      previewToolProgressEnabled: false,
+    });
+    const { opts, finish } = await dispatch();
+
+    expect(opts.suppressDefaultToolProgressMessages).toBeUndefined();
+    expect(opts.onToolStart).toBeUndefined();
+    expect(sendSingleTextMessageMatrixMock).not.toHaveBeenCalled();
+    await finish();
+  });
+
+  it("suppresses standalone Matrix tool progress in progress mode when draft lines are disabled", async () => {
+    const { dispatch } = createStreamingHarness({
+      streaming: "progress",
+      previewToolProgressEnabled: false,
+    });
+    const { opts, finish } = await dispatch();
+
+    expect(opts.suppressDefaultToolProgressMessages).toBe(true);
+    expect(opts.onToolStart).toBeUndefined();
+    expect(sendSingleTextMessageMatrixMock).not.toHaveBeenCalled();
+    await finish();
+  });
+
+  it("does not create a blank Matrix progress draft when label and lines are disabled", async () => {
+    const { dispatch } = createStreamingHarness({
+      streaming: "progress",
+      previewToolProgressEnabled: false,
+      accountConfig: {
+        streaming: { mode: "progress", progress: { label: false, toolProgress: false } },
+      } as never,
+    });
+    const { opts, finish } = await dispatch();
+
+    await opts.onItemEvent?.({ progressText: "tool one" });
+    await opts.onItemEvent?.({ progressText: "tool two" });
+
+    expect(opts.suppressDefaultToolProgressMessages).toBe(true);
+    expect(sendSingleTextMessageMatrixMock).not.toHaveBeenCalled();
     await finish();
   });
 
@@ -2108,26 +2923,19 @@ describe("matrix monitor handler draft streaming", () => {
       expect(sendSingleTextMessageMatrixMock).toHaveBeenCalledTimes(1);
     });
 
-    expect(sendSingleTextMessageMatrixMock).toHaveBeenCalledWith(
-      "!room:example.org",
-      "Single block",
-      expect.not.objectContaining({
-        msgtype: "m.notice",
-        includeMentions: false,
-      }),
+    const draftOptions = requireRecord(
+      callArg(sendSingleTextMessageMatrixMock, 0, 2, "draft options"),
+      "draft options",
     );
+    expect(draftOptions.msgtype).not.toBe("m.notice");
+    expect(draftOptions.includeMentions).not.toBe(false);
 
     await deliver({ text: "Single block" }, { kind: "final" });
 
     // MSC4357: even when text is unchanged, a finalize edit is sent to clear
     // the live marker so supporting clients stop the streaming animation.
     expect(editMessageMatrixMock).toHaveBeenCalledTimes(1);
-    expect(editMessageMatrixMock).toHaveBeenCalledWith(
-      "!room:example.org",
-      "$draft1",
-      "Single block",
-      expect.objectContaining({ live: false }),
-    );
+    expectEditLiveFlag("$draft1", "Single block", false);
     expect(deliverMatrixRepliesMock).not.toHaveBeenCalled();
     expect(redactEventMock).not.toHaveBeenCalled();
     await finish();
@@ -2148,12 +2956,7 @@ describe("matrix monitor handler draft streaming", () => {
     await deliver({ text: "Single block" }, { kind: "final" });
 
     expect(editMessageMatrixMock).toHaveBeenCalledTimes(1);
-    expect(editMessageMatrixMock).toHaveBeenCalledWith(
-      "!room:example.org",
-      "$draft1",
-      "Single block",
-      expect.not.objectContaining({ live: false }),
-    );
+    expectEditLiveFlag("$draft1", "Single block", undefined);
     expect(deliverMatrixRepliesMock).not.toHaveBeenCalled();
     expect(redactEventMock).not.toHaveBeenCalled();
     await finish();
@@ -2171,14 +2974,7 @@ describe("matrix monitor handler draft streaming", () => {
     deliverMatrixRepliesMock.mockClear();
     await deliver({ text: "Block one" }, { kind: "block" });
 
-    expect(editMessageMatrixMock).toHaveBeenCalledWith(
-      "!room:example.org",
-      "$draft1",
-      "Block one",
-      expect.objectContaining({
-        extraContent: { [MATRIX_OPENCLAW_FINALIZED_PREVIEW_KEY]: true },
-      }),
-    );
+    expectFinalizedPreviewEdit("$draft1", "Block one");
     expect(deliverMatrixRepliesMock).not.toHaveBeenCalled();
     expect(redactEventMock).not.toHaveBeenCalled();
 
@@ -2194,14 +2990,7 @@ describe("matrix monitor handler draft streaming", () => {
 
     await deliver({ text: "Block two" }, { kind: "final" });
 
-    expect(editMessageMatrixMock).toHaveBeenCalledWith(
-      "!room:example.org",
-      "$draft2",
-      "Block two",
-      expect.objectContaining({
-        extraContent: { [MATRIX_OPENCLAW_FINALIZED_PREVIEW_KEY]: true },
-      }),
-    );
+    expectFinalizedPreviewEdit("$draft2", "Block two");
     expect(deliverMatrixRepliesMock).not.toHaveBeenCalled();
     expect(redactEventMock).not.toHaveBeenCalled();
     await finish();
@@ -2245,19 +3034,20 @@ describe("matrix monitor handler draft streaming", () => {
     const { deliver, opts, finish } = await dispatch();
 
     opts.onPartialReply?.({ text: "Alpha" });
-    await vi.waitFor(() => {
-      expect(sendSingleTextMessageMatrixMock).toHaveBeenCalledTimes(1);
-    });
+    await vi.waitFor(
+      () => {
+        expect(sendSingleTextMessageMatrixMock).toHaveBeenCalledTimes(1);
+      },
+      { interval: 1 },
+    );
 
     opts.onPartialReply?.({ text: "AlphaBeta" });
-    await vi.waitFor(() => {
-      expect(editMessageMatrixMock).toHaveBeenCalledWith(
-        "!room:example.org",
-        "$draft1",
-        "AlphaBeta",
-        expect.anything(),
-      );
-    });
+    await vi.waitFor(
+      () => {
+        expectMatrixEdit("!room:example.org", "$draft1", "AlphaBeta");
+      },
+      { interval: 1 },
+    );
 
     await opts.onBlockReplyQueued?.({ text: "Alpha" });
 
@@ -2269,16 +3059,14 @@ describe("matrix monitor handler draft streaming", () => {
     });
     await deliver({ text: "Alpha" }, { kind: "block" });
 
-    await vi.waitFor(() => {
-      expect(sendSingleTextMessageMatrixMock).toHaveBeenCalledTimes(1);
-    });
-    expect(sendSingleTextMessageMatrixMock.mock.calls[0]?.[1]).toBe("Beta");
-    expect(editMessageMatrixMock).toHaveBeenCalledWith(
-      "!room:example.org",
-      "$draft1",
-      "Alpha",
-      expect.anything(),
+    await vi.waitFor(
+      () => {
+        expect(sendSingleTextMessageMatrixMock).toHaveBeenCalledTimes(1);
+      },
+      { interval: 1 },
     );
+    expect(sendSingleTextMessageMatrixMock.mock.calls[0]?.[1]).toBe("Beta");
+    expectMatrixEdit("!room:example.org", "$draft1", "Alpha");
     expect(deliverMatrixRepliesMock).not.toHaveBeenCalled();
     expect(redactEventMock).not.toHaveBeenCalled();
     await finish();
@@ -2355,7 +3143,7 @@ describe("matrix monitor handler draft streaming", () => {
 
     // The draft stream should have received "Block two", not empty string.
     const sentBody = sendSingleTextMessageMatrixMock.mock.calls[0]?.[1];
-    expect(sentBody).toBeTruthy();
+    expect(sentBody).toBe("Block two");
     await finish();
   });
 
@@ -2373,12 +3161,7 @@ describe("matrix monitor handler draft streaming", () => {
     opts.onPartialReply?.({ text: "Beta" });
 
     await vi.waitFor(() => {
-      expect(editMessageMatrixMock).toHaveBeenCalledWith(
-        "!room:example.org",
-        "$draft1",
-        "Beta",
-        expect.anything(),
-      );
+      expectMatrixEdit("!room:example.org", "$draft1", "Beta");
     });
 
     sendSingleTextMessageMatrixMock.mockClear();
@@ -2389,12 +3172,7 @@ describe("matrix monitor handler draft streaming", () => {
     });
     await deliver({ text: "Alpha" }, { kind: "block" });
 
-    expect(editMessageMatrixMock).toHaveBeenCalledWith(
-      "!room:example.org",
-      "$draft1",
-      "Alpha",
-      expect.anything(),
-    );
+    expectMatrixEdit("!room:example.org", "$draft1", "Alpha");
     expect(deliverMatrixRepliesMock).not.toHaveBeenCalled();
     expect(redactEventMock).not.toHaveBeenCalled();
     await vi.waitFor(() => {
@@ -2424,12 +3202,7 @@ describe("matrix monitor handler draft streaming", () => {
     opts.onPartialReply?.({ text: "Beta" });
 
     await vi.waitFor(() => {
-      expect(editMessageMatrixMock).toHaveBeenCalledWith(
-        "!room:example.org",
-        "$draft1",
-        "Beta",
-        expect.anything(),
-      );
+      expectMatrixEdit("!room:example.org", "$draft1", "Beta");
     });
 
     sendSingleTextMessageMatrixMock.mockClear();
@@ -2440,12 +3213,7 @@ describe("matrix monitor handler draft streaming", () => {
     });
     await deliver({ text: "Alpha" }, { kind: "block" });
 
-    expect(editMessageMatrixMock).toHaveBeenCalledWith(
-      "!room:example.org",
-      "$draft1",
-      "Alpha",
-      expect.anything(),
-    );
+    expectMatrixEdit("!room:example.org", "$draft1", "Alpha");
     expect(deliverMatrixRepliesMock).not.toHaveBeenCalled();
     expect(redactEventMock).not.toHaveBeenCalled();
     await vi.waitFor(() => {
@@ -2490,14 +3258,7 @@ describe("matrix monitor handler draft streaming", () => {
       expect(sendSingleTextMessageMatrixMock).toHaveBeenCalledTimes(1);
     });
     expect(sendSingleTextMessageMatrixMock.mock.calls[0]?.[1]).toBe("Beta");
-    expect(editMessageMatrixMock).toHaveBeenCalledWith(
-      "!room:example.org",
-      "$draft1",
-      "Alpha",
-      expect.objectContaining({
-        extraContent: { [MATRIX_OPENCLAW_FINALIZED_PREVIEW_KEY]: true },
-      }),
-    );
+    expectFinalizedPreviewEdit("$draft1", "Alpha");
 
     sendSingleTextMessageMatrixMock.mockClear();
     editMessageMatrixMock.mockClear();
@@ -2511,14 +3272,7 @@ describe("matrix monitor handler draft streaming", () => {
       expect(sendSingleTextMessageMatrixMock).toHaveBeenCalledTimes(1);
     });
     expect(sendSingleTextMessageMatrixMock.mock.calls[0]?.[1]).toBe("Gamma");
-    expect(editMessageMatrixMock).toHaveBeenCalledWith(
-      "!room:example.org",
-      "$draft2",
-      "Beta",
-      expect.objectContaining({
-        extraContent: { [MATRIX_OPENCLAW_FINALIZED_PREVIEW_KEY]: true },
-      }),
-    );
+    expectFinalizedPreviewEdit("$draft2", "Beta");
 
     await finish();
   });
@@ -2733,6 +3487,50 @@ describe("matrix monitor handler draft streaming", () => {
     await finish();
   });
 
+  it("does not create a throwaway draft for fast media-only finals", async () => {
+    const { dispatch, redactEventMock } = createStreamingHarness();
+    const { deliver, finish } = await dispatch();
+
+    await deliver({ mediaUrl: "https://example.com/image.png" }, { kind: "final" });
+
+    expect(sendSingleTextMessageMatrixMock).not.toHaveBeenCalled();
+    expect(editMessageMatrixMock).not.toHaveBeenCalled();
+    expect(redactEventMock).not.toHaveBeenCalled();
+    expect(deliverMatrixRepliesMock).toHaveBeenCalledTimes(1);
+    await finish();
+  });
+
+  it("does not create a throwaway draft for fast error finals", async () => {
+    const { dispatch, redactEventMock } = createStreamingHarness();
+    const { deliver, finish } = await dispatch();
+
+    await deliver({ text: "Something failed", isError: true } as never, { kind: "final" });
+
+    expect(sendSingleTextMessageMatrixMock).not.toHaveBeenCalled();
+    expect(editMessageMatrixMock).not.toHaveBeenCalled();
+    expect(redactEventMock).not.toHaveBeenCalled();
+    expect(deliverMatrixRepliesMock).toHaveBeenCalledTimes(1);
+    await finish();
+  });
+
+  it("redacts existing drafts for text error finals and uses normal delivery", async () => {
+    const { dispatch, redactEventMock } = createStreamingHarness();
+    const { deliver, opts, finish } = await dispatch();
+
+    opts.onPartialReply?.({ text: "Partial reply" });
+    await vi.waitFor(() => {
+      expect(sendSingleTextMessageMatrixMock).toHaveBeenCalledTimes(1);
+    });
+
+    deliverMatrixRepliesMock.mockClear();
+    await deliver({ text: "Something failed", isError: true } as never, { kind: "final" });
+
+    expect(editMessageMatrixMock).not.toHaveBeenCalled();
+    expect(redactEventMock).toHaveBeenCalledWith("!room:example.org", "$draft1");
+    expect(deliverMatrixRepliesMock).toHaveBeenCalledTimes(1);
+    await finish();
+  });
+
   it("finalizes partial drafts before reusing unchanged media captions", async () => {
     const { dispatch, redactEventMock } = createStreamingHarness({ streaming: "partial" });
     const { deliver, opts, finish } = await dispatch();
@@ -2752,23 +3550,9 @@ describe("matrix monitor handler draft streaming", () => {
     );
 
     expect(editMessageMatrixMock).toHaveBeenCalledTimes(1);
-    expect(editMessageMatrixMock).toHaveBeenCalledWith(
-      "!room:example.org",
-      "$draft1",
-      "@room screenshot ready",
-      expect.objectContaining({ live: false }),
-    );
+    expectEditLiveFlag("$draft1", "@room screenshot ready", false);
     expect(redactEventMock).not.toHaveBeenCalled();
-    expect(deliverMatrixRepliesMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        replies: [
-          expect.objectContaining({
-            mediaUrl: "https://example.com/image.png",
-            text: undefined,
-          }),
-        ],
-      }),
-    );
+    expectDeliveredMediaReply();
     await finish();
   });
 
@@ -2790,25 +3574,9 @@ describe("matrix monitor handler draft streaming", () => {
       { kind: "final" },
     );
 
-    expect(editMessageMatrixMock).toHaveBeenCalledWith(
-      "!room:example.org",
-      "$draft1",
-      "@room screenshot ready",
-      expect.objectContaining({
-        extraContent: { [MATRIX_OPENCLAW_FINALIZED_PREVIEW_KEY]: true },
-      }),
-    );
+    expectFinalizedPreviewEdit("$draft1", "@room screenshot ready");
     expect(redactEventMock).not.toHaveBeenCalled();
-    expect(deliverMatrixRepliesMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        replies: [
-          expect.objectContaining({
-            mediaUrl: "https://example.com/image.png",
-            text: undefined,
-          }),
-        ],
-      }),
-    );
+    expectDeliveredMediaReply();
     await finish();
   });
 

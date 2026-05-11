@@ -62,7 +62,7 @@ class GatewayManager {
 
   async start(): Promise<void> {
     this.spawnGateway();
-    await connectClientWithRetry(this.client);
+    await connectClientWithRetry(this.client, { maxWaitMs: 180_000 });
     console.log("[bridge] Gateway is ready and connected");
   }
 
@@ -112,7 +112,6 @@ class GatewayManager {
 
       // Re-read and write config (may have changed via settings API)
       const config = loadConfig();
-      console.info("[bridge] writeOpenclawConfig before")
       writeOpenclawConfig(config);
       console.log("[bridge] Refreshed openclaw config");
 
@@ -121,7 +120,7 @@ class GatewayManager {
 
       // Reconnect bridge client with retry until the gateway is ready
       this.client = new BridgeGatewayClient(this.gatewayUrl);
-      await connectClientWithRetry(this.client);
+      await connectClientWithRetry(this.client, { maxWaitMs: 180_000 });
       console.log("[bridge] Gateway restarted and reconnected");
     } finally {
       this.restarting = false;
