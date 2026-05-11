@@ -1,18 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
+import * as conversationBinding from "./conversation-binding.js";
+import { createInteractiveConversationBindingHelpers } from "./interactive-binding-helpers.js";
 import type {
   DiscordInteractiveHandlerContext,
   DiscordInteractiveHandlerRegistration,
-} from "../../test/helpers/channels/interactive-contract.js";
-import type {
   SlackInteractiveHandlerContext,
   SlackInteractiveHandlerRegistration,
-} from "../../test/helpers/channels/interactive-contract.js";
-import type {
   TelegramInteractiveHandlerContext,
   TelegramInteractiveHandlerRegistration,
-} from "../../test/helpers/channels/interactive-contract.js";
-import * as conversationBinding from "./conversation-binding.js";
-import { createInteractiveConversationBindingHelpers } from "./interactive-binding-helpers.js";
+} from "./interactive-contract.test-helpers.js";
 import {
   clearPluginInteractiveHandlers,
   dispatchPluginInteractiveHandler,
@@ -480,6 +476,64 @@ describe("plugin interactive handlers", () => {
     vi.restoreAllMocks();
   });
 
+  it("hydrates legacy interactive state shapes before clearing handlers", async () => {
+    const globalStore = globalThis as Record<PropertyKey, unknown>;
+    const stateKey = Symbol.for("openclaw.pluginInteractiveState");
+    const originalState = globalStore[stateKey];
+
+    globalStore[stateKey] = {
+      interactiveHandlers: new Map(),
+    };
+
+    try {
+      clearPluginInteractiveHandlers();
+      const hydrated = globalStore[stateKey] as {
+        interactiveHandlers?: Map<string, unknown>;
+        callbackDedupe?: { clear: () => void };
+        inflightCallbackDedupe?: Set<string>;
+      };
+      expect(hydrated.interactiveHandlers).toBeInstanceOf(Map);
+      if (!hydrated.callbackDedupe) {
+        throw new Error("expected hydrated callback dedupe");
+      }
+      hydrated.callbackDedupe.clear();
+      expect(hydrated.inflightCallbackDedupe).toBeInstanceOf(Set);
+
+      const handler = vi.fn(async () => ({ handled: true }));
+      expect(
+        registerPluginInteractiveHandler("codex-plugin", {
+          channel: "telegram",
+          namespace: "legacy",
+          handler,
+        }),
+      ).toEqual({ ok: true });
+
+      await expect(
+        dispatchInteractive(
+          createTelegramDispatchParams({
+            data: "legacy:resume",
+            callbackId: "legacy-state-cb",
+          }),
+        ),
+      ).resolves.toEqual({ matched: true, handled: true, duplicate: false });
+      await expect(
+        dispatchInteractive(
+          createTelegramDispatchParams({
+            data: "legacy:resume",
+            callbackId: "legacy-state-cb",
+          }),
+        ),
+      ).resolves.toEqual({ matched: true, handled: true, duplicate: true });
+    } finally {
+      if (originalState === undefined) {
+        delete globalStore[stateKey];
+      } else {
+        globalStore[stateKey] = originalState;
+      }
+      clearPluginInteractiveHandlers();
+    }
+  });
+
   it.each([
     {
       name: "routes Telegram callbacks by namespace and dedupes callback ids",
@@ -773,6 +827,100 @@ describe("plugin interactive handlers", () => {
     });
 
     await expect(dispatchInteractive(baseParams)).rejects.toThrow("boom");
+    await expect(dispatchInteractive(baseParams)).resolves.toEqual({
+      matched: true,
+      handled: true,
+      duplicate: false,
+    });
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it("dedupes concurrent interactive dispatches while a handler is still running", async () => {
+    let releaseHandler: (() => void) | undefined;
+    const handlerGate = new Promise<void>((resolve) => {
+      releaseHandler = resolve;
+    });
+    if (!releaseHandler) {
+      throw new Error("Expected handler release callback to be initialized");
+    }
+    const handler = vi.fn(async () => {
+      await handlerGate;
+      return { handled: true };
+    });
+    expect(
+      registerPluginInteractiveHandler("codex-plugin", {
+        channel: "telegram",
+        namespace: "codex",
+        handler,
+      }),
+    ).toEqual({ ok: true });
+
+    const baseParams = createTelegramDispatchParams({
+      data: "codex:resume:thread-1",
+      callbackId: "cb-concurrent",
+    });
+
+    const firstDispatch = dispatchInteractive(baseParams);
+    await vi.waitFor(() => {
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+    const duplicateDispatch = await dispatchInteractive(baseParams);
+
+    expect(duplicateDispatch).toEqual({
+      matched: true,
+      handled: true,
+      duplicate: true,
+    });
+
+    releaseHandler();
+
+    await expect(firstDispatch).resolves.toEqual({
+      matched: true,
+      handled: true,
+      duplicate: false,
+    });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases inflight interactive dedupe keys after a handler failure", async () => {
+    let rejectHandler: ((error: Error) => void) | undefined;
+    const handlerGate = new Promise<never>((_, reject) => {
+      rejectHandler = reject;
+    });
+    if (!rejectHandler) {
+      throw new Error("Expected handler reject callback to be initialized");
+    }
+    const handler = vi
+      .fn(async () => ({ handled: true }))
+      .mockImplementationOnce(async () => await handlerGate)
+      .mockResolvedValueOnce({ handled: true });
+    expect(
+      registerPluginInteractiveHandler("codex-plugin", {
+        channel: "telegram",
+        namespace: "codex",
+        handler,
+      }),
+    ).toEqual({ ok: true });
+
+    const baseParams = createTelegramDispatchParams({
+      data: "codex:resume:thread-1",
+      callbackId: "cb-retry-after-failure",
+    });
+
+    const firstDispatch = dispatchInteractive(baseParams);
+    await vi.waitFor(() => {
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    await expect(dispatchInteractive(baseParams)).resolves.toEqual({
+      matched: true,
+      handled: true,
+      duplicate: true,
+    });
+
+    rejectHandler(new Error("boom"));
+    await expect(firstDispatch).rejects.toThrow("boom");
+
     await expect(dispatchInteractive(baseParams)).resolves.toEqual({
       matched: true,
       handled: true,

@@ -1,5 +1,7 @@
+import { mockPinnedHostnameResolution } from "openclaw/plugin-sdk/test-env";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PluginRuntime } from "../runtime-api.js";
+import { readRemoteMediaResponse } from "./attachments.test-helpers.js";
 import { downloadMSTeamsGraphMedia } from "./attachments/graph.js";
 import { resolveRequestUrl } from "./attachments/shared.js";
 import { setMSTeamsRuntime } from "./runtime.js";
@@ -22,23 +24,6 @@ const saveMediaBufferMock = vi.fn(async () => ({
   size: Buffer.byteLength(PNG_BUFFER),
   contentType: CONTENT_TYPE_IMAGE_PNG,
 }));
-const readRemoteMediaResponse = async (
-  res: Response,
-  params: { maxBytes?: number; filePathHint?: string },
-) => {
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status}`);
-  }
-  const buffer = Buffer.from(await res.arrayBuffer());
-  if (typeof params.maxBytes === "number" && buffer.byteLength > params.maxBytes) {
-    throw new Error(`payload exceeds maxBytes ${params.maxBytes}`);
-  }
-  return {
-    buffer,
-    contentType: res.headers.get("content-type") ?? undefined,
-    fileName: params.filePathHint,
-  };
-};
 const fetchRemoteMediaMock = vi.fn(
   async (params: {
     url: string;
@@ -249,7 +234,11 @@ const GRAPH_MEDIA_SUCCESS_CASES: GraphMediaSuccessCase[] = [
 ];
 
 describe("msteams graph attachments", () => {
+  let ssrfMock: { mockRestore: () => void } | undefined;
+
   beforeEach(() => {
+    ssrfMock?.mockRestore();
+    ssrfMock = mockPinnedHostnameResolution();
     detectMimeMock.mockClear();
     fetchRemoteMediaMock.mockClear();
     saveMediaBufferMock.mockClear();
@@ -297,8 +286,10 @@ describe("msteams graph attachments", () => {
 
     expectAttachmentMediaLength(media.media, 1);
     const redirected = seen.find((entry) => entry.url === escapedUrl);
-    expect(redirected).toBeDefined();
-    expect(redirected?.auth).toBe("");
+    if (!redirected) {
+      throw new Error("expected SharePoint redirect request to be observed");
+    }
+    expect(redirected.auth).toBe("");
   });
 
   it("blocks SharePoint redirects to hosts outside allowHosts", async () => {
@@ -321,8 +312,13 @@ describe("msteams graph attachments", () => {
     );
 
     expectAttachmentMediaLength(media.media, 0);
-    const calledUrls = fetchMock.mock.calls.map((call) => String(call[0]));
-    expect(calledUrls.some((url) => url.startsWith(GRAPH_SHARES_URL_PREFIX))).toBe(true);
+    const calledUrls = fetchMock.mock.calls.map((call) => call[0]);
+    expect(calledUrls).toEqual([
+      DEFAULT_MESSAGE_URL,
+      expect.stringContaining(GRAPH_SHARES_URL_PREFIX),
+      `${DEFAULT_MESSAGE_URL}/hostedContents`,
+      expect.stringContaining(GRAPH_SHARES_URL_PREFIX),
+    ]);
     expect(calledUrls).not.toContain(escapedUrl);
   });
 
@@ -344,7 +340,7 @@ describe("msteams graph attachments", () => {
         { maxBytes: 4 },
       );
 
-      expect(media.media).toEqual([]);
+      expect(media.media).toStrictEqual([]);
       expect(bufferFromSpy).not.toHaveBeenCalledWith(oversizedBase64, "base64");
     } finally {
       bufferFromSpy.mockRestore();
