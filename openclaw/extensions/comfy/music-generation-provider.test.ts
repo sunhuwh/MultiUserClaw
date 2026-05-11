@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { expectExplicitMusicGenerationCapabilities } from "openclaw/plugin-sdk/provider-test-contracts";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildComfyMusicGenerationProvider } from "./music-generation-provider.js";
 import { _setComfyFetchGuardForTesting } from "./workflow-runtime.js";
 
@@ -7,12 +8,17 @@ const { fetchWithSsrFGuardMock } = vi.hoisted(() => ({
 }));
 
 describe("comfy music-generation provider", () => {
+  afterEach(() => {
+    _setComfyFetchGuardForTesting(null);
+    vi.clearAllMocks();
+  });
+
   it("registers the workflow model", () => {
     const provider = buildComfyMusicGenerationProvider();
 
     expect(provider.defaultModel).toBe("workflow");
     expect(provider.models).toEqual(["workflow"]);
-    expect(provider.capabilities.edit?.maxInputImages).toBe(1);
+    expectExplicitMusicGenerationCapabilities(provider);
   });
 
   it("runs a music workflow and returns audio outputs", async () => {
@@ -57,16 +63,18 @@ describe("comfy music-generation provider", () => {
       model: "workflow",
       prompt: "gentle ambient synth loop",
       cfg: {
-        models: {
-          providers: {
+        plugins: {
+          entries: {
             comfy: {
-              music: {
-                workflow: {
-                  "6": { inputs: { text: "" } },
-                  "9": { inputs: {} },
+              config: {
+                music: {
+                  workflow: {
+                    "6": { inputs: { text: "" } },
+                    "9": { inputs: {} },
+                  },
+                  promptNodeId: "6",
+                  outputNodeId: "9",
                 },
-                promptNodeId: "6",
-                outputNodeId: "9",
               },
             },
           },
