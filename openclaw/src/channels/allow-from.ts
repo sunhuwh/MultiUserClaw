@@ -1,25 +1,11 @@
 import { normalizeStringEntries } from "../shared/string-normalization.js";
 
-export const ACCESS_GROUP_ALLOW_FROM_PREFIX = "accessGroup:";
-
-export function parseAccessGroupAllowFromEntry(entry: string): string | null {
-  const trimmed = entry.trim();
-  if (!trimmed.startsWith(ACCESS_GROUP_ALLOW_FROM_PREFIX)) {
-    return null;
-  }
-  const name = trimmed.slice(ACCESS_GROUP_ALLOW_FROM_PREFIX.length).trim();
-  return name.length > 0 ? name : null;
-}
-
 export function mergeDmAllowFromSources(params: {
   allowFrom?: Array<string | number>;
   storeAllowFrom?: Array<string | number>;
   dmPolicy?: string;
 }): string[] {
-  const storeEntries =
-    params.dmPolicy === "allowlist" || params.dmPolicy === "open"
-      ? []
-      : (params.storeAllowFrom ?? []);
+  const storeEntries = params.dmPolicy === "allowlist" ? [] : (params.storeAllowFrom ?? []);
   return normalizeStringEntries([...(params.allowFrom ?? []), ...storeEntries]);
 }
 
@@ -42,7 +28,7 @@ export function resolveGroupAllowFromSources(params: {
 
 export function firstDefined<T>(...values: Array<T | undefined>) {
   for (const value of values) {
-    if (value !== undefined) {
+    if (typeof value !== "undefined") {
       return value;
     }
   }

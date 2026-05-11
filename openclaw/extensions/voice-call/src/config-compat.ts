@@ -1,10 +1,10 @@
-import { asOptionalRecord, readStringField } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { asOptionalRecord, readStringField } from "openclaw/plugin-sdk/text-runtime";
 import type { VoiceCallConfig } from "./config.js";
 import { VoiceCallConfigSchema } from "./config.js";
 
 export const VOICE_CALL_LEGACY_CONFIG_REMOVAL_VERSION = "2026.6.0";
 
-type VoiceCallLegacyConfigIssue = {
+export type VoiceCallLegacyConfigIssue = {
   path: string;
   replacement: string;
   message: string;

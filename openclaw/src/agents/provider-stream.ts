@@ -1,6 +1,6 @@
 import type { StreamFn } from "@mariozechner/pi-agent-core";
 import type { Api, Model } from "@mariozechner/pi-ai";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { OpenClawConfig } from "../config/config.js";
 import { resolveProviderStreamFn } from "../plugins/provider-runtime.js";
 import { ensureCustomApiRegistered } from "./custom-api-registry.js";
 import { createTransportAwareStreamFnForModel } from "./provider-transport-stream.js";
@@ -26,13 +26,7 @@ export function registerProviderStreamForModel<TApi extends Api>(params: {
         modelId: params.model.id,
         model: params.model,
       },
-    }) ??
-    createTransportAwareStreamFnForModel(params.model, {
-      cfg: params.cfg,
-      agentDir: params.agentDir,
-      workspaceDir: params.workspaceDir,
-      env: params.env,
-    });
+    }) ?? createTransportAwareStreamFnForModel(params.model);
   if (!streamFn) {
     return undefined;
   }

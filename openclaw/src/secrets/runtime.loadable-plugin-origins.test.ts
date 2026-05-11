@@ -1,33 +1,35 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { asConfig, setupSecretsRuntimeSnapshotTestHooks } from "./runtime.test-support.ts";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import type { OpenClawConfig } from "../config/config.js";
 
-const manifestMocks = vi.hoisted(() => ({
-  listPluginOriginsFromMetadataSnapshot: vi.fn(
-    (snapshot: { plugins: Array<{ id: string; origin: string }> }) =>
-      new Map(snapshot.plugins.map((record) => [record.id, record.origin])),
-  ),
-  loadPluginMetadataSnapshot: vi.fn<() => { plugins: Array<{ id: string; origin: string }> }>(
-    () => ({
-      plugins: [],
-    }),
-  ),
-}));
+const loadPluginManifestRegistry = vi.hoisted(() => vi.fn());
 
 vi.mock("./runtime-manifest.runtime.js", () => ({
-  listPluginOriginsFromMetadataSnapshot: manifestMocks.listPluginOriginsFromMetadataSnapshot,
-  loadPluginMetadataSnapshot: manifestMocks.loadPluginMetadataSnapshot,
+  loadPluginManifestRegistry,
 }));
 
-const { prepareSecretsRuntimeSnapshot } = setupSecretsRuntimeSnapshotTestHooks();
+function asConfig(value: unknown): OpenClawConfig {
+  return value as OpenClawConfig;
+}
+
+let clearConfigCache: typeof import("../config/config.js").clearConfigCache;
+let clearRuntimeConfigSnapshot: typeof import("../config/config.js").clearRuntimeConfigSnapshot;
+let clearSecretsRuntimeSnapshot: typeof import("./runtime.js").clearSecretsRuntimeSnapshot;
+let prepareSecretsRuntimeSnapshot: typeof import("./runtime.js").prepareSecretsRuntimeSnapshot;
 
 describe("prepareSecretsRuntimeSnapshot loadable plugin origins", () => {
-  afterEach(() => {
-    manifestMocks.listPluginOriginsFromMetadataSnapshot.mockClear();
-    manifestMocks.loadPluginMetadataSnapshot.mockReset();
-    manifestMocks.loadPluginMetadataSnapshot.mockReturnValue({ plugins: [] });
+  beforeAll(async () => {
+    ({ clearConfigCache, clearRuntimeConfigSnapshot } = await import("../config/config.js"));
+    ({ clearSecretsRuntimeSnapshot, prepareSecretsRuntimeSnapshot } = await import("./runtime.js"));
   });
 
-  it("skips metadata snapshot loading when plugin entries are absent", async () => {
+  afterEach(() => {
+    loadPluginManifestRegistry.mockReset();
+    clearSecretsRuntimeSnapshot();
+    clearRuntimeConfigSnapshot();
+    clearConfigCache();
+  });
+
+  it("skips manifest registry loading when plugin entries are absent", async () => {
     await prepareSecretsRuntimeSnapshot({
       config: asConfig({
         models: {
@@ -43,56 +45,6 @@ describe("prepareSecretsRuntimeSnapshot loadable plugin origins", () => {
       includeAuthStoreRefs: false,
     });
 
-    expect(manifestMocks.loadPluginMetadataSnapshot).not.toHaveBeenCalled();
-    expect(manifestMocks.listPluginOriginsFromMetadataSnapshot).not.toHaveBeenCalled();
-  });
-
-  it("derives loadable plugin origins from the shared metadata snapshot", async () => {
-    const snapshot = {
-      plugins: [{ id: "demo", origin: "workspace" }],
-    };
-    manifestMocks.loadPluginMetadataSnapshot.mockReturnValue(snapshot);
-
-    await prepareSecretsRuntimeSnapshot({
-      config: asConfig({
-        plugins: {
-          entries: {
-            demo: {
-              config: {
-                apiKey: { source: "env", provider: "default", id: "DEMO_API_KEY" },
-              },
-            },
-          },
-        },
-      }),
-      env: { HOME: "/home/demo", DEMO_API_KEY: "sk-demo" },
-      includeAuthStoreRefs: false,
-    });
-
-    const snapshotCalls = manifestMocks.loadPluginMetadataSnapshot.mock.calls as unknown as Array<
-      [
-        {
-          config: {
-            plugins?: unknown;
-          };
-          workspaceDir: unknown;
-          env: Record<string, unknown>;
-        },
-      ]
-    >;
-    const snapshotParams = snapshotCalls[0]?.[0];
-    expect(snapshotParams?.config.plugins).toStrictEqual({
-      entries: {
-        demo: {
-          config: {
-            apiKey: { source: "env", provider: "default", id: "DEMO_API_KEY" },
-          },
-        },
-      },
-    });
-    expect(typeof snapshotParams?.workspaceDir).toBe("string");
-    expect(snapshotParams?.env.HOME).toBe("/home/demo");
-    expect(snapshotParams?.env.DEMO_API_KEY).toBe("sk-demo");
-    expect(manifestMocks.listPluginOriginsFromMetadataSnapshot).toHaveBeenCalledWith(snapshot);
+    expect(loadPluginManifestRegistry).not.toHaveBeenCalled();
   });
 });

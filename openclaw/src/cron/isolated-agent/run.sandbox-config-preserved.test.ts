@@ -69,7 +69,7 @@ function expectDefaultSandboxPreserved(
 }
 
 describe("runCronIsolatedAgentTurn sandbox config preserved", () => {
-  it("preserves default sandbox config when agent entry omits sandbox", () => {
+  it("preserves default sandbox config when agent entry omits sandbox", async () => {
     const runCfg = buildRunCfg("worker", {
       name: "worker",
       workspace: "/tmp/custom-workspace",
@@ -84,7 +84,7 @@ describe("runCronIsolatedAgentTurn sandbox config preserved", () => {
     });
   });
 
-  it("keeps global sandbox defaults when agent override is partial", () => {
+  it("keeps global sandbox defaults when agent override is partial", async () => {
     const runCfg = buildRunCfg("specialist", {
       sandbox: {
         docker: {

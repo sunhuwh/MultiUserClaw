@@ -4,7 +4,6 @@ import { defaultRuntime } from "../runtime.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { formatDocsLink } from "../terminal/links.js";
 import { theme } from "../terminal/theme.js";
-import { formatCliCommand } from "./command-format.js";
 import type { GatewayRpcOpts } from "./gateway-rpc.js";
 import { addGatewayClientOptions, callGatewayFromCli } from "./gateway-rpc.js";
 
@@ -63,9 +62,7 @@ export function registerSystemCli(program: Command) {
       async () => {
         const text = normalizeOptionalString(opts.text) ?? "";
         if (!text) {
-          throw new Error(
-            `--text is required. Example: ${formatCliCommand('openclaw system event --text "deploy finished"')}.`,
-          );
+          throw new Error("--text is required");
         }
         const mode = normalizeWakeMode(opts.mode);
         return await callGatewayFromCli("wake", opts, { mode, text }, { expectFinal: false });

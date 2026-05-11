@@ -1,6 +1,6 @@
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import { describe, expect, it } from "vitest";
-import { resolveFinalAssistantRawText, resolveFinalAssistantVisibleText } from "./helpers.js";
+import { resolveFinalAssistantVisibleText } from "./helpers.js";
 
 function makeAssistantMessage(
   content: AssistantMessage["content"],
@@ -59,17 +59,5 @@ describe("resolveFinalAssistantVisibleText", () => {
     ]);
 
     expect(resolveFinalAssistantVisibleText(lastAssistant)).toBeUndefined();
-  });
-
-  it("preserves raw final answer text without visible-text sanitization", () => {
-    const lastAssistant = makeAssistantMessage([
-      {
-        type: "text",
-        text: "<final>keep this</final>",
-        textSignature: JSON.stringify({ v: 1, id: "item_final", phase: "final_answer" }),
-      },
-    ]);
-
-    expect(resolveFinalAssistantRawText(lastAssistant)).toBe("<final>keep this</final>");
   });
 });

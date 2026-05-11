@@ -33,14 +33,6 @@ const registerMessageEmojiCommandsMock = mocks.registerMessageEmojiCommandsMock;
 const registerMessageStickerCommandsMock = mocks.registerMessageStickerCommandsMock;
 const registerMessageDiscordAdminCommandsMock = mocks.registerMessageDiscordAdminCommandsMock;
 
-function requireProgramCommand(program: Command, name: string): Command {
-  const command = program.commands.find((entry) => entry.name() === name);
-  if (!command) {
-    throw new Error(`expected ${name} command`);
-  }
-  return command;
-}
-
 vi.mock("./message/helpers.js", () => ({
   createMessageCliHelpers: mocks.createMessageCliHelpersMock,
 }));
@@ -104,7 +96,8 @@ describe("registerMessageCommands", () => {
     const program = new Command();
     registerMessageCommands(program, ctx);
 
-    const message = requireProgramCommand(program, "message");
+    const message = program.commands.find((command) => command.name() === "message");
+    expect(message).toBeDefined();
     expect(createMessageCliHelpersMock).toHaveBeenCalledWith(message, "telegram|discord");
 
     const expectedRegistrars = [
@@ -129,8 +122,9 @@ describe("registerMessageCommands", () => {
   it("shows command help when root message command is invoked", async () => {
     const program = new Command().exitOverride();
     registerMessageCommands(program, ctx);
-    const message = requireProgramCommand(program, "message");
-    const helpSpy = vi.spyOn(message, "help").mockImplementation(() => {
+    const message = program.commands.find((command) => command.name() === "message");
+    expect(message).toBeDefined();
+    const helpSpy = vi.spyOn(message as Command, "help").mockImplementation(() => {
       throw new Error("help-called");
     });
 

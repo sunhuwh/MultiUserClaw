@@ -1,16 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { slackDoctor } from "./doctor.js";
 
-function getSlackCompatibilityNormalizer(): NonNullable<
-  typeof slackDoctor.normalizeCompatibilityConfig
-> {
-  const normalize = slackDoctor.normalizeCompatibilityConfig;
-  if (!normalize) {
-    throw new Error("Expected slack doctor to expose normalizeCompatibilityConfig");
-  }
-  return normalize;
-}
-
 describe("slack doctor", () => {
   it("warns when mutable allowlist entries rely on disabled name matching", () => {
     expect(
@@ -45,7 +35,11 @@ describe("slack doctor", () => {
   });
 
   it("normalizes legacy slack streaming aliases into the nested streaming shape", () => {
-    const normalize = getSlackCompatibilityNormalizer();
+    const normalize = slackDoctor.normalizeCompatibilityConfig;
+    expect(normalize).toBeDefined();
+    if (!normalize) {
+      return;
+    }
 
     const result = normalize({
       cfg: {
@@ -95,7 +89,11 @@ describe("slack doctor", () => {
   });
 
   it("does not duplicate streaming.mode change messages when streamMode wins over boolean streaming", () => {
-    const normalize = getSlackCompatibilityNormalizer();
+    const normalize = slackDoctor.normalizeCompatibilityConfig;
+    expect(normalize).toBeDefined();
+    if (!normalize) {
+      return;
+    }
 
     const result = normalize({
       cfg: {
@@ -115,43 +113,5 @@ describe("slack doctor", () => {
     expect(
       result.changes.filter((change) => change.includes("channels.slack.streaming.mode")),
     ).toEqual(["Moved channels.slack.streamMode → channels.slack.streaming.mode (progress)."]);
-  });
-
-  it("moves legacy channel allow toggles into enabled", () => {
-    const normalize = getSlackCompatibilityNormalizer();
-
-    const result = normalize({
-      cfg: {
-        channels: {
-          slack: {
-            channels: {
-              ops: {
-                allow: false,
-              },
-            },
-            accounts: {
-              work: {
-                channels: {
-                  general: {
-                    allow: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      } as never,
-    });
-
-    expect(result.changes).toEqual([
-      "Moved channels.slack.channels.ops.allow → channels.slack.channels.ops.enabled.",
-      "Moved channels.slack.accounts.work.channels.general.allow → channels.slack.accounts.work.channels.general.enabled.",
-    ]);
-    expect(result.config.channels?.slack?.channels?.ops).toEqual({
-      enabled: false,
-    });
-    expect(result.config.channels?.slack?.accounts?.work?.channels?.general).toEqual({
-      enabled: true,
-    });
   });
 });

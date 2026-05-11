@@ -12,10 +12,9 @@ import {
 import { resetEmbeddedAttemptHarness } from "./attempt.spawn-workspace.test-support.js";
 
 async function resolveBootstrapContext(params: {
-  contextInjectionMode?: "always" | "continuation-skip" | "never";
+  contextInjectionMode?: "always" | "continuation-skip";
   bootstrapContextMode?: string;
   bootstrapContextRunKind?: string;
-  bootstrapMode?: "full" | "limited" | "none";
   completed?: boolean;
   resolver?: () => Promise<{ bootstrapFiles: unknown[]; contextFiles: unknown[] }>;
 }) {
@@ -31,7 +30,6 @@ async function resolveBootstrapContext(params: {
     contextInjectionMode: params.contextInjectionMode ?? "always",
     bootstrapContextMode: params.bootstrapContextMode ?? "full",
     bootstrapContextRunKind: params.bootstrapContextRunKind ?? "default",
-    bootstrapMode: params.bootstrapMode ?? "none",
     sessionFile: "/tmp/session.jsonl",
     hasCompletedBootstrapTurn,
     resolveBootstrapContextForRun,
@@ -53,8 +51,8 @@ describe("embedded attempt context injection", () => {
       });
 
     expect(result.isContinuationTurn).toBe(true);
-    expect(result.bootstrapFiles).toStrictEqual([]);
-    expect(result.contextFiles).toStrictEqual([]);
+    expect(result.bootstrapFiles).toEqual([]);
+    expect(result.contextFiles).toEqual([]);
     expect(hasCompletedBootstrapTurn).toHaveBeenCalledWith("/tmp/session.jsonl");
     expect(resolveBootstrapContextForRun).not.toHaveBeenCalled();
   });
@@ -77,43 +75,7 @@ describe("embedded attempt context injection", () => {
     expect(resolver).toHaveBeenCalledTimes(1);
   });
 
-  it("disables bootstrap injection without marking the turn as a continuation", async () => {
-    const { result, hasCompletedBootstrapTurn, resolveBootstrapContextForRun } =
-      await resolveBootstrapContext({
-        contextInjectionMode: "never",
-        bootstrapMode: "full",
-        completed: true,
-      });
-
-    expect(result.isContinuationTurn).toBe(false);
-    expect(result.shouldRecordCompletedBootstrapTurn).toBe(false);
-    expect(result.bootstrapFiles).toStrictEqual([]);
-    expect(result.contextFiles).toStrictEqual([]);
-    expect(hasCompletedBootstrapTurn).not.toHaveBeenCalled();
-    expect(resolveBootstrapContextForRun).not.toHaveBeenCalled();
-  });
-
-  it("does not let a stale completed marker suppress pending workspace bootstrap", async () => {
-    const resolver = vi.fn(async () => ({
-      bootstrapFiles: [{ name: "BOOTSTRAP.md" }],
-      contextFiles: [{ path: "BOOTSTRAP.md" }],
-    }));
-
-    const { result, hasCompletedBootstrapTurn } = await resolveBootstrapContext({
-      contextInjectionMode: "continuation-skip",
-      bootstrapMode: "full",
-      completed: true,
-      resolver,
-    });
-
-    expect(result.isContinuationTurn).toBe(false);
-    expect(result.bootstrapFiles).toEqual([{ name: "BOOTSTRAP.md" }]);
-    expect(result.contextFiles).toEqual([{ path: "BOOTSTRAP.md" }]);
-    expect(hasCompletedBootstrapTurn).not.toHaveBeenCalled();
-    expect(resolver).toHaveBeenCalledTimes(1);
-  });
-
-  it("forwards senderIsOwner into embedded message-action discovery", () => {
+  it("forwards senderIsOwner into embedded message-action discovery", async () => {
     const input = buildEmbeddedMessageActionDiscoveryInput({
       cfg: {},
       channel: "matrix",
@@ -128,16 +90,18 @@ describe("embedded attempt context injection", () => {
       senderIsOwner: false,
     });
 
-    expect(input.channel).toBe("matrix");
-    expect(input.currentChannelId).toBe("room");
-    expect(input.currentThreadTs).toBe("thread");
-    expect(input.currentMessageId).toBe(123);
-    expect(input.accountId).toBe("work");
-    expect(input.sessionKey).toBe("agent:main");
-    expect(input.sessionId).toBe("session");
-    expect(input.agentId).toBe("main");
-    expect(input.requesterSenderId).toBe("@alice:example.org");
-    expect(input.senderIsOwner).toBe(false);
+    expect(input).toMatchObject({
+      channel: "matrix",
+      currentChannelId: "room",
+      currentThreadTs: "thread",
+      currentMessageId: 123,
+      accountId: "work",
+      sessionKey: "agent:main",
+      sessionId: "session",
+      agentId: "main",
+      requesterSenderId: "@alice:example.org",
+      senderIsOwner: false,
+    });
   });
 
   it("never skips heartbeat bootstrap filtering", async () => {
@@ -164,7 +128,6 @@ describe("embedded attempt context injection", () => {
     const { result } = await resolveBootstrapContext({
       bootstrapContextMode: "full",
       bootstrapContextRunKind: "default",
-      bootstrapMode: "full",
       resolver,
     });
 
@@ -176,23 +139,8 @@ describe("embedded attempt context injection", () => {
     const { result } = await resolveBootstrapContext({
       bootstrapContextMode: "lightweight",
       bootstrapContextRunKind: "heartbeat",
-      bootstrapMode: "none",
     });
 
-    expect(result.shouldRecordCompletedBootstrapTurn).toBe(false);
-  });
-
-  it("allows continuation skip again for limited bootstrap mode", async () => {
-    const { result, hasCompletedBootstrapTurn, resolveBootstrapContextForRun } =
-      await resolveBootstrapContext({
-        contextInjectionMode: "continuation-skip",
-        bootstrapMode: "limited",
-        completed: true,
-      });
-
-    expect(result.isContinuationTurn).toBe(true);
-    expect(hasCompletedBootstrapTurn).toHaveBeenCalledWith("/tmp/session.jsonl");
-    expect(resolveBootstrapContextForRun).not.toHaveBeenCalled();
     expect(result.shouldRecordCompletedBootstrapTurn).toBe(false);
   });
 
@@ -218,19 +166,18 @@ describe("embedded attempt context injection", () => {
         assemble,
       } satisfies AttemptContextEngine,
       sessionId: "session",
-      sessionKey: "agent:main:guildchat:dm:test-user",
+      sessionKey: "agent:main:discord:dm:test-user",
       messages: limited,
       modelId: "gpt-test",
     });
 
-    const assembleInput = assemble.mock.calls[0]?.[0] as { messages?: AgentMessage[] } | undefined;
-    const projectedMessages = assembleInput?.messages?.map((message) => ({
-      role: message.role,
-      content: (message as { content?: unknown }).content,
-    }));
-    expect(projectedMessages).toEqual([
-      { role: "user", content: "real question" },
-      { role: "assistant", content: "real answer" },
-    ]);
+    expect(assemble).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: [
+          expect.objectContaining({ role: "user", content: "real question" }),
+          expect.objectContaining({ role: "assistant", content: "real answer" }),
+        ],
+      }),
+    );
   });
 });

@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { collectStatusScanOverview } from "./status.scan-overview.ts";
 
 const mocks = vi.hoisted(() => ({
   hasPotentialConfiguredChannels: vi.fn(),
@@ -13,8 +12,8 @@ const mocks = vi.hoisted(() => ({
   buildChannelsTable: vi.fn(),
 }));
 
-vi.mock("../plugins/channel-plugin-ids.js", () => ({
-  hasConfiguredChannelsForReadOnlyScope: mocks.hasPotentialConfiguredChannels,
+vi.mock("../channels/config-presence.js", () => ({
+  hasPotentialConfiguredChannels: mocks.hasPotentialConfiguredChannels,
 }));
 
 vi.mock("../cli/command-config-resolution.js", () => ({
@@ -50,6 +49,7 @@ vi.mock("./status.scan.runtime.js", () => ({
 
 describe("collectStatusScanOverview", () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
 
     mocks.hasPotentialConfiguredChannels.mockReturnValue(true);
@@ -91,11 +91,13 @@ describe("collectStatusScanOverview", () => {
       skipColdStartNetworkChecks: false,
     });
     mocks.callGateway.mockResolvedValue({ channelAccounts: {} });
-    mocks.collectChannelStatusIssues.mockReturnValue([{ channel: "quietchat", message: "boom" }]);
+    mocks.collectChannelStatusIssues.mockReturnValue([{ channel: "signal", message: "boom" }]);
     mocks.buildChannelsTable.mockResolvedValue({ rows: [], details: [] });
   });
 
   it("uses gateway fallback overrides for channels.status when requested", async () => {
+    const { collectStatusScanOverview } = await import("./status.scan-overview.ts");
+
     const result = await collectStatusScanOverview({
       commandName: "status --all",
       opts: { timeoutMs: 1234 },
@@ -103,37 +105,21 @@ describe("collectStatusScanOverview", () => {
       useGatewayCallOverridesForChannelsStatus: true,
     });
 
-    expect(mocks.callGateway).toHaveBeenCalledOnce();
-    const gatewayRequest = mocks.callGateway.mock.calls[0]?.[0];
-    expect(gatewayRequest?.method).toBe("channels.status");
-    expect(gatewayRequest?.url).toBe("ws://127.0.0.1:18789");
-    expect(gatewayRequest?.token).toBe("tok");
-    expect(mocks.buildChannelsTable).toHaveBeenCalledOnce();
-    const channelTableCall = mocks.buildChannelsTable.mock.calls[0];
-    expect(typeof channelTableCall?.[0]).toBe("object");
-    expect(channelTableCall?.[1]?.includeSetupFallbackPlugins).toBe(true);
-    expect(channelTableCall?.[1]?.showSecrets).toBe(false);
-    expect(channelTableCall?.[1]?.sourceConfig).toStrictEqual({ session: {} });
-    expect(result.channelIssues).toEqual([{ channel: "quietchat", message: "boom" }]);
-  });
-
-  it("can keep channel overview on metadata-only status paths", async () => {
-    const result = await collectStatusScanOverview({
-      commandName: "status",
-      opts: { timeoutMs: 1234 },
-      showSecrets: false,
-      includeLiveChannelStatus: false,
-      includeChannelSetupRuntimeFallback: false,
-    });
-
-    expect(mocks.callGateway).not.toHaveBeenCalled();
-    expect(mocks.buildChannelsTable).toHaveBeenCalledOnce();
-    const channelTableCall = mocks.buildChannelsTable.mock.calls[0];
-    expect(typeof channelTableCall?.[0]).toBe("object");
-    expect(channelTableCall?.[1]?.includeSetupFallbackPlugins).toBe(false);
-    expect(channelTableCall?.[1]?.showSecrets).toBe(false);
-    expect(channelTableCall?.[1]?.sourceConfig).toStrictEqual({ session: {} });
-    expect(result.channelIssues).toStrictEqual([]);
+    expect(mocks.callGateway).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "channels.status",
+        url: "ws://127.0.0.1:18789",
+        token: "tok",
+      }),
+    );
+    expect(mocks.buildChannelsTable).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        showSecrets: false,
+        sourceConfig: { session: {} },
+      }),
+    );
+    expect(result.channelIssues).toEqual([{ channel: "signal", message: "boom" }]);
   });
 
   it("skips channels.status when the gateway is unreachable", async () => {
@@ -163,6 +149,8 @@ describe("collectStatusScanOverview", () => {
       resolveTailscaleHttpsUrl: vi.fn(async () => null),
       skipColdStartNetworkChecks: false,
     });
+    const { collectStatusScanOverview } = await import("./status.scan-overview.ts");
+
     const result = await collectStatusScanOverview({
       commandName: "status",
       opts: {},
@@ -171,6 +159,6 @@ describe("collectStatusScanOverview", () => {
 
     expect(mocks.callGateway).not.toHaveBeenCalled();
     expect(result.channelsStatus).toBeNull();
-    expect(result.channelIssues).toStrictEqual([]);
+    expect(result.channelIssues).toEqual([]);
   });
 });

@@ -1,4 +1,4 @@
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import { formatErrorMessage } from "../infra/errors.js";
 import { parseRoleRef } from "./pw-role-snapshot.js";
 
@@ -64,9 +64,7 @@ export function toAIFriendlyError(error: unknown, selector: string): Error {
 
   if (
     (message.includes("Timeout") || message.includes("waiting for")) &&
-    (message.includes("to be visible") ||
-      message.includes("not visible") ||
-      message.includes("waiting for locator("))
+    (message.includes("to be visible") || message.includes("not visible"))
   ) {
     return new Error(
       `Element "${selector}" not found or not visible. ` +

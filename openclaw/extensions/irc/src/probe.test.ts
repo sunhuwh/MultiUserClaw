@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { probeIrc } from "./probe.js";
 
 const resolveIrcAccountMock = vi.hoisted(() => vi.fn());
@@ -16,13 +16,6 @@ vi.mock("./connect-options.js", () => ({
 vi.mock("./client.js", () => ({
   connectIrcClient: connectIrcClientMock,
 }));
-
-afterAll(() => {
-  vi.doUnmock("./accounts.js");
-  vi.doUnmock("./connect-options.js");
-  vi.doUnmock("./client.js");
-  vi.resetModules();
-});
 
 describe("probeIrc", () => {
   beforeEach(() => {
@@ -56,14 +49,13 @@ describe("probeIrc", () => {
   });
 
   it("returns latency and quits the probe client on success", async () => {
-    const account = {
+    resolveIrcAccountMock.mockReturnValue({
       configured: true,
       host: "irc.libera.chat",
       port: 6697,
       tls: true,
       nick: "openclaw",
-    };
-    resolveIrcAccountMock.mockReturnValue(account);
+    });
     buildIrcConnectOptionsMock.mockReturnValue({ host: "irc.libera.chat" });
     const quit = vi.fn();
     connectIrcClientMock.mockResolvedValue({ quit });
@@ -72,7 +64,10 @@ describe("probeIrc", () => {
     try {
       const result = await probeIrc({} as never, { timeoutMs: 5000 });
 
-      expect(buildIrcConnectOptionsMock).toHaveBeenCalledWith(account, { connectTimeoutMs: 5000 });
+      expect(buildIrcConnectOptionsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ host: "irc.libera.chat" }),
+        { connectTimeoutMs: 5000 },
+      );
       expect(result).toEqual({
         ok: true,
         host: "irc.libera.chat",

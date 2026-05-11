@@ -11,7 +11,7 @@ import {
   resolveInlineCommandMatch,
 } from "./shell-inline-command.js";
 
-type SystemRunCommandValidation =
+export type SystemRunCommandValidation =
   | {
       ok: true;
       shellPayload: string | null;
@@ -24,7 +24,7 @@ type SystemRunCommandValidation =
       details?: Record<string, unknown>;
     };
 
-type ResolvedSystemRunCommand =
+export type ResolvedSystemRunCommand =
   | {
       ok: true;
       argv: string[];
@@ -105,15 +105,8 @@ function hasTrailingPositionalArgvAfterInlineCommand(argv: string[]): boolean {
   return wrapperArgv.slice(inlineCommandIndex + 1).some((entry) => entry.trim().length > 0);
 }
 
-function buildSystemRunCommandDisplay(
-  argv: string[],
-  rawCommand: string | null,
-): SystemRunCommandDisplay {
-  const rawlessShellWrapperResolution = extractShellWrapperCommand(argv);
-  const shellWrapperResolution =
-    rawlessShellWrapperResolution.command === null && rawCommand !== null
-      ? extractShellWrapperCommand(argv, rawCommand)
-      : rawlessShellWrapperResolution;
+function buildSystemRunCommandDisplay(argv: string[]): SystemRunCommandDisplay {
+  const shellWrapperResolution = extractShellWrapperCommand(argv);
   const shellPayload = shellWrapperResolution.command;
   const shellWrapperPositionalArgv = hasTrailingPositionalArgvAfterInlineCommand(argv);
   const envManipulationBeforeShellWrapper =
@@ -140,7 +133,7 @@ export function validateSystemRunCommandConsistency(params: {
   allowLegacyShellText?: boolean;
 }): SystemRunCommandValidation {
   const raw = normalizeRawCommandText(params.rawCommand);
-  const display = buildSystemRunCommandDisplay(params.argv, raw);
+  const display = buildSystemRunCommandDisplay(params.argv);
 
   if (raw) {
     const matchesCanonicalArgv = raw === display.commandText;

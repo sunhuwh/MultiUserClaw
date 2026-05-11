@@ -1,16 +1,16 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/memory-core";
 import { describe, expect, it } from "vitest";
 import {
   buildMemoryFlushPlan,
+  buildPromptSection,
   DEFAULT_MEMORY_FLUSH_FORCE_TRANSCRIPT_BYTES,
   DEFAULT_MEMORY_FLUSH_PROMPT,
   DEFAULT_MEMORY_FLUSH_SOFT_TOKENS,
-} from "./src/flush-plan.js";
-import { buildPromptSection } from "./src/prompt-section.js";
+} from "./index.js";
 
 describe("buildPromptSection", () => {
   it("returns empty when no memory tools are available", () => {
-    expect(buildPromptSection({ availableTools: new Set() })).toStrictEqual([]);
+    expect(buildPromptSection({ availableTools: new Set() })).toEqual([]);
   });
 
   it("describes the two-step flow when both memory tools are available", () => {
@@ -84,9 +84,8 @@ describe("buildMemoryFlushPlan", () => {
 
     expect(plan?.prompt).toContain("memory/2026-02-16.md");
     expect(plan?.prompt).toContain(
-      "Current time: Monday, February 16th, 2026 - 10:00 AM (America/New_York)",
+      "Current time: Monday, February 16th, 2026 - 10:00 AM (America/New_York) / 2026-02-16 15:00 UTC",
     );
-    expect(plan?.prompt).toContain("Reference UTC: 2026-02-16 15:00 UTC");
     expect(plan?.relativePath).toBe("memory/2026-02-16.md");
   });
 
@@ -115,6 +114,7 @@ describe("buildMemoryFlushPlan", () => {
 
   it("defaults to safe prompts and gating values", () => {
     const plan = buildMemoryFlushPlan();
+    expect(plan).not.toBeNull();
     expect(plan?.softThresholdTokens).toBe(DEFAULT_MEMORY_FLUSH_SOFT_TOKENS);
     expect(plan?.forceFlushTranscriptBytes).toBe(DEFAULT_MEMORY_FLUSH_FORCE_TRANSCRIPT_BYTES);
     expect(plan?.prompt).toContain("memory/");
@@ -132,24 +132,6 @@ describe("buildMemoryFlushPlan", () => {
         },
       }),
     ).toBeNull();
-  });
-
-  it("carries configured memory flush model override", () => {
-    const plan = buildMemoryFlushPlan({
-      cfg: {
-        agents: {
-          defaults: {
-            compaction: {
-              memoryFlush: {
-                model: "ollama/qwen3:8b",
-              },
-            },
-          },
-        },
-      },
-    });
-
-    expect(plan?.model).toBe("ollama/qwen3:8b");
   });
 
   it("falls back to defaults when numeric values are invalid", () => {

@@ -2,26 +2,24 @@ import crypto from "node:crypto";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
+} from "openclaw/plugin-sdk/text-runtime";
 import {
   ErrorCodes,
   applyBrowserProxyPaths,
   createBrowserControlContext,
   createBrowserRouteDispatcher,
   errorShape,
-  getRuntimeConfig,
   isNodeCommandAllowed,
   isPersistentBrowserProfileMutation,
+  loadConfig,
   persistBrowserProxyFiles,
   resolveNodeCommandAllowlist,
   resolveRequestedBrowserProfile,
   respondUnavailableOnNodeInvokeError,
   safeParseJson,
   startBrowserControlServiceFromConfig,
-  withTimeout,
   type GatewayRequestHandlers,
   type NodeSession,
-  type OpenClawConfig,
 } from "../core-api.js";
 
 type BrowserRequestParams = {
@@ -89,7 +87,7 @@ function resolveBrowserNode(nodes: NodeSession[], query: string): NodeSession | 
 }
 
 function resolveBrowserNodeTarget(params: {
-  cfg: OpenClawConfig;
+  cfg: ReturnType<typeof loadConfig>;
   nodes: NodeSession[];
 }): NodeSession | null {
   const policy = params.cfg.gateway?.nodes?.browser;
@@ -172,7 +170,7 @@ export async function handleBrowserGatewayRequest({
     return;
   }
 
-  const cfg = getRuntimeConfig();
+  const cfg = loadConfig();
   let nodeTarget: NodeSession | null = null;
   try {
     nodeTarget = resolveBrowserNodeTarget({
@@ -248,31 +246,12 @@ export async function handleBrowserGatewayRequest({
     return;
   }
 
-  let result;
-  try {
-    result = timeoutMs
-      ? await withTimeout(
-          (signal) =>
-            dispatcher.dispatch({
-              method: methodRaw,
-              path,
-              query,
-              body,
-              signal,
-            }),
-          timeoutMs,
-          "browser request",
-        )
-      : await dispatcher.dispatch({
-          method: methodRaw,
-          path,
-          query,
-          body,
-        });
-  } catch (err) {
-    respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
-    return;
-  }
+  const result = await dispatcher.dispatch({
+    method: methodRaw,
+    path,
+    query,
+    body,
+  });
 
   if (result.status >= 400) {
     const message =

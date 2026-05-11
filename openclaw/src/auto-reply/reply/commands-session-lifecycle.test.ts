@@ -21,16 +21,6 @@ function firstText(values: Array<string | undefined>): string | undefined {
   return values.map((value) => value?.trim() ?? "").find(Boolean) || undefined;
 }
 
-function normalizeCommandContextText(value: unknown): string {
-  if (typeof value === "string") {
-    return value.trim().toLowerCase();
-  }
-  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
-    return String(value).trim().toLowerCase();
-  }
-  return "";
-}
-
 function resolveThreadTargetId(raw?: string): string | undefined {
   const trimmed = raw?.trim() ?? "";
   if (!trimmed) {
@@ -198,8 +188,6 @@ vi.mock("../../plugins/runtime.js", () => {
 vi.mock("../../channels/plugins/index.js", () => ({
   getChannelPlugin: (channelId: string) =>
     hoisted.runtimeChannelRegistry.channels.find((entry) => entry.plugin.id === channelId)?.plugin,
-  getLoadedChannelPlugin: (channelId: string) =>
-    hoisted.runtimeChannelRegistry.channels.find((entry) => entry.plugin.id === channelId)?.plugin,
   normalizeChannelId: (raw?: string | null) => {
     const normalized = raw?.trim().toLowerCase();
     return normalized || null;
@@ -294,20 +282,24 @@ function buildSessionCommandParams(
     CommandBody: commandBody,
     CommandSource: "text",
     CommandAuthorized: true,
-    Provider: "quietchat",
-    Surface: "quietchat",
+    Provider: "whatsapp",
+    Surface: "whatsapp",
     From: "+1222",
     To: "+1222",
     SenderId: "user-1",
     ...ctxOverrides,
   } as HandleCommandsParams["ctx"];
-  const channel = normalizeCommandContextText(ctx.Provider ?? ctx.Surface);
+  const channel = String(ctx.Provider ?? ctx.Surface ?? "")
+    .trim()
+    .toLowerCase();
   const senderId = typeof ctx.SenderId === "string" ? ctx.SenderId : undefined;
   return {
     ctx,
     cfg: baseCfg,
     command: {
-      surface: normalizeCommandContextText(ctx.Surface ?? ctx.Provider),
+      surface: String(ctx.Surface ?? ctx.Provider ?? "")
+        .trim()
+        .toLowerCase(),
       channel,
       channelId: channel,
       ownerList: [],

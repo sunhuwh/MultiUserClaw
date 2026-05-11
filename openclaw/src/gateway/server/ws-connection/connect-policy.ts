@@ -39,12 +39,8 @@ export function shouldSkipControlUiPairing(
   role: GatewayRole,
   trustedProxyAuthOk = false,
   authMode?: string,
-  authMethod?: string,
 ): boolean {
   if (trustedProxyAuthOk) {
-    return true;
-  }
-  if (policy.isControlUi && role === "operator" && authMethod === "tailscale" && policy.device) {
     return true;
   }
   // When auth is completely disabled (mode=none), there is no shared secret
@@ -96,12 +92,12 @@ export function shouldClearUnboundScopesForMissingDeviceIdentity(params: {
     params.decision.kind !== "allow" ||
     (!params.controlUiAuthPolicy.allowBypass &&
       !params.preserveInsecureLocalControlUiScopes &&
-      params.trustedProxyAuthOk !== true &&
       // trusted-proxy auth can bypass pairing for some clients, but those
       // self-declared scopes are still unbound without device identity.
       (params.authMethod === "token" ||
         params.authMethod === "password" ||
-        params.authMethod === "trusted-proxy"))
+        params.authMethod === "trusted-proxy" ||
+        params.trustedProxyAuthOk === true))
   );
 }
 
@@ -111,7 +107,6 @@ export function evaluateMissingDeviceIdentity(params: {
   isControlUi: boolean;
   controlUiAuthPolicy: ControlUiAuthPolicy;
   trustedProxyAuthOk?: boolean;
-  localBackendSelfPairingOk?: boolean;
   sharedAuthOk: boolean;
   authOk: boolean;
   hasSharedAuth: boolean;
@@ -129,9 +124,6 @@ export function evaluateMissingDeviceIdentity(params: {
     // sessions only; node-role sessions must still satisfy device identity so
     // that the break-glass flag cannot be abused to admit device-less node
     // registrations (see #45405 review).
-    return { kind: "allow" };
-  }
-  if (params.localBackendSelfPairingOk && params.role === "operator") {
     return { kind: "allow" };
   }
   if (params.isControlUi && !params.controlUiAuthPolicy.allowBypass) {

@@ -436,8 +436,8 @@ describe("resolveFeishuAccount", () => {
     expect((caught as Error).message).toMatch(/channels\.feishu\.appSecret: unresolved SecretRef/i);
   });
 
-  it("ignores non-string account names", () => {
-    expect(
+  it("does not throw when account name is non-string", () => {
+    expect(() =>
       resolveFeishuAccount({
         cfg: {
           channels: {
@@ -454,11 +454,6 @@ describe("resolveFeishuAccount", () => {
         } as never,
         accountId: "main",
       }),
-    ).toMatchObject({
-      accountId: "main",
-      appId: "cli_123",
-      appSecret: "secret_456",
-      name: undefined,
-    });
+    ).not.toThrow();
   });
 });

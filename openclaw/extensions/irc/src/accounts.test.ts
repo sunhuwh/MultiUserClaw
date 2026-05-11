@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { listIrcAccountIds, resolveDefaultIrcAccountId, resolveIrcAccount } from "./accounts.js";
 import type { CoreConfig } from "./types.js";
 
@@ -105,7 +105,8 @@ describe("resolveIrcAccount", () => {
   });
 
   it("parses delimited IRC_CHANNELS env values for the default account", () => {
-    vi.stubEnv("IRC_CHANNELS", "alpha, beta\ngamma; delta");
+    const previousChannels = process.env.IRC_CHANNELS;
+    process.env.IRC_CHANNELS = "alpha, beta\ngamma; delta";
 
     try {
       const account = resolveIrcAccount({
@@ -121,7 +122,11 @@ describe("resolveIrcAccount", () => {
 
       expect(account.config.channels).toEqual(["alpha", "beta", "gamma", "delta"]);
     } finally {
-      vi.unstubAllEnvs();
+      if (previousChannels === undefined) {
+        delete process.env.IRC_CHANNELS;
+      } else {
+        process.env.IRC_CHANNELS = previousChannels;
+      }
     }
   });
 

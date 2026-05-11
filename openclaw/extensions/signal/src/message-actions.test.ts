@@ -1,4 +1,4 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const sendReactionsModule = await import("./send-reactions.js");
@@ -33,7 +33,7 @@ describe("signalMessageActions", () => {
   it("lists actions based on configured accounts and reaction gates", () => {
     expect(
       signalMessageActions.describeMessageTool?.({ cfg: {} as OpenClawConfig })?.actions ?? [],
-    ).toStrictEqual([]);
+    ).toEqual([]);
 
     expect(
       signalMessageActions.describeMessageTool?.({
@@ -136,12 +136,6 @@ describe("signalMessageActions", () => {
 
     for (const testCase of cases) {
       sendReactionSignalMock.mockClear();
-      const expectedOptions = testCase.expectedOptions as {
-        accountId?: string;
-        groupId?: string;
-        targetAuthor?: string;
-        targetAuthorUuid?: string;
-      };
       await signalMessageActions.handleAction?.({
         channel: "signal",
         action: "react",
@@ -155,13 +149,10 @@ describe("signalMessageActions", () => {
         testCase.expectedRecipient,
         testCase.expectedTimestamp,
         testCase.expectedEmoji,
-        {
+        expect.objectContaining({
           cfg: testCase.cfg,
-          accountId: expectedOptions.accountId,
-          groupId: expectedOptions.groupId,
-          targetAuthor: expectedOptions.targetAuthor,
-          targetAuthorUuid: expectedOptions.targetAuthorUuid,
-        },
+          ...testCase.expectedOptions,
+        }),
       );
     }
   });

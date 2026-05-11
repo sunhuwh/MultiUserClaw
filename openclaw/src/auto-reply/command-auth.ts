@@ -1,11 +1,7 @@
-import {
-  getLoadedChannelPluginById,
-  listLoadedChannelPlugins,
-} from "../channels/plugins/registry-loaded.js";
-import type { ChannelPlugin } from "../channels/plugins/types.plugin.js";
-import type { ChannelId } from "../channels/plugins/types.public.js";
+import { getChannelPlugin, listChannelPlugins } from "../channels/plugins/index.js";
+import type { ChannelId, ChannelPlugin } from "../channels/plugins/types.js";
 import { normalizeAnyChannelId } from "../channels/registry.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { OpenClawConfig } from "../config/config.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
@@ -109,10 +105,10 @@ function resolveProviderFromContext(
 
 function probeInferredProviders(ctx: MsgContext, cfg: OpenClawConfig): InferredProviderProbe {
   let droppedResolutionError = false;
-  const candidates = listLoadedChannelPlugins()
+  const candidates = listChannelPlugins()
     .map((plugin) => {
       const resolvedAllowFrom = buildProviderAllowFromResolution({
-        plugin: plugin as ChannelPlugin,
+        plugin,
         cfg,
         accountId: ctx.AccountId,
       });
@@ -289,8 +285,7 @@ function resolveOwnerAllowFromList(params: {
       const prefix = trimmed.slice(0, separatorIndex);
       const channel = normalizeAnyChannelId(prefix);
       if (channel) {
-        // Channel-prefixed entries require a known matching provider; webchat leaves it unset.
-        if (!params.providerId || channel !== params.providerId) {
+        if (params.providerId && channel !== params.providerId) {
           continue;
         }
         const remainder = trimmed.slice(separatorIndex + 1).trim();
@@ -430,17 +425,12 @@ function resolveOwnerAuthorizationState(params: {
 
 function resolveCommandSenderAuthorization(params: {
   commandAuthorized: boolean;
-  enforceOwnerForCommands: boolean;
-  nativeCommandAuthorized: boolean;
   isOwnerForCommands: boolean;
   senderCandidates: string[];
   commandsAllowFromList: string[] | null;
   providerResolutionError: boolean;
   commandsAllowFromConfigured: boolean;
 }): boolean {
-  if (params.enforceOwnerForCommands && !params.isOwnerForCommands) {
-    return false;
-  }
   if (
     params.commandsAllowFromList !== null ||
     (params.providerResolutionError && params.commandsAllowFromConfigured)
@@ -456,13 +446,16 @@ function resolveCommandSenderAuthorization(params: {
       !params.providerResolutionError && (commandsAllowAll || Boolean(matchedCommandsAllowFrom))
     );
   }
-  return params.commandAuthorized && (params.isOwnerForCommands || params.nativeCommandAuthorized);
+  return params.commandAuthorized && params.isOwnerForCommands;
 }
 
 function isConversationLikeIdentity(value: string): boolean {
   const normalized = normalizeOptionalLowercaseString(value);
   if (!normalized) {
     return false;
+  }
+  if (normalized.includes("@g.us")) {
+    return true;
   }
   if (normalized.startsWith("chat_id:")) {
     return true;
@@ -636,9 +629,7 @@ export function resolveCommandAuthorization(params: {
     ctx,
     cfg,
   );
-  const plugin = providerId
-    ? ((getLoadedChannelPluginById(providerId) as ChannelPlugin | undefined) ?? undefined)
-    : undefined;
+  const plugin = providerId ? getChannelPlugin(providerId) : undefined;
   const from = normalizeOptionalString(ctx.From) ?? "";
   const to = normalizeOptionalString(ctx.To) ?? "";
   const commandsAllowFromConfigured = Boolean(
@@ -709,13 +700,11 @@ export function resolveCommandAuthorization(params: {
       ? true
       : ownerAllowlistConfigured
         ? senderIsOwner
-        : senderIsOwnerByScope || Boolean(matchedCommandOwner);
-  const nativeCommandAuthorized =
-    commandAuthorized && ctx.CommandSource === "native" && !requireOwner;
+        : ownerState.allowAll ||
+          ownerState.ownerCandidatesForCommands.length === 0 ||
+          Boolean(matchedCommandOwner);
   const isAuthorizedSender = resolveCommandSenderAuthorization({
     commandAuthorized,
-    enforceOwnerForCommands: enforceOwner,
-    nativeCommandAuthorized,
     isOwnerForCommands,
     senderCandidates,
     commandsAllowFromList,

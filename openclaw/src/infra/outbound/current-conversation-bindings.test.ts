@@ -8,49 +8,18 @@ import {
   __testing,
   bindGenericCurrentConversation,
   getGenericCurrentConversationBindingCapabilities,
-  listGenericCurrentConversationBindingsBySession,
   resolveGenericCurrentConversationBinding,
-  touchGenericCurrentConversationBinding,
   unbindGenericCurrentConversationBindings,
 } from "./current-conversation-bindings.js";
-import type { SessionBindingRecord } from "./session-binding.types.js";
-
-function expectSessionBinding(bound: SessionBindingRecord | null): SessionBindingRecord {
-  if (bound === null) {
-    throw new Error("Expected current-conversation binding");
-  }
-  return bound;
-}
-
-function expectBindingFields(
-  binding: SessionBindingRecord | null | undefined,
-  expected: Partial<SessionBindingRecord>,
-): SessionBindingRecord {
-  const record = expectSessionBinding(binding ?? null);
-  for (const [key, value] of Object.entries(expected)) {
-    expect(record[key as keyof SessionBindingRecord]).toEqual(value);
-  }
-  return record;
-}
-
-function expectBindingMetadata(
-  binding: SessionBindingRecord | null | undefined,
-  expected: Record<string, unknown>,
-): void {
-  const metadata = expectSessionBinding(binding ?? null).metadata;
-  for (const [key, value] of Object.entries(expected)) {
-    expect(metadata?.[key]).toEqual(value);
-  }
-}
 
 function setMinimalCurrentConversationRegistry(): void {
   setActivePluginRegistry(
     createTestRegistry([
       {
-        pluginId: "workspace",
+        pluginId: "slack",
         source: "test",
         plugin: {
-          id: "workspace",
+          id: "slack",
           meta: { aliases: [] },
           conversationBindings: {
             supportsCurrentConversationBinding: true,
@@ -90,7 +59,7 @@ describe("generic current-conversation bindings", () => {
   it("advertises support only for channels that opt into current-conversation binds", () => {
     expect(
       getGenericCurrentConversationBindingCapabilities({
-        channel: "workspace",
+        channel: "slack",
         accountId: "default",
       }),
     ).toEqual({
@@ -112,7 +81,7 @@ describe("generic current-conversation bindings", () => {
 
     expect(
       getGenericCurrentConversationBindingCapabilities({
-        channel: "workspace",
+        channel: "slack",
         accountId: "default",
       }),
     ).toBeNull();
@@ -120,117 +89,71 @@ describe("generic current-conversation bindings", () => {
 
   it("reloads persisted bindings after the in-memory cache is cleared", async () => {
     const bound = await bindGenericCurrentConversation({
-      targetSessionKey: "agent:codex:acp:workspace-dm",
+      targetSessionKey: "agent:codex:acp:slack-dm",
       targetKind: "session",
       conversation: {
-        channel: "workspace",
+        channel: "slack",
         accountId: "default",
         conversationId: "user:U123",
       },
       metadata: {
-        label: "workspace-dm",
+        label: "slack-dm",
       },
     });
 
-    expectBindingFields(bound, {
-      bindingId: "generic:workspace\u241fdefault\u241f\u241fuser:U123",
-      targetSessionKey: "agent:codex:acp:workspace-dm",
+    expect(bound).toMatchObject({
+      bindingId: "generic:slack\u241fdefault\u241f\u241fuser:U123",
+      targetSessionKey: "agent:codex:acp:slack-dm",
     });
 
     __testing.resetCurrentConversationBindingsForTests();
 
-    const resolved = resolveGenericCurrentConversationBinding({
-      channel: "workspace",
-      accountId: "default",
-      conversationId: "user:U123",
-    });
-    expectBindingFields(resolved, {
-      bindingId: "generic:workspace\u241fdefault\u241f\u241fuser:U123",
-      targetSessionKey: "agent:codex:acp:workspace-dm",
-    });
-    expectBindingMetadata(resolved, { label: "workspace-dm" });
-  });
-
-  it("normalizes persisted target session keys on reload", async () => {
-    const filePath = __testing.resolveBindingsFilePath();
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(
-      filePath,
-      JSON.stringify({
-        version: 1,
-        bindings: [
-          {
-            bindingId: "generic:workspace\u241fdefault\u241f\u241fuser:U123",
-            targetSessionKey: " agent:codex:acp:workspace-dm ",
-            targetKind: "session",
-            conversation: {
-              channel: "workspace",
-              accountId: "default",
-              conversationId: "user:U123",
-            },
-            status: "active",
-            boundAt: 1234,
-            metadata: {
-              label: "workspace-dm",
-            },
-          },
-        ],
+    expect(
+      resolveGenericCurrentConversationBinding({
+        channel: "slack",
+        accountId: "default",
+        conversationId: "user:U123",
       }),
-    );
-
-    const resolved = resolveGenericCurrentConversationBinding({
-      channel: "workspace",
-      accountId: "default",
-      conversationId: "user:U123",
-    });
-
-    expectBindingFields(resolved, {
-      bindingId: "generic:workspace\u241fdefault\u241f\u241fuser:U123",
-      targetSessionKey: "agent:codex:acp:workspace-dm",
-    });
-    expectBindingMetadata(resolved, { label: "workspace-dm" });
-    const bindings = listGenericCurrentConversationBindingsBySession(
-      "agent:codex:acp:workspace-dm",
-    );
-    expect(bindings).toHaveLength(1);
-    expectBindingFields(bindings[0], {
-      bindingId: "generic:workspace\u241fdefault\u241f\u241fuser:U123",
-      targetSessionKey: "agent:codex:acp:workspace-dm",
+    ).toMatchObject({
+      bindingId: "generic:slack\u241fdefault\u241f\u241fuser:U123",
+      targetSessionKey: "agent:codex:acp:slack-dm",
+      metadata: expect.objectContaining({
+        label: "slack-dm",
+      }),
     });
   });
 
   it("drops self-parent conversation refs when storing generic current bindings", async () => {
     const bound = await bindGenericCurrentConversation({
-      targetSessionKey: "agent:codex:acp:forum-dm",
+      targetSessionKey: "agent:codex:acp:telegram-dm",
       targetKind: "session",
       conversation: {
-        channel: "forum",
+        channel: "telegram",
         accountId: "default",
         conversationId: "6098642967",
         parentConversationId: "6098642967",
       },
     });
 
-    const boundRecord = expectBindingFields(bound, {
-      bindingId: "generic:forum\u241fdefault\u241f\u241f6098642967",
-    });
-    expect(boundRecord.conversation).toEqual({
-      channel: "forum",
-      accountId: "default",
-      conversationId: "6098642967",
+    expect(bound).toMatchObject({
+      bindingId: "generic:telegram\u241fdefault\u241f\u241f6098642967",
+      conversation: {
+        channel: "telegram",
+        accountId: "default",
+        conversationId: "6098642967",
+      },
     });
     expect(bound?.conversation.parentConversationId).toBeUndefined();
-    expectBindingFields(
+    expect(
       resolveGenericCurrentConversationBinding({
-        channel: "forum",
+        channel: "telegram",
         accountId: "default",
         conversationId: "6098642967",
       }),
-      {
-        bindingId: "generic:forum\u241fdefault\u241f\u241f6098642967",
-        targetSessionKey: "agent:codex:acp:forum-dm",
-      },
-    );
+    ).toMatchObject({
+      bindingId: "generic:telegram\u241fdefault\u241f\u241f6098642967",
+      targetSessionKey: "agent:codex:acp:telegram-dm",
+    });
   });
 
   it("migrates persisted legacy self-parent binding ids on load", async () => {
@@ -242,11 +165,11 @@ describe("generic current-conversation bindings", () => {
         version: 1,
         bindings: [
           {
-            bindingId: "generic:forum\u241fdefault\u241f6098642967\u241f6098642967",
-            targetSessionKey: "agent:codex:acp:forum-dm",
+            bindingId: "generic:telegram\u241fdefault\u241f6098642967\u241f6098642967",
+            targetSessionKey: "agent:codex:acp:telegram-dm",
             targetKind: "session",
             conversation: {
-              channel: "forum",
+              channel: "telegram",
               accountId: "default",
               conversationId: "6098642967",
               parentConversationId: "6098642967",
@@ -254,7 +177,7 @@ describe("generic current-conversation bindings", () => {
             status: "active",
             boundAt: 1234,
             metadata: {
-              label: "forum-dm",
+              label: "telegram-dm",
             },
           },
         ],
@@ -262,35 +185,37 @@ describe("generic current-conversation bindings", () => {
     );
 
     const resolved = resolveGenericCurrentConversationBinding({
-      channel: "forum",
+      channel: "telegram",
       accountId: "default",
       conversationId: "6098642967",
     });
 
-    const resolvedRecord = expectBindingFields(resolved, {
-      bindingId: "generic:forum\u241fdefault\u241f\u241f6098642967",
-      targetSessionKey: "agent:codex:acp:forum-dm",
-    });
-    expect(resolvedRecord.conversation).toEqual({
-      channel: "forum",
-      accountId: "default",
-      conversationId: "6098642967",
+    expect(resolved).toMatchObject({
+      bindingId: "generic:telegram\u241fdefault\u241f\u241f6098642967",
+      targetSessionKey: "agent:codex:acp:telegram-dm",
+      conversation: {
+        channel: "telegram",
+        accountId: "default",
+        conversationId: "6098642967",
+      },
     });
     expect(resolved?.conversation.parentConversationId).toBeUndefined();
 
-    const unbound = await unbindGenericCurrentConversationBindings({
-      bindingId: resolved?.bindingId,
-      reason: "test cleanup",
-    });
-    expect(unbound).toHaveLength(1);
-    expectBindingFields(unbound[0], {
-      bindingId: "generic:forum\u241fdefault\u241f\u241f6098642967",
-    });
+    await expect(
+      unbindGenericCurrentConversationBindings({
+        bindingId: resolved?.bindingId,
+        reason: "test cleanup",
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        bindingId: "generic:telegram\u241fdefault\u241f\u241f6098642967",
+      }),
+    ]);
 
     __testing.resetCurrentConversationBindingsForTests();
     expect(
       resolveGenericCurrentConversationBinding({
-        channel: "forum",
+        channel: "telegram",
         accountId: "default",
         conversationId: "6098642967",
       }),
@@ -322,41 +247,5 @@ describe("generic current-conversation bindings", () => {
         conversationId: "spaces/AAAAAAA",
       }),
     ).toBeNull();
-  });
-
-  it("persists touched activity across reloads", async () => {
-    const bound = await bindGenericCurrentConversation({
-      targetSessionKey: "agent:codex:acp:workspace-dm",
-      targetKind: "session",
-      conversation: {
-        channel: "workspace",
-        accountId: "default",
-        conversationId: "user:U123",
-      },
-      metadata: {
-        label: "workspace-dm",
-      },
-    });
-
-    expectSessionBinding(bound);
-
-    touchGenericCurrentConversationBinding(
-      "generic:workspace\u241fdefault\u241f\u241fuser:U123",
-      1_234_567_890,
-    );
-
-    __testing.resetCurrentConversationBindingsForTests();
-
-    expectBindingMetadata(
-      resolveGenericCurrentConversationBinding({
-        channel: "workspace",
-        accountId: "default",
-        conversationId: "user:U123",
-      }),
-      {
-        label: "workspace-dm",
-        lastActivityAt: 1_234_567_890,
-      },
-    );
   });
 });

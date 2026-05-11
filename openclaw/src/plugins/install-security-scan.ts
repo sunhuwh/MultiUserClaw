@@ -2,8 +2,9 @@ type InstallScanLogger = {
   warn?: (message: string) => void;
 };
 
-export type { InstallSafetyOverrides } from "./install-security-scan.types.js";
-import type { InstallSafetyOverrides } from "./install-security-scan.types.js";
+export type InstallSafetyOverrides = {
+  dangerouslyForceUnsafeInstall?: boolean;
+};
 
 export type InstallSecurityScanResult = {
   blocked?: {
@@ -16,8 +17,7 @@ export type PluginInstallRequestKind =
   | "plugin-dir"
   | "plugin-archive"
   | "plugin-file"
-  | "plugin-npm"
-  | "plugin-git";
+  | "plugin-npm";
 
 export type SkillInstallSpecMetadata = {
   id?: string;
@@ -73,7 +73,6 @@ export async function scanPackageInstallSource(
 }
 
 export async function scanInstalledPackageDependencyTree(params: {
-  allowManagedNpmRootPackagePeerSymlinks?: boolean;
   logger: InstallScanLogger;
   packageDir: string;
   pluginId: string;

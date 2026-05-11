@@ -32,9 +32,6 @@ describe("gateway --force helpers", () => {
     originalKill = process.kill.bind(process);
     originalPlatform = process.platform;
     tryListenOnPortMock.mockReset();
-    tryListenOnPortMock.mockRejectedValue(
-      Object.assign(new Error("in use"), { code: "EADDRINUSE" }),
-    );
     // Pin to linux so all lsof tests are platform-invariant.
     Object.defineProperty(process, "platform", { value: "linux", configurable: true });
   });
@@ -59,20 +56,7 @@ describe("gateway --force helpers", () => {
       err.status = 1; // lsof uses exit 1 for no matches
       throw err;
     });
-    expect(listPortListeners(18789)).toStrictEqual([]);
-  });
-
-  it("skips lsof when the port is already bindable", async () => {
-    tryListenOnPortMock.mockResolvedValue(undefined);
-
-    const result = await forceFreePortAndWait(18789, { timeoutMs: 500, intervalMs: 100 });
-
-    expect(result).toEqual({
-      killed: [],
-      waitedMs: 0,
-      escalatedToSigkill: false,
-    });
-    expect(execFileSync).not.toHaveBeenCalled();
+    expect(listPortListeners(18789)).toEqual([]);
   });
 
   it("throws when lsof missing", () => {
@@ -180,9 +164,7 @@ describe("gateway --force helpers", () => {
       }
       return "18789/tcp: 4242\n";
     });
-    tryListenOnPortMock
-      .mockRejectedValueOnce(Object.assign(new Error("in use"), { code: "EADDRINUSE" }))
-      .mockResolvedValue(undefined);
+    tryListenOnPortMock.mockResolvedValue(undefined);
 
     const result = await forceFreePortAndWait(18789, { timeoutMs: 500, intervalMs: 100 });
 
@@ -214,7 +196,6 @@ describe("gateway --force helpers", () => {
 
     const busyErr = Object.assign(new Error("in use"), { code: "EADDRINUSE" });
     tryListenOnPortMock
-      .mockRejectedValueOnce(busyErr)
       .mockRejectedValueOnce(busyErr)
       .mockRejectedValueOnce(busyErr)
       .mockRejectedValueOnce(busyErr)
@@ -277,7 +258,7 @@ describe("gateway --force helpers (Windows netstat path)", () => {
 
   it("returns empty list when netstat finds no listeners on the port", () => {
     (execFileSync as unknown as Mock).mockReturnValue(makeNetstatOutput(9999, 42));
-    expect(listPortListeners(18789)).toStrictEqual([]);
+    expect(listPortListeners(18789)).toEqual([]);
   });
 
   it("parses PIDs from netstat output correctly", () => {
@@ -287,7 +268,7 @@ describe("gateway --force helpers (Windows netstat path)", () => {
 
   it("does not incorrectly match a port that is a substring (e.g. 80 vs 8080)", () => {
     (execFileSync as unknown as Mock).mockReturnValue(makeNetstatOutput(8080, 42));
-    expect(listPortListeners(80)).toStrictEqual([]);
+    expect(listPortListeners(80)).toEqual([]);
   });
 
   it("deduplicates PIDs that appear multiple times", () => {

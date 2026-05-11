@@ -1,6 +1,5 @@
 import { format } from "node:util";
 import { CHANNEL_APPROVAL_NATIVE_RUNTIME_CONTEXT_CAPABILITY } from "openclaw/plugin-sdk/approval-handler-adapter-runtime";
-import type { ChannelRuntimeSurface } from "openclaw/plugin-sdk/channel-contract";
 import { waitUntilAbort } from "openclaw/plugin-sdk/channel-lifecycle";
 import { registerChannelRuntimeContext } from "openclaw/plugin-sdk/channel-runtime-context";
 import {
@@ -13,13 +12,7 @@ import {
   type RuntimeEnv,
 } from "../../runtime-api.js";
 import { getMatrixRuntime } from "../../runtime.js";
-import type {
-  CoreConfig,
-  MatrixConfig,
-  MatrixStreamingConfig,
-  MatrixStreamingMode,
-  ReplyToMode,
-} from "../../types.js";
+import type { CoreConfig, ReplyToMode } from "../../types.js";
 import { resolveMatrixAccountConfig } from "../account-config.js";
 import { resolveConfiguredMatrixBotUserIds } from "../accounts.js";
 import { setActiveMatrixClient } from "../active-client.js";
@@ -33,14 +26,9 @@ import {
 import { releaseSharedClientInstance } from "../client/shared.js";
 import type { MatrixClient } from "../sdk.js";
 import { isMatrixStartupAbortError } from "../startup-abort.js";
-import {
-  isMatrixDisconnectedSyncState,
-  isMatrixReadySyncState,
-  type MatrixSyncState,
-} from "../sync-state.js";
 import { createMatrixThreadBindingManager } from "../thread-bindings.js";
 import { registerMatrixAutoJoin } from "./auto-join.js";
-import { resolveMatrixMonitorConfig, type MatrixResolvedAllowlistEntry } from "./config.js";
+import { resolveMatrixMonitorConfig } from "./config.js";
 import { createDirectRoomTracker } from "./direct.js";
 import { registerMatrixMonitorEvents } from "./events.js";
 import { createMatrixRoomMessageHandler } from "./handler.js";
@@ -57,63 +45,13 @@ import { createMatrixMonitorTaskRunner } from "./task-runner.js";
 
 export type MonitorMatrixOpts = {
   runtime?: RuntimeEnv;
-  channelRuntime?: ChannelRuntimeSurface;
+  channelRuntime?: import("openclaw/plugin-sdk/channel-core").PluginRuntime["channel"];
   abortSignal?: AbortSignal;
   mediaMaxMb?: number;
   initialSyncLimit?: number;
   replyToMode?: ReplyToMode;
   accountId?: string | null;
   setStatus?: (next: import("openclaw/plugin-sdk/channel-contract").ChannelAccountSnapshot) => void;
-};
-
-function isMatrixStreamingConfig(
-  streaming: MatrixConfig["streaming"],
-): streaming is MatrixStreamingConfig {
-  return Boolean(streaming && typeof streaming === "object" && !Array.isArray(streaming));
-}
-
-function resolveMatrixStreamingMode(streaming: MatrixConfig["streaming"]): MatrixStreamingMode {
-  if (streaming === true || streaming === "partial") {
-    return "partial";
-  }
-  if (streaming === "quiet") {
-    return "quiet";
-  }
-  if (streaming === "progress") {
-    return "progress";
-  }
-  if (isMatrixStreamingConfig(streaming)) {
-    if (
-      streaming.mode === "partial" ||
-      streaming.mode === "quiet" ||
-      streaming.mode === "progress"
-    ) {
-      return streaming.mode;
-    }
-  }
-  return "off";
-}
-
-function resolveMatrixPreviewToolProgress(streaming: MatrixConfig["streaming"]): boolean {
-  if (!isMatrixStreamingConfig(streaming)) {
-    return true;
-  }
-  if (resolveMatrixStreamingMode(streaming) === "progress") {
-    return streaming.progress?.toolProgress ?? streaming.preview?.toolProgress ?? true;
-  }
-  return streaming.preview?.toolProgress ?? true;
-}
-
-function resolveMatrixPreviewToolProgressEnabled(streaming: MatrixConfig["streaming"]): boolean {
-  return (
-    resolveMatrixStreamingMode(streaming) !== "off" && resolveMatrixPreviewToolProgress(streaming)
-  );
-}
-
-export const __testing = {
-  resolveMatrixPreviewToolProgress,
-  resolveMatrixPreviewToolProgressEnabled,
-  resolveMatrixStreamingMode,
 };
 
 const DEFAULT_MEDIA_MAX_MB = 20;
@@ -127,7 +65,7 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
     throw new Error("Matrix provider requires Node (bun runtime not supported)");
   }
   const core = getMatrixRuntime();
-  let cfg = core.config.current() as CoreConfig;
+  let cfg = core.config.loadConfig() as CoreConfig;
   if (cfg.channels?.["matrix"]?.enabled === false) {
     return;
   }
@@ -168,8 +106,6 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
   const accountAllowBots = accountConfig.allowBots;
   let allowFrom: string[] = (accountConfig.dm?.allowFrom ?? []).map(String);
   let groupAllowFrom: string[] = (accountConfig.groupAllowFrom ?? []).map(String);
-  let allowFromResolvedEntries: MatrixResolvedAllowlistEntry[] = [];
-  let groupAllowFromResolvedEntries: MatrixResolvedAllowlistEntry[] = [];
   let roomsConfig = accountConfig.groups ?? accountConfig.rooms;
   let needsRoomAliasesForConfig = false;
   const configuredBotUserIds = resolveConfiguredMatrixBotUserIds({
@@ -177,13 +113,7 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
     accountId: effectiveAccountId,
   });
 
-  ({
-    allowFrom,
-    allowFromResolvedEntries,
-    groupAllowFrom,
-    groupAllowFromResolvedEntries,
-    roomsConfig,
-  } = await resolveMatrixMonitorConfig({
+  ({ allowFrom, groupAllowFrom, roomsConfig } = await resolveMatrixMonitorConfig({
     cfg,
     accountId: effectiveAccountId,
     allowFrom,
@@ -253,7 +183,6 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
         await releaseSharedClientInstance(client, mode);
       }
     } finally {
-      client?.off("sync.state", onSyncState);
       syncLifecycle?.dispose();
       statusController.markStopped();
       setActiveMatrixClient(null, auth.accountId);
@@ -300,28 +229,17 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
   const historyLimit = Math.max(0, accountConfig.historyLimit ?? globalGroupChatHistoryLimit ?? 0);
   const mediaMaxMb = opts.mediaMaxMb ?? accountConfig.mediaMaxMb ?? DEFAULT_MEDIA_MAX_MB;
   const mediaMaxBytes = Math.max(1, mediaMaxMb) * 1024 * 1024;
-  const streaming = resolveMatrixStreamingMode(accountConfig.streaming);
-  const previewToolProgressEnabled = resolveMatrixPreviewToolProgressEnabled(
-    accountConfig.streaming,
-  );
+  const streaming: "partial" | "quiet" | "off" =
+    accountConfig.streaming === true || accountConfig.streaming === "partial"
+      ? "partial"
+      : accountConfig.streaming === "quiet"
+        ? "quiet"
+        : "off";
   const blockStreamingEnabled = accountConfig.blockStreaming === true;
   const startupMs = Date.now();
   const startupGraceMs = 0;
   const warnedEncryptedRooms = new Set<string>();
   const warnedCryptoMissingRooms = new Set<string>();
-  let healthySyncSinceMs: number | undefined;
-  const noteSyncHealthState = (state: MatrixSyncState, at = Date.now()) => {
-    if (isMatrixReadySyncState(state)) {
-      healthySyncSinceMs ??= at;
-      return;
-    }
-    if (isMatrixDisconnectedSyncState(state)) {
-      healthySyncSinceMs = undefined;
-    }
-  };
-  const onSyncState = (state: MatrixSyncState) => {
-    noteSyncHealthState(state);
-  };
 
   try {
     client = await resolveSharedMatrixClient({
@@ -340,7 +258,6 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
       statusController,
       isStopping: () => cleanedUp || opts.abortSignal?.aborted === true,
     });
-    client.on("sync.state", onSyncState);
     // Cold starts should ignore old room history, but once we have a persisted
     // /sync cursor we want restart backlogs to replay just like other channels.
     const dropPreStartupMessages = !client.hasPersistedSyncState();
@@ -378,14 +295,11 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
       core,
       cfg,
       accountId: effectiveAccountId,
-      accountConfig,
       runtime,
       logger,
       logVerboseMessage,
       allowFrom,
-      allowFromResolvedEntries,
       groupAllowFrom,
-      groupAllowFromResolvedEntries,
       roomsConfig,
       accountAllowBots,
       configuredBotUserIds,
@@ -395,7 +309,6 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
       dmThreadReplies,
       dmSessionScope,
       streaming,
-      previewToolProgressEnabled,
       blockStreamingEnabled,
       dmEnabled,
       dmPolicy,
@@ -412,7 +325,6 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
       needsRoomAliasesForConfig,
     });
     threadBindingManager = await createMatrixThreadBindingManager({
-      cfg,
       accountId: effectiveAccountId,
       auth,
       client,
@@ -445,8 +357,6 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
       warnedEncryptedRooms,
       warnedCryptoMissingRooms,
       logger,
-      startupGraceMs,
-      getHealthySyncSinceMs: () => healthySyncSinceMs,
       formatNativeDependencyHint: core.system.formatNativeDependencyHint,
       onRoomMessage: handleRoomMessage,
       runDetachedTask: monitorTaskRunner.runDetachedTask,
@@ -492,13 +402,8 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
       accountConfig,
       logger,
       logVerboseMessage,
-      getRuntimeConfig: () => core.config.current() as CoreConfig,
-      replaceConfigFile: async (nextCfg) => {
-        await core.config.replaceConfigFile({
-          nextConfig: nextCfg,
-          afterWrite: { mode: "auto" },
-        });
-      },
+      loadConfig: () => core.config.loadConfig() as CoreConfig,
+      writeConfigFile: async (nextCfg) => await core.config.writeConfigFile(nextCfg),
       loadWebMedia: async (url, maxBytes) => await core.media.loadWebMedia(url, maxBytes),
       env: process.env,
       abortSignal: opts.abortSignal,

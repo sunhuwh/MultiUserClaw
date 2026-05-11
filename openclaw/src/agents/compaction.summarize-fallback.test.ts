@@ -2,7 +2,6 @@ import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { UserMessage } from "@mariozechner/pi-ai";
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { summarizeWithFallback } from "./compaction.js";
 
 const piCodingAgentMocks = vi.hoisted(() => ({
   generateSummary: vi.fn(),
@@ -19,6 +18,8 @@ vi.mock("@mariozechner/pi-coding-agent", async () => {
     estimateTokens: piCodingAgentMocks.estimateTokens,
   };
 });
+
+const { summarizeWithFallback } = await import("./compaction.js");
 
 const testModel = {
   id: "test",

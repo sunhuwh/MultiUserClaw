@@ -1,4 +1,4 @@
-import { Type } from "typebox";
+import { Type } from "@sinclair/typebox";
 import { GatewayClientIdSchema, GatewayClientModeSchema, NonEmptyString } from "./primitives.js";
 import { SnapshotSchema, StateVersionSchema } from "./snapshot.js";
 
@@ -88,28 +88,30 @@ export const HelloOkSchema = Type.Object(
       { additionalProperties: false },
     ),
     snapshot: SnapshotSchema,
-    pluginSurfaceUrls: Type.Optional(Type.Record(NonEmptyString, NonEmptyString)),
-    auth: Type.Object(
-      {
-        deviceToken: Type.Optional(NonEmptyString),
-        role: NonEmptyString,
-        scopes: Type.Array(NonEmptyString),
-        issuedAtMs: Type.Optional(Type.Integer({ minimum: 0 })),
-        deviceTokens: Type.Optional(
-          Type.Array(
-            Type.Object(
-              {
-                deviceToken: NonEmptyString,
-                role: NonEmptyString,
-                scopes: Type.Array(NonEmptyString),
-                issuedAtMs: Type.Integer({ minimum: 0 }),
-              },
-              { additionalProperties: false },
+    canvasHostUrl: Type.Optional(NonEmptyString),
+    auth: Type.Optional(
+      Type.Object(
+        {
+          deviceToken: NonEmptyString,
+          role: NonEmptyString,
+          scopes: Type.Array(NonEmptyString),
+          issuedAtMs: Type.Optional(Type.Integer({ minimum: 0 })),
+          deviceTokens: Type.Optional(
+            Type.Array(
+              Type.Object(
+                {
+                  deviceToken: NonEmptyString,
+                  role: NonEmptyString,
+                  scopes: Type.Array(NonEmptyString),
+                  issuedAtMs: Type.Integer({ minimum: 0 }),
+                },
+                { additionalProperties: false },
+              ),
             ),
           ),
-        ),
-      },
-      { additionalProperties: false },
+        },
+        { additionalProperties: false },
+      ),
     ),
     policy: Type.Object(
       {

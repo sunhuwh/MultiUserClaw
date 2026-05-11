@@ -1,31 +1,25 @@
-import { createStartAccountContext } from "openclaw/plugin-sdk/channel-test-helpers";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createStartAccountContext } from "../../../test/helpers/plugins/start-account-context.js";
 import {
   expectStopPendingUntilAbort,
   startAccountAndTrackLifecycle,
   waitForStartedMocks,
-} from "openclaw/plugin-sdk/channel-test-helpers";
-import { afterEach, describe, expect, it, vi } from "vitest";
+} from "../../../test/helpers/plugins/start-account-lifecycle.js";
 import type { ResolvedNextcloudTalkAccount } from "./accounts.js";
 
 const hoisted = vi.hoisted(() => ({
   monitorNextcloudTalkProvider: vi.fn(),
 }));
 
-vi.mock("./monitor-runtime.js", () => ({
-  monitorNextcloudTalkProvider: hoisted.monitorNextcloudTalkProvider,
-}));
+vi.mock("./monitor.js", async () => {
+  const actual = await vi.importActual<typeof import("./monitor.js")>("./monitor.js");
+  return {
+    ...actual,
+    monitorNextcloudTalkProvider: hoisted.monitorNextcloudTalkProvider,
+  };
+});
 
 const { nextcloudTalkGatewayAdapter } = await import("./gateway.js");
-
-type NextcloudTalkStartAccount = NonNullable<typeof nextcloudTalkGatewayAdapter.startAccount>;
-
-function requireStartAccount(): NextcloudTalkStartAccount {
-  const startAccount = nextcloudTalkGatewayAdapter.startAccount;
-  if (!startAccount) {
-    throw new Error("Expected Nextcloud Talk gateway startAccount");
-  }
-  return startAccount;
-}
 
 function buildAccount(): ResolvedNextcloudTalkAccount {
   return {
@@ -50,7 +44,7 @@ function mockStartedMonitor() {
 }
 
 function startNextcloudAccount(abortSignal?: AbortSignal) {
-  return requireStartAccount()(
+  return nextcloudTalkGatewayAdapter.startAccount!(
     createStartAccountContext({
       account: buildAccount(),
       abortSignal,
@@ -66,7 +60,7 @@ describe("nextcloud-talk startAccount lifecycle", () => {
   it("keeps startAccount pending until abort, then stops the monitor", async () => {
     const stop = mockStartedMonitor();
     const { abort, task, isSettled } = startAccountAndTrackLifecycle({
-      startAccount: requireStartAccount(),
+      startAccount: nextcloudTalkGatewayAdapter.startAccount!,
       account: buildAccount(),
     });
     await expectStopPendingUntilAbort({

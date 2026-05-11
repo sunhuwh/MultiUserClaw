@@ -1,8 +1,6 @@
 import type { MsgContext } from "../auto-reply/templating.js";
-import type { GroupKeyResolution } from "../config/sessions/types.js";
+import type { GroupKeyResolution, SessionEntry } from "../config/sessions/types.js";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
-import type { InboundLastRouteUpdate } from "./session.types.js";
-export type { InboundLastRouteUpdate, RecordInboundSession } from "./session.types.js";
 
 let inboundSessionRuntimePromise: Promise<
   typeof import("../config/sessions/inbound.runtime.js")
@@ -12,6 +10,19 @@ function loadInboundSessionRuntime() {
   inboundSessionRuntimePromise ??= import("../config/sessions/inbound.runtime.js");
   return inboundSessionRuntimePromise;
 }
+
+export type InboundLastRouteUpdate = {
+  sessionKey: string;
+  channel: SessionEntry["lastChannel"];
+  to: string;
+  accountId?: string;
+  threadId?: string | number;
+  mainDmOwnerPin?: {
+    ownerRecipient: string;
+    senderRecipient: string;
+    onSkip?: (params: { ownerRecipient: string; senderRecipient: string }) => void;
+  };
+};
 
 function shouldSkipPinnedMainDmRouteUpdate(
   pin: InboundLastRouteUpdate["mainDmOwnerPin"] | undefined,
@@ -36,12 +47,11 @@ export async function recordInboundSession(params: {
   createIfMissing?: boolean;
   updateLastRoute?: InboundLastRouteUpdate;
   onRecordError: (err: unknown) => void;
-  trackSessionMetaTask?: (task: Promise<unknown>) => void;
 }): Promise<void> {
   const { storePath, sessionKey, ctx, groupResolution, createIfMissing } = params;
   const canonicalSessionKey = normalizeLowercaseStringOrEmpty(sessionKey);
   const runtime = await loadInboundSessionRuntime();
-  const metaTask = runtime
+  void runtime
     .recordSessionMetaFromInbound({
       storePath,
       sessionKey: canonicalSessionKey,
@@ -50,8 +60,6 @@ export async function recordInboundSession(params: {
       createIfMissing,
     })
     .catch(params.onRecordError);
-  params.trackSessionMetaTask?.(metaTask);
-  void metaTask;
 
   const update = params.updateLastRoute;
   if (!update) {
@@ -73,6 +81,5 @@ export async function recordInboundSession(params: {
     // Avoid leaking inbound origin metadata into a different target session.
     ctx: targetSessionKey === canonicalSessionKey ? ctx : undefined,
     groupResolution,
-    createIfMissing,
   });
 }

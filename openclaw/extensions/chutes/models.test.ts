@@ -6,14 +6,6 @@ import {
   discoverChutesModels,
 } from "./models.js";
 
-function restoreEnvVar(name: string, value: string | undefined): void {
-  if (value === undefined) {
-    delete process.env[name];
-  } else {
-    process.env[name] = value;
-  }
-}
-
 async function withLiveChutesDiscovery<T>(
   fetchMock: ReturnType<typeof vi.fn>,
   run: () => Promise<T>,
@@ -32,8 +24,8 @@ async function withLiveChutesDiscovery<T>(
   try {
     return await run();
   } finally {
-    restoreEnvVar("NODE_ENV", oldNodeEnv);
-    restoreEnvVar("VITEST", oldVitest);
+    process.env.NODE_ENV = oldNodeEnv;
+    process.env.VITEST = oldVitest;
     vi.unstubAllGlobals();
     if (options?.now) {
       vi.useRealTimers();
@@ -53,17 +45,6 @@ function createAuthEchoFetchMock() {
   });
 }
 
-function requireChutesModel(
-  models: Awaited<ReturnType<typeof discoverChutesModels>>,
-  index: number,
-): Awaited<ReturnType<typeof discoverChutesModels>>[number] {
-  const model = models[index];
-  if (!model) {
-    throw new Error(`expected Chutes model at index ${index}`);
-  }
-  return model;
-}
-
 describe("chutes-models", () => {
   beforeEach(() => {
     clearChutesModelCacheForTests();
@@ -79,10 +60,7 @@ describe("chutes-models", () => {
     expect(def.cost).toEqual(entry.cost);
     expect(def.contextWindow).toBe(entry.contextWindow);
     expect(def.maxTokens).toBe(entry.maxTokens);
-    if (!def.compat) {
-      throw new Error("expected Chutes model compat");
-    }
-    expect(def.compat.supportsUsageInStreaming).toBe(false);
+    expect(def.compat?.supportsUsageInStreaming).toBe(false);
   });
 
   it("discoverChutesModels returns static catalog when accessToken is empty", async () => {
@@ -94,7 +72,7 @@ describe("chutes-models", () => {
   it("discoverChutesModels returns static catalog in test env by default", async () => {
     const models = await discoverChutesModels("test-token");
     expect(models).toHaveLength(CHUTES_MODEL_CATALOG.length);
-    expect(requireChutesModel(models, 0).id).toBe("Qwen/Qwen3-32B");
+    expect(models[0]?.id).toBe("Qwen/Qwen3-32B");
   });
 
   it("discoverChutesModels correctly maps API response when not in test env", async () => {
@@ -119,14 +97,9 @@ describe("chutes-models", () => {
       const models = await discoverChutesModels("test-token-real-fetch");
       expect(models.length).toBeGreaterThan(0);
       if (models.length === 3) {
-        const firstModel = requireChutesModel(models, 0);
-        const secondModel = requireChutesModel(models, 1);
-        expect(firstModel.id).toBe("zai-org/GLM-4.7-TEE");
-        expect(secondModel.reasoning).toBe(true);
-        if (!secondModel.compat) {
-          throw new Error("expected Chutes API model compat");
-        }
-        expect(secondModel.compat.supportsUsageInStreaming).toBe(false);
+        expect(models[0]?.id).toBe("zai-org/GLM-4.7-TEE");
+        expect(models[1]?.reasoning).toBe(true);
+        expect(models[1]?.compat?.supportsUsageInStreaming).toBe(false);
       }
     });
   });
@@ -227,9 +200,9 @@ describe("chutes-models", () => {
       const modelsA = await discoverChutesModels("chutes-token-a");
       const modelsB = await discoverChutesModels("chutes-token-b");
       const modelsASecond = await discoverChutesModels("chutes-token-a");
-      expect(requireChutesModel(modelsA, 0).id).toBe("private/model-a");
-      expect(requireChutesModel(modelsB, 0).id).toBe("private/model-b");
-      expect(requireChutesModel(modelsASecond, 0).id).toBe("private/model-a");
+      expect(modelsA[0]?.id).toBe("private/model-a");
+      expect(modelsB[0]?.id).toBe("private/model-b");
+      expect(modelsASecond[0]?.id).toBe("private/model-a");
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
   });

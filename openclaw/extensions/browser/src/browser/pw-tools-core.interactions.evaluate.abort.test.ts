@@ -34,13 +34,10 @@ vi.mock("./pw-session.js", () => {
 const { evaluateViaPlaywright } = await import("./pw-tools-core.interactions.js");
 
 function createPendingEval() {
-  let evalCalled: (() => void) | undefined;
+  let evalCalled!: () => void;
   const evalCalledPromise = new Promise<void>((resolve) => {
     evalCalled = resolve;
   });
-  if (!evalCalled) {
-    throw new Error("Expected evaluate callback to be initialized");
-  }
   return {
     evalCalledPromise,
     resolveEvalCalled: evalCalled,

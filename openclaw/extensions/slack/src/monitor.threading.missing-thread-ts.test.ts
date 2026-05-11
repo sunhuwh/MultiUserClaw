@@ -50,7 +50,6 @@ describe("Slack missing thread_ts recovery", () => {
       historyResponse: { messages: [{ ts: "456" }] },
     });
     expect(message.thread_ts).toBeUndefined();
-    expect(message._ambiguousThreadReply).toBe(true);
   });
 
   it("continues without thread_ts when history lookup throws", async () => {
@@ -58,6 +57,5 @@ describe("Slack missing thread_ts recovery", () => {
       historyError: new Error("history failed"),
     });
     expect(message.thread_ts).toBeUndefined();
-    expect(message._ambiguousThreadReply).toBe(true);
   });
 });

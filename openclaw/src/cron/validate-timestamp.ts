@@ -5,16 +5,16 @@ import type { CronSchedule } from "./types.js";
 const ONE_MINUTE_MS = 60 * 1000;
 const TEN_YEARS_MS = 10 * 365.25 * 24 * 60 * 60 * 1000;
 
-type TimestampValidationError = {
+export type TimestampValidationError = {
   ok: false;
   message: string;
 };
 
-type TimestampValidationSuccess = {
+export type TimestampValidationSuccess = {
   ok: true;
 };
 
-type TimestampValidationResult = TimestampValidationSuccess | TimestampValidationError;
+export type TimestampValidationResult = TimestampValidationSuccess | TimestampValidationError;
 
 /**
  * Validates at timestamps in cron schedules.
@@ -36,7 +36,7 @@ export function validateScheduleTimestamp(
   if (atMs === null || !Number.isFinite(atMs)) {
     return {
       ok: false,
-      message: `Invalid schedule.at: expected ISO-8601 timestamp (got ${schedule.at})`,
+      message: `Invalid schedule.at: expected ISO-8601 timestamp (got ${String(schedule.at)})`,
     };
   }
 

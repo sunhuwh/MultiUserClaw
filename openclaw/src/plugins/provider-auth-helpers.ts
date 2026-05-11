@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { OAuthCredentials } from "@mariozechner/pi-ai";
-import { resolveDefaultAgentDir } from "../agents/agent-scope-config.js";
+import { resolveOpenClawAgentDir } from "../agents/agent-paths.js";
 import { buildAuthProfileId } from "../agents/auth-profiles/identity.js";
 import { upsertAuthProfile } from "../agents/auth-profiles/profiles.js";
 import { resolveProviderIdForAuth } from "../agents/provider-auth-aliases.js";
+import type { OpenClawConfig } from "../config/config.js";
 import { resolveStateDir } from "../config/paths.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   coerceSecretRef,
   DEFAULT_SECRET_PROVIDER_ALIAS,
@@ -19,12 +19,10 @@ import type { SecretInputMode } from "./provider-auth-types.js";
 
 const ENV_REF_PATTERN = /^\$\{([A-Z][A-Z0-9_]*)\}$/;
 
-const resolveAuthAgentDir = (agentDir?: string, config?: OpenClawConfig) =>
-  agentDir ?? resolveDefaultAgentDir(config ?? {});
+const resolveAuthAgentDir = (agentDir?: string) => agentDir ?? resolveOpenClawAgentDir();
 
 export type ApiKeyStorageOptions = {
   secretInputMode?: SecretInputMode;
-  config?: OpenClawConfig;
 };
 
 export type WriteOAuthCredentialsOptions = {
@@ -45,11 +43,8 @@ function parseEnvSecretRef(value: string): SecretRef | null {
   return buildEnvSecretRef(match[1]);
 }
 
-function resolveProviderDefaultEnvSecretRef(provider: string, config?: OpenClawConfig): SecretRef {
-  const envVars = getProviderEnvVars(provider, {
-    ...(config ? { config } : {}),
-    includeUntrustedWorkspacePlugins: false,
-  });
+function resolveProviderDefaultEnvSecretRef(provider: string): SecretRef {
+  const envVars = getProviderEnvVars(provider);
   const envVar = envVars?.find((candidate) => candidate.trim().length > 0);
   if (!envVar) {
     throw new Error(
@@ -64,9 +59,6 @@ function resolveApiKeySecretInput(
   input: SecretInput,
   options?: ApiKeyStorageOptions,
 ): SecretInput {
-  if (options?.secretInputMode === "plaintext") {
-    return normalizeSecretInput(input);
-  }
   const coercedRef = coerceSecretRef(input);
   if (coercedRef) {
     return coercedRef;
@@ -77,7 +69,7 @@ function resolveApiKeySecretInput(
     return inlineEnvRef;
   }
   if (options?.secretInputMode === "ref") {
-    return resolveProviderDefaultEnvSecretRef(provider, options.config);
+    return resolveProviderDefaultEnvSecretRef(provider);
   }
   return normalized;
 }
@@ -128,7 +120,7 @@ export function upsertApiKeyProfile(params: {
       params.metadata,
       params.options,
     ),
-    agentDir: resolveAuthAgentDir(params.agentDir, params.options?.config),
+    agentDir: resolveAuthAgentDir(params.agentDir),
   });
   return profileId;
 }
@@ -138,7 +130,7 @@ export function applyAuthProfileConfig(
   params: {
     profileId: string;
     provider: string;
-    mode: "api_key" | "aws-sdk" | "oauth" | "token";
+    mode: "api_key" | "oauth" | "token";
     email?: string;
     displayName?: string;
     preferProfileFirst?: boolean;

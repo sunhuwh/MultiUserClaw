@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import { getPluginCliCommandDescriptors } from "../../plugins/cli.js";
 import type { PluginLoadOptions } from "../../plugins/loader.js";
 import { VERSION } from "../../version.js";
@@ -14,7 +14,6 @@ import { getSubCliEntries } from "./subcli-descriptors.js";
 export type RootHelpRenderOptions = Pick<PluginLoadOptions, "pluginSdkResolution"> & {
   config?: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
-  includePluginDescriptors?: boolean;
 };
 
 async function buildRootHelpProgram(renderOptions?: RootHelpRenderOptions): Promise<Command> {
@@ -26,19 +25,14 @@ async function buildRootHelpProgram(renderOptions?: RootHelpRenderOptions): Prom
     agentChannelOptions: "",
   });
 
-  const pluginDescriptors =
-    renderOptions?.includePluginDescriptors === true || renderOptions?.config
-      ? await getPluginCliCommandDescriptors(renderOptions.config, renderOptions.env, {
-          pluginSdkResolution: renderOptions.pluginSdkResolution,
-        })
-      : [];
-
   addCommandDescriptorsToProgram(
     program,
     collectUniqueCommandDescriptors([
       getCoreCliCommandDescriptors(),
       getSubCliEntries(),
-      pluginDescriptors,
+      await getPluginCliCommandDescriptors(renderOptions?.config, renderOptions?.env, {
+        pluginSdkResolution: renderOptions?.pluginSdkResolution,
+      }),
     ]),
   );
 

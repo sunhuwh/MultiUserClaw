@@ -3,14 +3,15 @@ import {
   hasConfiguredSecretInput,
   normalizeSecretInputString,
 } from "openclaw/plugin-sdk/secret-input";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import {
   mergeDiscordAccountConfig,
   resolveDefaultDiscordAccountId,
   resolveDiscordAccountConfig,
 } from "./accounts.js";
 import type { DiscordAccountConfig, OpenClawConfig } from "./runtime-api.js";
-import type { DiscordCredentialStatus } from "./token.js";
+
+export type DiscordCredentialStatus = "available" | "configured_unavailable" | "missing";
 
 export type InspectedDiscordAccount = {
   accountId: string;

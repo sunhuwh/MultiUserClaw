@@ -6,7 +6,8 @@ import {
 } from "../../config/config.js";
 import * as skillsModule from "../skills.js";
 import type { SkillSnapshot } from "../skills.js";
-import { resolveEmbeddedRunSkillEntries } from "./skills-runtime.js";
+
+const { resolveEmbeddedRunSkillEntries } = await import("./skills-runtime.js");
 
 describe("resolveEmbeddedRunSkillEntries", () => {
   const loadWorkspaceSkillEntriesSpy = vi.spyOn(skillsModule, "loadWorkspaceSkillEntries");

@@ -1,11 +1,10 @@
 export {
-  createChannelMessageReplyPipeline,
+  createChannelReplyPipeline,
   dispatchReplyWithBufferedBlockDispatcher,
   finalizeInboundContext,
   getAgentScopedMediaLocalRoots,
   jidToE164,
   logVerbose,
-  resolveChannelMessageSourceReplyDeliveryMode,
   resolveChunkMode,
   resolveIdentityNamePrefix,
   resolveInboundLastRouteSessionKey,

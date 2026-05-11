@@ -9,9 +9,6 @@ export type ReplyRunQueueBusyState = {
   isStreaming: boolean;
 };
 
-export const REPLY_RUN_STILL_SHUTTING_DOWN_TEXT =
-  "⚠️ Previous run is still shutting down. Please try again in a moment.";
-
 export async function resolvePreparedReplyQueueState(params: {
   activeRunQueueAction: ActiveRunQueueAction;
   activeSessionId: string | undefined;
@@ -43,7 +40,7 @@ export async function resolvePreparedReplyQueueState(params: {
     return {
       kind: "reply",
       reply: {
-        text: REPLY_RUN_STILL_SHUTTING_DOWN_TEXT,
+        text: "⚠️ Previous run is still shutting down. Please try again in a moment.",
       },
     };
   }

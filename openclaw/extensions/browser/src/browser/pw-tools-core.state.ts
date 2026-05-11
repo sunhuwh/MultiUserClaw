@@ -1,9 +1,7 @@
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { playwrightCore } from "./playwright-core.runtime.js";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
+import { devices as playwrightDevices } from "playwright-core";
 import { ensurePageState, getPageForTargetId } from "./pw-session.js";
 import { withPageScopedCdpClient } from "./pw-session.page-cdp.js";
-
-const { devices: playwrightDevices } = playwrightCore;
 
 export async function setOfflineViaPlaywright(opts: {
   cdpUrl: string;

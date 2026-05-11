@@ -55,22 +55,15 @@ describe("FS tools with workspaceOnly=false", () => {
       : tools;
   };
 
-  const requireTool = (tools: AnyAgentTool[], toolName: "write" | "edit" | "read") => {
-    const tool = tools.find((candidate) => candidate.name === toolName);
-    if (!tool) {
-      throw new Error(`expected ${toolName} tool`);
-    }
-    return tool;
-  };
-
   const runFsTool = async (
     toolName: "write" | "edit" | "read",
     callId: string,
     input: Record<string, unknown>,
     workspaceOnly: boolean | undefined,
   ) => {
-    const tool = requireTool(toolsFor(workspaceOnly), toolName);
-    const result = await tool.execute(callId, input);
+    const tool = toolsFor(workspaceOnly).find((candidate) => candidate.name === toolName);
+    expect(tool).toBeDefined();
+    const result = await tool!.execute(callId, input);
     expect(hasToolError(result)).toBe(false);
     return result;
   };
@@ -154,7 +147,7 @@ describe("FS tools with workspaceOnly=false", () => {
   it("should allow read outside workspace when workspaceOnly=false", async () => {
     await fs.writeFile(outsideFile, "test read content");
 
-    const result = await runFsTool(
+    await runFsTool(
       "read",
       "test-call-3",
       {
@@ -162,7 +155,6 @@ describe("FS tools with workspaceOnly=false", () => {
       },
       false,
     );
-    expect(JSON.stringify(result.content)).toContain("test read content");
   });
 
   it("should allow write outside workspace when workspaceOnly is unset", async () => {
@@ -198,11 +190,12 @@ describe("FS tools with workspaceOnly=false", () => {
 
   it("should block write outside workspace when workspaceOnly=true", async () => {
     const tools = toolsFor(true);
-    const writeTool = requireTool(tools, "write");
+    const writeTool = tools.find((t) => t.name === "write");
+    expect(writeTool).toBeDefined();
 
     // When workspaceOnly=true, the guard throws an error
     await expect(
-      writeTool.execute("test-call-4", {
+      writeTool!.execute("test-call-4", {
         path: outsideFile,
         content: "test content",
       }),
@@ -223,17 +216,18 @@ describe("FS tools with workspaceOnly=false", () => {
       }),
     ];
 
-    const writeTool = requireTool(tools, "write");
+    const writeTool = tools.find((tool) => tool.name === "write");
+    expect(writeTool).toBeDefined();
     expect(tools.map((tool) => tool.name).toSorted()).toEqual(["read", "write"]);
 
     await expect(
-      writeTool.execute("test-call-memory-deny", {
+      writeTool!.execute("test-call-memory-deny", {
         path: outsideFile,
         content: "should not write here",
       }),
     ).rejects.toThrow(/Memory flush writes are restricted to memory\/2026-03-07\.md/);
 
-    const result = await writeTool.execute("test-call-memory-append", {
+    const result = await writeTool!.execute("test-call-memory-append", {
       path: allowedRelativePath,
       content: "new note",
     });

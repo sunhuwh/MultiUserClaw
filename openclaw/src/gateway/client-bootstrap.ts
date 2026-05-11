@@ -1,7 +1,7 @@
-import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { OpenClawConfig } from "../config/config.js";
+import { buildGatewayConnectionDetails } from "./call.js";
+import type { ExplicitGatewayAuth } from "./call.js";
 import { resolveGatewayConnectionAuth } from "./connection-auth.js";
-import { buildGatewayConnectionDetailsWithResolvers } from "./connection-details.js";
-import type { ExplicitGatewayAuth } from "./credentials.js";
 
 export function resolveGatewayUrlOverrideSource(urlSource: string): "cli" | "env" | undefined {
   if (urlSource === "cli --url") {
@@ -21,13 +21,12 @@ export async function resolveGatewayClientBootstrap(params: {
 }): Promise<{
   url: string;
   urlSource: string;
-  preauthHandshakeTimeoutMs?: number;
   auth: {
     token?: string;
     password?: string;
   };
 }> {
-  const connection = buildGatewayConnectionDetailsWithResolvers({
+  const connection = buildGatewayConnectionDetails({
     config: params.config,
     url: params.gatewayUrl,
   });
@@ -42,7 +41,6 @@ export async function resolveGatewayClientBootstrap(params: {
   return {
     url: connection.url,
     urlSource: connection.urlSource,
-    preauthHandshakeTimeoutMs: params.config.gateway?.handshakeTimeoutMs,
     auth,
   };
 }

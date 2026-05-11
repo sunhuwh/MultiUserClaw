@@ -1,29 +1,22 @@
-import { getAgentRunContext } from "../infra/agent-events.js";
 import { subagentRuns } from "./subagent-registry-memory.js";
 import {
-  buildSubagentRunReadIndexFromRuns,
   countActiveDescendantRunsFromRuns,
-  getSubagentRunByChildSessionKeyFromRuns,
   listDescendantRunsForRequesterFromRuns,
   listRunsForControllerFromRuns,
-  type SubagentRunReadIndex,
 } from "./subagent-registry-queries.js";
 import { getSubagentRunsSnapshotForRead } from "./subagent-registry-state.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
+import {
+  getSubagentSessionRuntimeMs,
+  getSubagentSessionStartedAt,
+  resolveSubagentSessionStatus,
+} from "./subagent-session-metrics.js";
 
 export {
   getSubagentSessionRuntimeMs,
   getSubagentSessionStartedAt,
   resolveSubagentSessionStatus,
 } from "./subagent-session-metrics.js";
-
-export function buildSubagentRunReadIndex(now = Date.now()): SubagentRunReadIndex {
-  return buildSubagentRunReadIndexFromRuns({
-    runs: getSubagentRunsSnapshotForRead(subagentRuns),
-    inMemoryRuns: subagentRuns.values(),
-    now,
-  });
-}
 
 export function listSubagentRunsForController(controllerSessionKey: string): SubagentRunRecord[] {
   return listRunsForControllerFromRuns(
@@ -47,19 +40,29 @@ export function listDescendantRunsForRequester(rootSessionKey: string): Subagent
 }
 
 export function getSubagentRunByChildSessionKey(childSessionKey: string): SubagentRunRecord | null {
-  return getSubagentRunByChildSessionKeyFromRuns(
-    getSubagentRunsSnapshotForRead(subagentRuns),
-    childSessionKey,
-  );
-}
-
-export function isSubagentRunLive(
-  entry: Pick<SubagentRunRecord, "runId" | "endedAt"> | null | undefined,
-): boolean {
-  if (!entry || typeof entry.endedAt === "number") {
-    return false;
+  const key = childSessionKey.trim();
+  if (!key) {
+    return null;
   }
-  return Boolean(getAgentRunContext(entry.runId));
+
+  let latestActive: SubagentRunRecord | null = null;
+  let latestEnded: SubagentRunRecord | null = null;
+  for (const entry of getSubagentRunsSnapshotForRead(subagentRuns).values()) {
+    if (entry.childSessionKey !== key) {
+      continue;
+    }
+    if (typeof entry.endedAt !== "number") {
+      if (!latestActive || entry.createdAt > latestActive.createdAt) {
+        latestActive = entry;
+      }
+      continue;
+    }
+    if (!latestEnded || entry.createdAt > latestEnded.createdAt) {
+      latestEnded = entry;
+    }
+  }
+
+  return latestActive ?? latestEnded;
 }
 
 export function getSessionDisplaySubagentRunByChildSessionKey(

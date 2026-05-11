@@ -1,4 +1,4 @@
-import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { OpenClawConfig } from "../config/config.js";
 
 export type RealtimeTranscriptionProviderId = string;
 
@@ -22,7 +22,6 @@ export type RealtimeTranscriptionSessionCallbacks = {
 };
 
 export type RealtimeTranscriptionSessionCreateRequest = RealtimeTranscriptionSessionCallbacks & {
-  cfg?: OpenClawConfig;
   providerConfig: RealtimeTranscriptionProviderConfig;
 };
 

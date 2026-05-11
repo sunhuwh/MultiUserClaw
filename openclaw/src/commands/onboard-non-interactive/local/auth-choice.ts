@@ -1,6 +1,5 @@
 import type { ApiKeyCredential } from "../../../agents/auth-profiles/types.js";
-import { formatCliCommand } from "../../../cli/command-format.js";
-import type { OpenClawConfig } from "../../../config/types.openclaw.js";
+import type { OpenClawConfig } from "../../../config/config.js";
 import type { SecretInput } from "../../../config/types.secrets.js";
 import { formatErrorMessage } from "../../../infra/errors.js";
 import { resolveManifestDeprecatedProviderAuthChoice } from "../../../plugins/provider-auth-choices.js";
@@ -17,7 +16,7 @@ import {
   CustomApiError,
   parseNonInteractiveCustomApiFlags,
   resolveCustomProviderId,
-} from "../../onboard-custom-config.js";
+} from "../../onboard-custom.js";
 import type { AuthChoice, OnboardOptions } from "../../onboard-types.js";
 import { resolveNonInteractiveApiKey } from "../api-keys.js";
 import { applyNonInteractivePluginProviderChoice } from "./auth-choice.plugin-providers.js";
@@ -43,9 +42,7 @@ export async function applyNonInteractiveAuthChoice(params: {
   let nextConfig = params.nextConfig;
   const requestedSecretInputMode = normalizeSecretInputModeInput(opts.secretInputMode);
   if (opts.secretInputMode && !requestedSecretInputMode) {
-    runtime.error(
-      `Invalid --secret-input-mode. Use "plaintext" or "ref", or run ${formatCliCommand("openclaw onboard")} for interactive setup.`,
-    );
+    runtime.error('Invalid --secret-input-mode. Use "plaintext" or "ref".');
     runtime.exit(1);
     return null;
   }
@@ -166,7 +163,7 @@ export async function applyNonInteractiveAuthChoice(params: {
   });
   if (deprecatedChoice) {
     runtime.error(
-      `${JSON.stringify(authChoice as string)} is no longer supported. Use --auth-choice ${JSON.stringify(deprecatedChoice.choiceId)} instead.`,
+      `"${authChoice as string}" is no longer supported. Use --auth-choice ${deprecatedChoice.choiceId} instead.`,
     );
     runtime.exit(1);
     return null;
@@ -180,7 +177,6 @@ export async function applyNonInteractiveAuthChoice(params: {
         compatibility: opts.customCompatibility,
         apiKey: opts.customApiKey,
         providerId: opts.customProviderId,
-        supportsImageInput: opts.customImageInput,
       });
       const resolvedProviderId = resolveCustomProviderId({
         config: nextConfig,
@@ -217,7 +213,6 @@ export async function applyNonInteractiveAuthChoice(params: {
         compatibility: customAuth.compatibility,
         apiKey: customApiKeyInput,
         providerId: customAuth.providerId,
-        supportsImageInput: customAuth.supportsImageInput,
       });
       if (result.providerIdRenamedFrom && result.providerId) {
         runtime.log(

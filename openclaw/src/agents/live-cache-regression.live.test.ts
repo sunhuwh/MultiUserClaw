@@ -9,7 +9,7 @@ describeCacheLive("live cache regression", () => {
     "matches the stored provider cache baselines",
     async () => {
       const result = await runLiveCacheRegression();
-      expect(result.regressions).toStrictEqual([]);
+      expect(result.regressions).toEqual([]);
     },
     30 * 60_000,
   );

@@ -1,10 +1,9 @@
 import type { Command } from "commander";
-import { getRuntimeConfig } from "../config/config.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
+import qrcode from "qrcode-terminal";
+import { loadConfig } from "../config/config.js";
 import { hasConfiguredSecretInput } from "../config/types.secrets.js";
 import { trimToUndefined } from "../gateway/credentials.js";
 import { resolveRequiredConfiguredSecretRefInputString } from "../gateway/resolve-configured-secret-input-string.js";
-import { renderQrTerminal } from "../media/qr-terminal.ts";
 import { resolvePairingSetupFromConfig, encodePairingSetupCode } from "../pairing/setup-code.js";
 import { runCommandWithTimeout } from "../process/exec.js";
 import { defaultRuntime } from "../runtime.js";
@@ -25,9 +24,14 @@ type QrCliOptions = {
 };
 
 function renderQrAscii(data: string): Promise<string> {
-  return renderQrTerminal(data, { small: true });
+  return new Promise((resolve) => {
+    qrcode.generate(data, { small: true }, (output: string) => {
+      resolve(output);
+    });
+  });
 }
-function readDevicePairPublicUrlFromConfig(cfg: OpenClawConfig): string | undefined {
+
+function readDevicePairPublicUrlFromConfig(cfg: ReturnType<typeof loadConfig>): string | undefined {
   const value = cfg.plugins?.entries?.["device-pair"]?.config?.["publicUrl"];
   if (typeof value !== "string") {
     return undefined;
@@ -37,7 +41,7 @@ function readDevicePairPublicUrlFromConfig(cfg: OpenClawConfig): string | undefi
 }
 
 function shouldResolveLocalGatewayPasswordSecret(
-  cfg: OpenClawConfig,
+  cfg: ReturnType<typeof loadConfig>,
   env: NodeJS.ProcessEnv,
 ): boolean {
   if (trimToUndefined(env.OPENCLAW_GATEWAY_PASSWORD)) {
@@ -58,7 +62,9 @@ function shouldResolveLocalGatewayPasswordSecret(
   return !envToken && !configTokenConfigured;
 }
 
-async function resolveLocalGatewayPasswordSecretIfNeeded(cfg: OpenClawConfig): Promise<void> {
+async function resolveLocalGatewayPasswordSecretIfNeeded(
+  cfg: ReturnType<typeof loadConfig>,
+): Promise<void> {
   const resolvedPassword = await resolveRequiredConfiguredSecretRefInputString({
     config: cfg,
     env: process.env,
@@ -119,7 +125,7 @@ export function registerQrCli(program: Command) {
         const password = trimToUndefined(opts.password) ?? "";
         const wantsRemote = opts.remote === true;
 
-        const loadedRaw = getRuntimeConfig();
+        const loadedRaw = loadConfig();
         if (wantsRemote && !opts.url && !opts.publicUrl) {
           const tailscaleMode = loadedRaw.gateway?.tailscale?.mode ?? "off";
           const remoteUrl = loadedRaw.gateway?.remote?.url;

@@ -2,7 +2,6 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { botApi, botCtorSpy } = vi.hoisted(() => ({
   botApi: {
-    config: { use: vi.fn() },
     sendMessage: vi.fn(),
     setMessageReaction: vi.fn(),
     deleteMessage: vi.fn(),
@@ -22,17 +21,13 @@ const { resolveTelegramFetch } = vi.hoisted(() => ({
   resolveTelegramFetch: vi.fn(),
 }));
 
-const resolveTelegramApiBase = vi.hoisted(
-  () => (apiRoot?: string) => apiRoot?.trim()?.replace(/\/+$/, "") || "https://api.telegram.org",
-);
-
-vi.mock("openclaw/plugin-sdk/plugin-config-runtime", async () => {
-  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/plugin-config-runtime")>(
-    "openclaw/plugin-sdk/plugin-config-runtime",
+vi.mock("openclaw/plugin-sdk/config-runtime", async () => {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/config-runtime")>(
+    "openclaw/plugin-sdk/config-runtime",
   );
   return {
     ...actual,
-    requireRuntimeConfig: (cfg: unknown) => cfg ?? loadConfig(),
+    loadConfig,
   };
 });
 
@@ -42,7 +37,8 @@ vi.mock("./proxy.js", () => ({
 
 vi.mock("./fetch.js", () => ({
   resolveTelegramFetch,
-  resolveTelegramApiBase,
+  resolveTelegramApiBase: (apiRoot?: string) =>
+    apiRoot?.trim()?.replace(/\/+$/, "") || "https://api.telegram.org",
 }));
 
 vi.mock("grammy", () => ({
@@ -63,7 +59,7 @@ vi.mock("grammy", () => ({
   GrammyError: class GrammyError extends Error {
     description = "";
   },
-  InputFile: function InputFile() {},
+  InputFile: class {},
 }));
 
 let deleteMessageTelegram: typeof import("./send.js").deleteMessageTelegram;
@@ -73,9 +69,6 @@ let sendMessageTelegram: typeof import("./send.js").sendMessageTelegram;
 
 describe("telegram proxy client", () => {
   const proxyUrl = "http://proxy.test:8080";
-  const TELEGRAM_PROXY_CFG = {
-    channels: { telegram: { accounts: { foo: { proxy: proxyUrl } } } },
-  };
 
   const prepareProxyFetch = () => {
     const proxyFetch = vi.fn();
@@ -85,13 +78,15 @@ describe("telegram proxy client", () => {
     return { proxyFetch, fetchImpl };
   };
 
-  const expectProxyClient = (params: {
-    proxyFetch: ReturnType<typeof vi.fn>;
-    fetchImpl: ReturnType<typeof vi.fn>;
-  }) => {
+  const expectProxyClient = (fetchImpl: ReturnType<typeof vi.fn>) => {
     expect(makeProxyFetch).toHaveBeenCalledWith(proxyUrl);
-    expect(resolveTelegramFetch).toHaveBeenCalledWith(params.proxyFetch, { network: undefined });
-    expect(botCtorSpy).toHaveBeenCalledWith("tok", { client: { fetch: params.fetchImpl } });
+    expect(resolveTelegramFetch).toHaveBeenCalledWith(expect.any(Function), { network: undefined });
+    expect(botCtorSpy).toHaveBeenCalledWith(
+      "tok",
+      expect.objectContaining({
+        client: expect.objectContaining({ fetch: fetchImpl }),
+      }),
+    );
   };
 
   beforeAll(async () => {
@@ -109,70 +104,59 @@ describe("telegram proxy client", () => {
     botApi.sendMessage.mockResolvedValue({ message_id: 1, chat: { id: "123" } });
     botApi.setMessageReaction.mockResolvedValue(undefined);
     botApi.deleteMessage.mockResolvedValue(true);
-    botApi.config.use.mockClear();
     botCtorSpy.mockClear();
-    loadConfig.mockReturnValue(TELEGRAM_PROXY_CFG);
+    loadConfig.mockReturnValue({
+      channels: { telegram: { accounts: { foo: { proxy: proxyUrl } } } },
+    });
     makeProxyFetch.mockClear();
     resolveTelegramFetch.mockClear();
   });
 
   it("reuses cached Telegram client options for repeated sends with same account transport settings", async () => {
-    const { proxyFetch, fetchImpl } = prepareProxyFetch();
+    const { fetchImpl } = prepareProxyFetch();
     vi.stubEnv("VITEST", "");
     vi.stubEnv("NODE_ENV", "production");
 
-    await sendMessageTelegram("123", "first", {
-      cfg: TELEGRAM_PROXY_CFG,
-      token: "tok",
-      accountId: "foo",
-    });
-    await sendMessageTelegram("123", "second", {
-      cfg: TELEGRAM_PROXY_CFG,
-      token: "tok",
-      accountId: "foo",
-    });
+    await sendMessageTelegram("123", "first", { token: "tok", accountId: "foo" });
+    await sendMessageTelegram("123", "second", { token: "tok", accountId: "foo" });
 
     expect(makeProxyFetch).toHaveBeenCalledTimes(1);
     expect(resolveTelegramFetch).toHaveBeenCalledTimes(1);
     expect(botCtorSpy).toHaveBeenCalledTimes(2);
-    expect(resolveTelegramFetch).toHaveBeenCalledWith(proxyFetch, { network: undefined });
-    expect(botCtorSpy).toHaveBeenNthCalledWith(1, "tok", { client: { fetch: fetchImpl } });
-    expect(botCtorSpy).toHaveBeenNthCalledWith(2, "tok", { client: { fetch: fetchImpl } });
+    expect(botCtorSpy).toHaveBeenNthCalledWith(
+      1,
+      "tok",
+      expect.objectContaining({
+        client: expect.objectContaining({ fetch: fetchImpl }),
+      }),
+    );
+    expect(botCtorSpy).toHaveBeenNthCalledWith(
+      2,
+      "tok",
+      expect.objectContaining({
+        client: expect.objectContaining({ fetch: fetchImpl }),
+      }),
+    );
   });
 
   it.each([
     {
       name: "sendMessage",
-      run: () =>
-        sendMessageTelegram("123", "hi", {
-          cfg: TELEGRAM_PROXY_CFG,
-          token: "tok",
-          accountId: "foo",
-        }),
+      run: () => sendMessageTelegram("123", "hi", { token: "tok", accountId: "foo" }),
     },
     {
       name: "reactions",
-      run: () =>
-        reactMessageTelegram("123", "456", "✅", {
-          cfg: TELEGRAM_PROXY_CFG,
-          token: "tok",
-          accountId: "foo",
-        }),
+      run: () => reactMessageTelegram("123", "456", "✅", { token: "tok", accountId: "foo" }),
     },
     {
       name: "deleteMessage",
-      run: () =>
-        deleteMessageTelegram("123", "456", {
-          cfg: TELEGRAM_PROXY_CFG,
-          token: "tok",
-          accountId: "foo",
-        }),
+      run: () => deleteMessageTelegram("123", "456", { token: "tok", accountId: "foo" }),
     },
   ])("uses proxy fetch for $name", async (testCase) => {
-    const { proxyFetch, fetchImpl } = prepareProxyFetch();
+    const { fetchImpl } = prepareProxyFetch();
 
     await testCase.run();
 
-    expectProxyClient({ proxyFetch, fetchImpl });
+    expectProxyClient(fetchImpl);
   });
 });

@@ -5,7 +5,7 @@ import { createConfigHandlerHarness } from "./config.test-helpers.js";
 const execFileMock = vi.hoisted(() => vi.fn());
 
 vi.mock("node:child_process", async () => {
-  const { mockNodeBuiltinModule } = await import("openclaw/plugin-sdk/test-node-mocks");
+  const { mockNodeBuiltinModule } = await import("../../../test/helpers/node-builtin-mocks.js");
   return mockNodeBuiltinModule(
     () => vi.importActual<typeof import("node:child_process")>("node:child_process"),
     {
@@ -18,10 +18,8 @@ vi.mock("node:child_process", async () => {
 
 function invokeExecFileCallback(args: unknown[], error: Error | null) {
   const callback = args.at(-1);
-  if (typeof callback !== "function") {
-    throw new Error("expected execFile callback");
-  }
-  callback(error);
+  expect(callback).toEqual(expect.any(Function));
+  (callback as (error: Error | null) => void)(error);
 }
 
 describe("resolveConfigOpenCommand", () => {

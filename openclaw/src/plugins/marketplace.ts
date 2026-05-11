@@ -3,9 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { resolveArchiveKind } from "../infra/archive.js";
 import { formatErrorMessage } from "../infra/errors.js";
-import { pathExists } from "../infra/fs-safe.js";
 import { resolveOsHomeRelativePath } from "../infra/home-dir.js";
-import { tryReadJson } from "../infra/json-files.js";
 import { fetchWithSsrFGuard } from "../infra/net/fetch-guard.js";
 import { isPathInside } from "../infra/path-guards.js";
 import { runCommandWithTimeout } from "../process/exec.js";
@@ -310,13 +308,27 @@ function parseMarketplaceManifest(
   };
 }
 
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await fs.access(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function readClaudeKnownMarketplaces(): Promise<Record<string, KnownMarketplaceRecord>> {
   const knownPath = resolveOsHomeRelativePath(CLAUDE_KNOWN_MARKETPLACES_PATH);
   if (!(await pathExists(knownPath))) {
     return {};
   }
 
-  const parsed = await tryReadJson<unknown>(knownPath);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await fs.readFile(knownPath, "utf-8"));
+  } catch {
+    return {};
+  }
 
   if (!parsed || typeof parsed !== "object") {
     return {};
@@ -1097,7 +1109,6 @@ export async function installPluginFromMarketplace(
     logger?: MarketplaceLogger;
     timeoutMs?: number;
     mode?: "install" | "update";
-    extensionsDir?: string;
     dryRun?: boolean;
     expectedPluginId?: string;
   },
@@ -1143,8 +1154,6 @@ export async function installPluginFromMarketplace(
       path: resolved.path,
       logger: params.logger,
       mode: params.mode,
-      extensionsDir: params.extensionsDir,
-      timeoutMs: params.timeoutMs,
       dryRun: params.dryRun,
       expectedPluginId: params.expectedPluginId,
     });

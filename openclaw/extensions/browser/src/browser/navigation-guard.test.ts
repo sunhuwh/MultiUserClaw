@@ -128,18 +128,6 @@ describe("browser navigation guard", () => {
     expect(lookupFn).not.toHaveBeenCalled();
   });
 
-  it("allows hostname navigation when the default strict policy object is present", async () => {
-    const lookupFn = createLookupFn("93.184.216.34");
-    await expect(
-      assertBrowserNavigationAllowed({
-        url: "https://example.com",
-        lookupFn,
-        ssrfPolicy: {},
-      }),
-    ).resolves.toBeUndefined();
-    expect(lookupFn).toHaveBeenCalledWith("example.com", { all: true });
-  });
-
   it("allows explicitly allowed hostnames in strict mode", async () => {
     const lookupFn = createLookupFn("93.184.216.34");
     await expect(
@@ -207,7 +195,7 @@ describe("browser navigation guard", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("allows public navigation when only Gateway env proxy is configured", async () => {
+  it("blocks strict policy navigation when env proxy is configured", async () => {
     vi.stubEnv("HTTP_PROXY", "http://127.0.0.1:7890");
     const lookupFn = createLookupFn("93.184.216.34");
     await expect(
@@ -215,29 +203,16 @@ describe("browser navigation guard", () => {
         url: "https://example.com",
         lookupFn,
       }),
-    ).resolves.toBeUndefined();
-    expect(lookupFn).toHaveBeenCalledWith("example.com", { all: true });
-  });
-
-  it("blocks explicit browser proxy routing in strict SSRF mode", async () => {
-    const lookupFn = createLookupFn("93.184.216.34");
-    await expect(
-      assertBrowserNavigationAllowed({
-        url: "https://example.com",
-        lookupFn,
-        browserProxyMode: "explicit-browser-proxy",
-      }),
     ).rejects.toBeInstanceOf(InvalidBrowserNavigationUrlError);
-    expect(lookupFn).not.toHaveBeenCalled();
   });
 
-  it("allows explicit browser proxy routing when private-network mode is enabled", async () => {
+  it("allows env proxy navigation when private-network mode is explicitly enabled", async () => {
+    vi.stubEnv("HTTP_PROXY", "http://127.0.0.1:7890");
     const lookupFn = createLookupFn("93.184.216.34");
     await expect(
       assertBrowserNavigationAllowed({
         url: "https://example.com",
         lookupFn,
-        browserProxyMode: "explicit-browser-proxy",
         ssrfPolicy: { dangerouslyAllowPrivateNetwork: true },
       }),
     ).resolves.toBeUndefined();
@@ -325,11 +300,8 @@ describe("browser navigation guard", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("requires redirect-hop inspection only in explicit strict mode", () => {
-    expect(requiresInspectableBrowserNavigationRedirects()).toBe(false);
-    expect(
-      requiresInspectableBrowserNavigationRedirects({ dangerouslyAllowPrivateNetwork: false }),
-    ).toBe(true);
+  it("treats default browser SSRF mode as requiring redirect-hop inspection", () => {
+    expect(requiresInspectableBrowserNavigationRedirects()).toBe(true);
     expect(requiresInspectableBrowserNavigationRedirects({ allowPrivateNetwork: true })).toBe(
       false,
     );

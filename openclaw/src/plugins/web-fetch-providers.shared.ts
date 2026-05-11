@@ -1,3 +1,4 @@
+import { type NormalizedPluginsConfig } from "./config-state.js";
 import type { PluginLoadOptions } from "./loader.js";
 import type { PluginWebFetchProviderEntry } from "./types.js";
 import {
@@ -25,6 +26,7 @@ export function resolveBundledWebFetchResolutionConfig(params: {
   bundledAllowlistCompat?: boolean;
 }): {
   config: PluginLoadOptions["config"];
+  normalized: NormalizedPluginsConfig;
   activationSourceConfig?: PluginLoadOptions["config"];
   autoEnabledReasons: Record<string, string[]>;
 } {

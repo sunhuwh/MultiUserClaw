@@ -36,7 +36,7 @@ describe("attachChannelToResult(s)", () => {
 });
 
 describe("buildChannelSendResult", () => {
-  it("normalizes raw send results directly", () => {
+  it("normalizes raw send results", () => {
     const result = buildChannelSendResult("zalo", {
       ok: false,
       messageId: null,
@@ -110,7 +110,7 @@ describe("createAttachedChannelResultAdapter", () => {
 });
 
 describe("createRawChannelSendResultAdapter", () => {
-  it("normalizes raw send results through adapter methods", async () => {
+  it("normalizes raw send results", async () => {
     const adapter = createRawChannelSendResultAdapter({
       channel: "zalo",
       sendText: async () => ({ ok: true, messageId: "m1" }),

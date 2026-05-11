@@ -1,4 +1,4 @@
-import type { OpenClawConfig } from "./types.openclaw.js";
+import type { OpenClawConfig } from "./config.js";
 
 export type PluginAutoEnableCandidate =
   | {
@@ -15,16 +15,6 @@ export type PluginAutoEnableCandidate =
       pluginId: string;
       kind: "provider-model-configured";
       modelRef: string;
-    }
-  | {
-      pluginId: string;
-      kind: "agent-harness-runtime-configured";
-      runtime: string;
-    }
-  | {
-      pluginId: string;
-      kind: "web-search-provider-selected";
-      providerId: string;
     }
   | {
       pluginId: string;

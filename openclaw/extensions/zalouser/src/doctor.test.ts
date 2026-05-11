@@ -1,19 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { zalouserDoctor } from "./doctor.js";
 
-function getZaloUserCompatibilityNormalizer(): NonNullable<
-  typeof zalouserDoctor.normalizeCompatibilityConfig
-> {
-  const normalize = zalouserDoctor.normalizeCompatibilityConfig;
-  if (!normalize) {
-    throw new Error("Expected zalouser doctor to expose normalizeCompatibilityConfig");
-  }
-  return normalize;
-}
-
 describe("zalouser doctor", () => {
-  it("warns when mutable group names rely on disabled name matching", async () => {
-    const warnings = await Promise.resolve(
+  it("warns when mutable group names rely on disabled name matching", () => {
+    expect(
       zalouserDoctor.collectMutableAllowlistWarnings?.({
         cfg: {
           channels: {
@@ -26,21 +16,21 @@ describe("zalouser doctor", () => {
             },
           },
         } as never,
-      }) ?? [],
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("mutable allowlist entry across zalouser"),
+        expect.stringContaining("channels.zalouser.groups: group:trusted"),
+      ]),
     );
-
-    const mutableWarning = warnings.find((warning: string) =>
-      warning.includes("mutable allowlist entry across zalouser"),
-    );
-    const groupPathWarning = warnings.find((warning: string) =>
-      warning.includes("channels.zalouser.groups: group:trusted"),
-    );
-    expect(mutableWarning).toBeDefined();
-    expect(groupPathWarning).toBeDefined();
   });
 
   it("normalizes legacy group allow aliases to enabled", () => {
-    const normalize = getZaloUserCompatibilityNormalizer();
+    const normalize = zalouserDoctor.normalizeCompatibilityConfig;
+    expect(normalize).toBeDefined();
+    if (!normalize) {
+      return;
+    }
 
     const result = normalize({
       cfg: {
@@ -77,9 +67,11 @@ describe("zalouser doctor", () => {
     ).toEqual({
       enabled: false,
     });
-    expect(result.changes).toEqual([
-      "Moved channels.zalouser.groups.group:trusted.allow → channels.zalouser.groups.group:trusted.enabled (true).",
-      "Moved channels.zalouser.accounts.work.groups.group:legacy.allow → channels.zalouser.accounts.work.groups.group:legacy.enabled (false).",
-    ]);
+    expect(result.changes).toEqual(
+      expect.arrayContaining([
+        "Moved channels.zalouser.groups.group:trusted.allow → channels.zalouser.groups.group:trusted.enabled (true).",
+        "Moved channels.zalouser.accounts.work.groups.group:legacy.allow → channels.zalouser.accounts.work.groups.group:legacy.enabled (false).",
+      ]),
+    );
   });
 });

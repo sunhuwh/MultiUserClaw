@@ -1,11 +1,17 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   resolveSetupWizardAllowFromEntries,
   resolveSetupWizardGroupAllowlist,
-} from "openclaw/plugin-sdk/plugin-test-runtime";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+} from "../../../test/helpers/plugins/setup-wizard.js";
 import type { OpenClawConfig } from "../../config/config.js";
+import {
+  namedAccountPromotionKeys as matrixNamedAccountPromotionKeys,
+  resolveSingleAccountPromotionTarget as resolveMatrixSingleAccountPromotionTarget,
+  singleAccountKeysToMove as matrixSingleAccountKeysToMove,
+} from "../../plugin-sdk/matrix.js";
+import { singleAccountKeysToMove as telegramSingleAccountKeysToMove } from "../../plugin-sdk/telegram.js";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
-import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "../../routing/session-key.js";
+import { DEFAULT_ACCOUNT_ID } from "../../routing/session-key.js";
 import {
   createChannelTestPluginBase,
   createTestRegistry,
@@ -65,53 +71,6 @@ import {
   splitSetupEntries,
 } from "./setup-wizard-helpers.js";
 
-const matrixSingleAccountKeysToMove = [
-  "allowBots",
-  "deviceId",
-  "deviceName",
-  "dm",
-  "encryption",
-  "groups",
-  "rooms",
-] as const;
-const matrixNamedAccountPromotionKeys = [
-  "accessToken",
-  "deviceId",
-  "deviceName",
-  "encryption",
-  "homeserver",
-  "userId",
-] as const;
-const telegramSingleAccountKeysToMove = ["streaming"] as const;
-
-function collectNamedAccountIds(accounts: Record<string, unknown>): string[] {
-  const ids: string[] = [];
-  for (const accountId of Object.keys(accounts)) {
-    if (accountId) {
-      ids.push(accountId);
-    }
-  }
-  return ids;
-}
-
-function resolveMatrixSingleAccountPromotionTarget(params: {
-  channel: { defaultAccount?: string; accounts?: Record<string, unknown> };
-}): string {
-  const accounts = params.channel.accounts ?? {};
-  const normalizedDefaultAccount = params.channel.defaultAccount?.trim()
-    ? normalizeAccountId(params.channel.defaultAccount)
-    : undefined;
-  if (normalizedDefaultAccount) {
-    return (
-      Object.keys(accounts).find(
-        (accountId) => normalizeAccountId(accountId) === normalizedDefaultAccount,
-      ) ?? DEFAULT_ACCOUNT_ID
-    );
-  }
-  const namedAccounts = collectNamedAccountIds(accounts);
-  return namedAccounts.length === 1 ? namedAccounts[0] : DEFAULT_ACCOUNT_ID;
-}
-
 beforeEach(() => {
   setActivePluginRegistry(
     createTestRegistry([
@@ -141,7 +100,7 @@ beforeEach(() => {
   );
 });
 
-afterAll(() => {
+afterEach(() => {
   resetPluginRuntimeStateForTest();
 });
 
@@ -162,14 +121,10 @@ function createTokenPrompter(params: { confirms: boolean[]; texts: string[] }) {
 }
 
 function parseCsvInputs(value: string): string[] {
-  const entries: string[] = [];
-  for (const part of value.split(",")) {
-    const entry = part.trim();
-    if (entry) {
-      entries.push(entry);
-    }
-  }
-  return entries;
+  return value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
 }
 
 type AllowFromResolver = (params: {
@@ -719,7 +674,7 @@ describe("promptParsedAllowFromForAccount", () => {
     const next = await promptParsedAllowFromForAccount({
       cfg: {
         channels: {
-          imessage: {
+          bluebubbles: {
             accounts: {
               alt: {
                 allowFrom: ["old"],
@@ -731,7 +686,7 @@ describe("promptParsedAllowFromForAccount", () => {
       accountId: "alt",
       defaultAccountId: DEFAULT_ACCOUNT_ID,
       prompter,
-      noteTitle: "iMessage allowlist",
+      noteTitle: "BlueBubbles allowlist",
       noteLines: ["line"],
       message: "msg",
       placeholder: "placeholder",
@@ -739,7 +694,7 @@ describe("promptParsedAllowFromForAccount", () => {
         parseSetupEntriesWithParser(raw, (entry) => ({ value: entry.toLowerCase() })),
       getExistingAllowFrom: ({ cfg, accountId }) => [
         ...((
-          cfg.channels?.imessage?.accounts?.[accountId] as
+          cfg.channels?.bluebubbles?.accounts?.[accountId] as
             | { allowFrom?: ReadonlyArray<string | number> }
             | undefined
         )?.allowFrom ?? []),
@@ -747,7 +702,7 @@ describe("promptParsedAllowFromForAccount", () => {
       applyAllowFrom: ({ cfg, accountId, allowFrom }) =>
         patchChannelConfigForAccount({
           cfg,
-          channel: "imessage",
+          channel: "bluebubbles",
           accountId,
           patch: { allowFrom },
         }),
@@ -755,12 +710,12 @@ describe("promptParsedAllowFromForAccount", () => {
 
     expect(
       (
-        next.channels?.imessage?.accounts?.alt as
+        next.channels?.bluebubbles?.accounts?.alt as
           | { allowFrom?: ReadonlyArray<string | number> }
           | undefined
       )?.allowFrom,
     ).toEqual(["alice"]);
-    expect(prompter.note).toHaveBeenCalledWith("line", "iMessage allowlist");
+    expect(prompter.note).toHaveBeenCalledWith("line", "BlueBubbles allowlist");
   });
 
   it("can merge parsed values with existing entries", async () => {
@@ -802,7 +757,7 @@ describe("createPromptParsedAllowFromForAccount", () => {
       parseEntries: (raw) => ({ entries: [raw.trim().toLowerCase()] }),
       getExistingAllowFrom: ({ cfg, accountId }) => [
         ...((
-          cfg.channels?.imessage?.accounts?.[accountId] as
+          cfg.channels?.bluebubbles?.accounts?.[accountId] as
             | { allowFrom?: ReadonlyArray<string | number> }
             | undefined
         )?.allowFrom ?? []),
@@ -810,7 +765,7 @@ describe("createPromptParsedAllowFromForAccount", () => {
       applyAllowFrom: ({ cfg, accountId, allowFrom }) =>
         patchChannelConfigForAccount({
           cfg,
-          channel: "imessage",
+          channel: "bluebubbles",
           accountId,
           patch: { allowFrom },
         }),
@@ -820,7 +775,7 @@ describe("createPromptParsedAllowFromForAccount", () => {
     const next = await promptAllowFrom({
       cfg: {
         channels: {
-          imessage: {
+          bluebubbles: {
             accounts: {
               work: {
                 allowFrom: ["old"],
@@ -834,7 +789,7 @@ describe("createPromptParsedAllowFromForAccount", () => {
 
     expect(
       (
-        next.channels?.imessage?.accounts?.work as
+        next.channels?.bluebubbles?.accounts?.work as
           | { allowFrom?: ReadonlyArray<string | number> }
           | undefined
       )?.allowFrom,

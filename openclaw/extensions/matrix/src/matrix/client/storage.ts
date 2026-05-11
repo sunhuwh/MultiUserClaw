@@ -2,8 +2,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { normalizeAccountId } from "openclaw/plugin-sdk/account-id";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
-import { loadJsonFile, saveJsonFile } from "openclaw/plugin-sdk/json-store";
 import {
   requiresExplicitMatrixDefaultAccount,
   resolveMatrixDefaultOrOnlyAccountId,
@@ -16,7 +14,7 @@ import {
 import type { MatrixAuth } from "./types.js";
 import type { MatrixStoragePaths } from "./types.js";
 
-const DEFAULT_ACCOUNT_KEY = "default";
+export const DEFAULT_ACCOUNT_KEY = "default";
 const STORAGE_META_FILENAME = "storage-meta.json";
 const THREAD_BINDINGS_FILENAME = "thread-bindings.json";
 const LEGACY_CRYPTO_MIGRATION_FILENAME = "legacy-crypto-migration.json";
@@ -50,7 +48,7 @@ function resolveLegacyStoragePaths(env: NodeJS.ProcessEnv = process.env): {
 }
 
 function assertLegacyMigrationAccountSelection(params: { accountKey: string }): void {
-  const cfg = getMatrixRuntime().config.current() as OpenClawConfig;
+  const cfg = getMatrixRuntime().config.loadConfig();
   if (!cfg.channels?.matrix || typeof cfg.channels.matrix !== "object") {
     return;
   }
@@ -106,10 +104,10 @@ function resolveStorageRootMtimeMs(rootDir: string): number {
 function readStoredRootMetadata(rootDir: string): StoredRootMetadata {
   const metadata: StoredRootMetadata = {};
 
-  const parsed = loadJsonFile<Partial<StoredRootMetadata>>(
-    path.join(rootDir, STORAGE_META_FILENAME),
-  );
-  if (parsed) {
+  try {
+    const parsed = JSON.parse(
+      fs.readFileSync(path.join(rootDir, STORAGE_META_FILENAME), "utf8"),
+    ) as Partial<StoredRootMetadata>;
     if (typeof parsed.homeserver === "string" && parsed.homeserver.trim()) {
       metadata.homeserver = parsed.homeserver.trim();
     }
@@ -131,17 +129,19 @@ function readStoredRootMetadata(rootDir: string): StoredRootMetadata {
     if (typeof parsed.createdAt === "string" && parsed.createdAt.trim()) {
       metadata.createdAt = parsed.createdAt.trim();
     }
+  } catch {
+    // ignore missing or malformed storage metadata
   }
 
-  const verification = loadJsonFile<{ deviceId?: unknown }>(
-    path.join(rootDir, STARTUP_VERIFICATION_FILENAME),
-  );
-  if (
-    !metadata.deviceId &&
-    typeof verification?.deviceId === "string" &&
-    verification.deviceId.trim()
-  ) {
-    metadata.deviceId = verification.deviceId.trim();
+  try {
+    const parsed = JSON.parse(
+      fs.readFileSync(path.join(rootDir, STARTUP_VERIFICATION_FILENAME), "utf8"),
+    ) as { deviceId?: unknown };
+    if (!metadata.deviceId && typeof parsed.deviceId === "string" && parsed.deviceId.trim()) {
+      metadata.deviceId = parsed.deviceId.trim();
+    }
+  } catch {
+    // ignore missing or malformed verification state
   }
 
   return metadata;
@@ -472,7 +472,8 @@ function writeStoredRootMetadata(
   },
 ): boolean {
   try {
-    saveJsonFile(metaPath, payload);
+    fs.mkdirSync(path.dirname(metaPath), { recursive: true });
+    fs.writeFileSync(metaPath, JSON.stringify(payload, null, 2), "utf-8");
     return true;
   } catch {
     return false;

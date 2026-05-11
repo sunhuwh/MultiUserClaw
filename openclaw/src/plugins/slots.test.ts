@@ -271,7 +271,7 @@ describe("applyExclusiveSlotSelection", () => {
 
 describe("normalizeKinds", () => {
   it("returns empty array for undefined", () => {
-    expect(normalizeKinds(undefined)).toStrictEqual([]);
+    expect(normalizeKinds(undefined)).toEqual([]);
   });
 
   it("wraps a single kind in an array", () => {
@@ -301,7 +301,7 @@ describe("hasKind", () => {
 
 describe("slotKeysForPluginKind", () => {
   it("returns empty for undefined", () => {
-    expect(slotKeysForPluginKind(undefined)).toStrictEqual([]);
+    expect(slotKeysForPluginKind(undefined)).toEqual([]);
   });
 
   it("returns single slot key for single kind", () => {

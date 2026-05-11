@@ -69,8 +69,8 @@ describe("bot-native-command-menu", () => {
       0,
     );
     expect(totalText).toBeLessThanOrEqual(TELEGRAM_TOTAL_COMMAND_TEXT_BUDGET);
-    expect(result.commandsToRegister.filter((command) => command.description.length > 56)).toEqual(
-      [],
+    expect(result.commandsToRegister.every((command) => command.description.length <= 56)).toBe(
+      true,
     );
   });
 
@@ -92,24 +92,6 @@ describe("bot-native-command-menu", () => {
     ]);
     expect(result.descriptionTrimmed).toBe(true);
     expect(result.textBudgetDropCount).toBe(1);
-  });
-
-  it("does not reuse cached capped results for delimiter-like descriptions", () => {
-    const first = buildCappedTelegramMenuCommands({
-      allCommands: [{ command: "a", description: "b\0c\0d" }],
-    });
-    const second = buildCappedTelegramMenuCommands({
-      allCommands: [
-        { command: "a", description: "b" },
-        { command: "c", description: "d" },
-      ],
-    });
-
-    expect(first.commandsToRegister).toEqual([{ command: "a", description: "b\0c\0d" }]);
-    expect(second.commandsToRegister).toEqual([
-      { command: "a", description: "b" },
-      { command: "c", description: "d" },
-    ]);
   });
 
   it("validates plugin command specs and reports conflicts", () => {
@@ -144,7 +126,7 @@ describe("bot-native-command-menu", () => {
     });
 
     expect(result.commands).toEqual([{ command: "agent_run", description: "Run agent" }]);
-    expect(result.issues).toStrictEqual([]);
+    expect(result.issues).toEqual([]);
   });
 
   it("ignores malformed plugin specs without crashing", () => {
@@ -170,14 +152,12 @@ describe("bot-native-command-menu", () => {
 
   it("deletes stale commands before setting new menu", async () => {
     const callOrder: string[] = [];
-    const deleteMyCommands = vi.fn(async (options?: { scope?: { type?: string } }) => {
-      callOrder.push(options?.scope?.type ? `delete:${options.scope.type}` : "delete:default");
+    const deleteMyCommands = vi.fn(async () => {
+      callOrder.push("delete");
     });
-    const setMyCommands = vi.fn(
-      async (_commands: unknown, options?: { scope?: { type?: string } }) => {
-        callOrder.push(options?.scope?.type ? `set:${options.scope.type}` : "set:default");
-      },
-    );
+    const setMyCommands = vi.fn(async () => {
+      callOrder.push("set");
+    });
 
     syncMenuCommandsWithMocks({
       deleteMyCommands,
@@ -191,35 +171,7 @@ describe("bot-native-command-menu", () => {
       expect(setMyCommands).toHaveBeenCalled();
     });
 
-    expect(callOrder).toEqual([
-      "delete:default",
-      "delete:all_group_chats",
-      "set:default",
-      "set:all_group_chats",
-    ]);
-  });
-
-  it("registers the menu in default and group chat scopes", async () => {
-    const deleteMyCommands = vi.fn(async () => undefined);
-    const setMyCommands = vi.fn(async () => undefined);
-    const commands = [{ command: "cmd", description: "Command" }];
-
-    syncMenuCommandsWithMocks({
-      deleteMyCommands,
-      setMyCommands,
-      commandsToRegister: commands,
-      accountId: `test-scopes-${Date.now()}`,
-      botIdentity: "bot-a",
-    });
-
-    await vi.waitFor(() => {
-      expect(setMyCommands).toHaveBeenCalledTimes(2);
-    });
-
-    expect(setMyCommands).toHaveBeenCalledWith(commands);
-    expect(setMyCommands).toHaveBeenCalledWith(commands, {
-      scope: { type: "all_group_chats" },
-    });
+    expect(callOrder).toEqual(["delete", "set"]);
   });
 
   it("produces a stable hash regardless of command order (#32017)", () => {
@@ -237,23 +189,16 @@ describe("bot-native-command-menu", () => {
     expect(hashCommandList(a)).not.toBe(hashCommandList(b));
   });
 
-  it("produces different hashes for delimiter-like command lists", () => {
-    const a = [{ command: "a", description: "b\0c\0d" }];
-    const b = [
-      { command: "a", description: "b" },
-      { command: "c", description: "d" },
-    ];
-    expect(hashCommandList(a)).not.toBe(hashCommandList(b));
-  });
-
   it("skips sync when command hash is unchanged (#32017)", async () => {
     const deleteMyCommands = vi.fn(async () => undefined);
     const setMyCommands = vi.fn(async () => undefined);
     const runtimeLog = vi.fn();
 
+    // Use a unique accountId so cached hashes from other tests don't interfere.
     const accountId = `test-skip-${Date.now()}`;
     const commands = [{ command: "skip_test", description: "Skip test command" }];
 
+    // First sync — no cached hash, should call setMyCommands.
     syncMenuCommandsWithMocks({
       deleteMyCommands,
       setMyCommands,
@@ -264,9 +209,10 @@ describe("bot-native-command-menu", () => {
     });
 
     await vi.waitFor(() => {
-      expect(setMyCommands).toHaveBeenCalledTimes(2);
+      expect(setMyCommands).toHaveBeenCalledTimes(1);
     });
 
+    // Second sync with the same commands — hash is cached, should skip.
     syncMenuCommandsWithMocks({
       deleteMyCommands,
       setMyCommands,
@@ -276,7 +222,8 @@ describe("bot-native-command-menu", () => {
       botIdentity: "bot-a",
     });
 
-    expect(setMyCommands).toHaveBeenCalledTimes(2);
+    // setMyCommands should NOT have been called a second time.
+    expect(setMyCommands).toHaveBeenCalledTimes(1);
   });
 
   it("does not reuse cached hash across different bot identities", async () => {
@@ -294,7 +241,7 @@ describe("bot-native-command-menu", () => {
       accountId,
       botIdentity: "token-bot-a",
     });
-    await vi.waitFor(() => expect(setMyCommands).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(setMyCommands).toHaveBeenCalledTimes(1));
 
     syncMenuCommandsWithMocks({
       deleteMyCommands,
@@ -304,7 +251,7 @@ describe("bot-native-command-menu", () => {
       accountId,
       botIdentity: "token-bot-b",
     });
-    await vi.waitFor(() => expect(setMyCommands).toHaveBeenCalledTimes(4));
+    await vi.waitFor(() => expect(setMyCommands).toHaveBeenCalledTimes(2));
   });
 
   it("does not cache empty-menu hash when deleteMyCommands fails", async () => {
@@ -324,7 +271,7 @@ describe("bot-native-command-menu", () => {
       accountId,
       botIdentity: "bot-a",
     });
-    await vi.waitFor(() => expect(deleteMyCommands).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(deleteMyCommands).toHaveBeenCalledTimes(1));
 
     syncMenuCommandsWithMocks({
       deleteMyCommands,
@@ -334,7 +281,7 @@ describe("bot-native-command-menu", () => {
       accountId,
       botIdentity: "bot-a",
     });
-    await vi.waitFor(() => expect(deleteMyCommands).toHaveBeenCalledTimes(4));
+    await vi.waitFor(() => expect(deleteMyCommands).toHaveBeenCalledTimes(2));
   });
 
   it("retries with fewer commands on BOT_COMMANDS_TOO_MUCH", async () => {
@@ -360,15 +307,12 @@ describe("bot-native-command-menu", () => {
     });
 
     await vi.waitFor(() => {
-      expect(setMyCommands).toHaveBeenCalledTimes(3);
+      expect(setMyCommands).toHaveBeenCalledTimes(2);
     });
     const firstPayload = setMyCommands.mock.calls[0]?.[0] as Array<unknown>;
     const secondPayload = setMyCommands.mock.calls[1]?.[0] as Array<unknown>;
-    const thirdPayload = setMyCommands.mock.calls[2]?.[0] as Array<unknown>;
     expect(firstPayload).toHaveLength(100);
     expect(secondPayload).toHaveLength(80);
-    expect(thirdPayload).toHaveLength(80);
-    expect(setMyCommands.mock.calls[2]?.[1]).toEqual({ scope: { type: "all_group_chats" } });
     expect(runtimeLog).toHaveBeenCalledWith(
       "Telegram rejected 100 commands (BOT_COMMANDS_TOO_MUCH); retrying with 80.",
     );
@@ -399,7 +343,7 @@ describe("bot-native-command-menu", () => {
     });
 
     await vi.waitFor(() => {
-      expect(setMyCommands).toHaveBeenCalledTimes(3);
+      expect(setMyCommands).toHaveBeenCalledTimes(2);
     });
     expect(runtimeLog).toHaveBeenCalledWith(
       "Telegram rejected 10 commands (BOT_COMMANDS_TOO_MUCH); retrying with 8.",

@@ -90,7 +90,7 @@ describe("exec approvals allowlist evaluation", () => {
       return;
     }
     expect(result.allowlistSatisfied).toBe(true);
-    expect(result.allowlistMatches).toStrictEqual([]);
+    expect(result.allowlistMatches).toEqual([]);
   });
 
   it("satisfies allowlist via auto-allow skills", () => {
@@ -188,8 +188,8 @@ describe("exec approvals allowlist evaluation", () => {
       cwd: "/tmp",
     });
     expect(result.allowlistSatisfied).toBe(false);
-    expect(result.allowlistMatches).toStrictEqual([]);
-    expect(result.segmentSatisfiedBy).toStrictEqual([]);
+    expect(result.allowlistMatches).toEqual([]);
+    expect(result.segmentSatisfiedBy).toEqual([]);
   });
 
   it("aggregates segment satisfaction across chains", () => {

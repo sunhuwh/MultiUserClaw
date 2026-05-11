@@ -8,13 +8,15 @@ import {
   splitSetupEntries,
 } from "openclaw/plugin-sdk/setup";
 import type { ChannelSetupWizard } from "openclaw/plugin-sdk/setup";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import { inspectTelegramAccount } from "./account-inspect.js";
 import { listTelegramAccountIds, resolveTelegramAccount } from "./accounts.js";
 import {
   parseTelegramAllowFromId,
+  resolveTelegramAllowFromEntries,
   TELEGRAM_TOKEN_HELP_LINES,
   TELEGRAM_USER_ID_HELP_LINES,
+  telegramSetupAdapter,
 } from "./setup-core.js";
 import {
   buildTelegramDmAccessWarningLines,
@@ -77,16 +79,18 @@ export const telegramSetupWizard: ChannelSetupWizard = {
   allowFrom: createAllowFromSection({
     helpTitle: "Telegram user id",
     helpLines: TELEGRAM_USER_ID_HELP_LINES,
-    message: "Telegram allowFrom (numeric sender id)",
-    placeholder: "123456789",
+    credentialInputKey: "token",
+    message: "Telegram allowFrom (numeric sender id; @username resolves to id)",
+    placeholder: "@username",
     invalidWithoutCredentialNote:
-      "Telegram allowFrom requires numeric sender ids. DM your bot first, then copy from.id from logs or getUpdates.",
+      "Telegram token missing; use numeric sender ids (usernames require a bot token).",
     parseInputs: splitSetupEntries,
     parseId: parseTelegramAllowFromId,
-    resolveEntries: async ({ entries }) =>
-      entries.map((entry) => {
-        const id = parseTelegramAllowFromId(entry);
-        return { input: entry, resolved: Boolean(id), id };
+    resolveEntries: async ({ cfg, accountId, credentialValues, entries }) =>
+      resolveTelegramAllowFromEntries({
+        credentialValue: credentialValues.token,
+        entries,
+        apiRoot: resolveTelegramAccount({ cfg, accountId }).config.apiRoot,
       }),
     apply: async ({ cfg, accountId, allowFrom }) =>
       patchChannelConfigForAccount({
@@ -108,3 +112,5 @@ export const telegramSetupWizard: ChannelSetupWizard = {
   dmPolicy: telegramSetupDmPolicy,
   disable: (cfg) => setSetupChannelEnabled(cfg, channel, false),
 };
+
+export { parseTelegramAllowFromId, telegramSetupAdapter };

@@ -1,4 +1,4 @@
-import { normalizeLowercaseStringOrEmpty } from "./string-utils.js";
+import { normalizeLowercaseStringOrEmpty } from "../../../../src/shared/string-coerce.js";
 
 const MEMORY_MULTIMODAL_SPECS = {
   image: {
@@ -99,4 +99,22 @@ export function classifyMemoryMultimodalPath(
     }
   }
   return null;
+}
+
+export function normalizeGeminiEmbeddingModelForMemory(model: string): string {
+  const trimmed = model.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return trimmed.replace(/^models\//, "").replace(/^(gemini|google)\//, "");
+}
+
+export function supportsMemoryMultimodalEmbeddings(params: {
+  provider: string;
+  model: string;
+}): boolean {
+  if (params.provider !== "gemini") {
+    return false;
+  }
+  return normalizeGeminiEmbeddingModelForMemory(params.model) === "gemini-embedding-2-preview";
 }

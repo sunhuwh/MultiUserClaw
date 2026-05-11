@@ -1,17 +1,16 @@
-import "../infra/fs-safe-defaults.js";
 import {
-  FsSafeError,
   readLocalFileSafely as readLocalFileSafelyImpl,
-  type FsSafeErrorCode,
+  SafeOpenError,
+  type SafeOpenErrorCode,
 } from "../infra/fs-safe.js";
 
-export type FsSafeLikeError = {
-  code: FsSafeErrorCode;
+export type SafeOpenLikeError = {
+  code: SafeOpenErrorCode;
   message: string;
 };
 
 export const readLocalFileSafely = readLocalFileSafelyImpl;
 
-export function isFsSafeError(error: unknown): error is FsSafeLikeError {
-  return error instanceof FsSafeError;
+export function isSafeOpenError(error: unknown): error is SafeOpenLikeError {
+  return error instanceof SafeOpenError;
 }

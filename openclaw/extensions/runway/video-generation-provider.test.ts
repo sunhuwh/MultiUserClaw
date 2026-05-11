@@ -1,9 +1,8 @@
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
   getProviderHttpMocks,
   installProviderHttpMockCleanup,
-} from "openclaw/plugin-sdk/provider-http-test-mocks";
-import { expectExplicitVideoGenerationCapabilities } from "openclaw/plugin-sdk/provider-test-contracts";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+} from "../../test/helpers/media-generation/provider-http-mocks.js";
 
 const { postJsonRequestMock, fetchWithTimeoutMock } = getProviderHttpMocks();
 
@@ -16,10 +15,6 @@ beforeAll(async () => {
 installProviderHttpMockCleanup();
 
 describe("runway video generation provider", () => {
-  it("declares explicit mode capabilities", () => {
-    expectExplicitVideoGenerationCapabilities(buildRunwayVideoGenerationProvider());
-  });
-
   it("submits a text-to-video task, polls it, and downloads the output", async () => {
     postJsonRequestMock.mockResolvedValue({
       response: {
@@ -40,7 +35,7 @@ describe("runway video generation provider", () => {
       })
       .mockResolvedValueOnce({
         arrayBuffer: async () => Buffer.from("mp4-bytes"),
-        headers: new Headers({ "content-type": "video/webm" }),
+        headers: new Headers({ "content-type": "video/mp4" }),
       });
 
     const provider = buildRunwayVideoGenerationProvider();
@@ -53,34 +48,32 @@ describe("runway video generation provider", () => {
       aspectRatio: "16:9",
     });
 
-    expect(postJsonRequestMock).toHaveBeenCalledTimes(1);
-    const createRequest = postJsonRequestMock.mock.calls[0]?.[0] as
-      | { url?: string; body?: unknown }
-      | undefined;
-    expect(createRequest?.url).toBe("https://api.dev.runwayml.com/v1/text_to_video");
-    expect(createRequest?.body).toEqual({
-      model: "gen4.5",
-      promptText: "a tiny lobster DJ under neon lights",
-      ratio: "1280:720",
-      duration: 4,
-    });
-    const pollCall = fetchWithTimeoutMock.mock.calls[0];
-    expect(pollCall?.[0]).toBe("https://api.dev.runwayml.com/v1/tasks/task-1");
-    const pollInit = pollCall?.[1] as { method?: string; headers?: unknown } | undefined;
-    expect(pollInit?.method).toBe("GET");
-    expect(pollInit?.headers).toBeInstanceOf(Headers);
-    expect(pollCall?.[2]).toBe(120000);
-    expect(pollCall?.[3]).toBe(fetch);
+    expect(postJsonRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://api.dev.runwayml.com/v1/text_to_video",
+        body: {
+          model: "gen4.5",
+          promptText: "a tiny lobster DJ under neon lights",
+          ratio: "1280:720",
+          duration: 4,
+        },
+      }),
+    );
+    expect(fetchWithTimeoutMock).toHaveBeenNthCalledWith(
+      1,
+      "https://api.dev.runwayml.com/v1/tasks/task-1",
+      expect.objectContaining({ method: "GET" }),
+      120000,
+      fetch,
+    );
     expect(result.videos).toHaveLength(1);
-    const video = result.videos[0];
-    if (!video) {
-      throw new Error("expected Runway generated video");
-    }
-    expect(video.fileName).toBe("video-1.webm");
-    const metadata = result.metadata as Record<string, unknown>;
-    expect(metadata.taskId).toBe("task-1");
-    expect(metadata.status).toBe("SUCCEEDED");
-    expect(metadata.endpoint).toBe("/v1/text_to_video");
+    expect(result.metadata).toEqual(
+      expect.objectContaining({
+        taskId: "task-1",
+        status: "SUCCEEDED",
+        endpoint: "/v1/text_to_video",
+      }),
+    );
   });
 
   it("accepts local image buffers by converting them into data URIs", async () => {
@@ -115,14 +108,16 @@ describe("runway video generation provider", () => {
       durationSeconds: 6,
     });
 
-    expect(postJsonRequestMock).toHaveBeenCalledTimes(1);
-    const request = postJsonRequestMock.mock.calls[0]?.[0] as
-      | { url?: string; body?: Record<string, unknown> }
-      | undefined;
-    expect(request?.url).toBe("https://api.dev.runwayml.com/v1/image_to_video");
-    expect(request?.body?.promptImage).toMatch(/^data:image\/png;base64,/u);
-    expect(request?.body?.ratio).toBe("960:960");
-    expect(request?.body?.duration).toBe(6);
+    expect(postJsonRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://api.dev.runwayml.com/v1/image_to_video",
+        body: expect.objectContaining({
+          promptImage: expect.stringMatching(/^data:image\/png;base64,/u),
+          ratio: "960:960",
+          duration: 6,
+        }),
+      }),
+    );
   });
 
   it("requires gen4_aleph for video-to-video", async () => {

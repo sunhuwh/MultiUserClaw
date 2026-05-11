@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
-import { FsSafeError, root as fsRoot } from "openclaw/plugin-sdk/security-runtime";
+import path from "node:path";
+import { pathExists } from "./source-path-shared.js";
 import {
   setImportedSourceEntry,
   shouldSkipImportedSourceWrite,
@@ -20,17 +21,8 @@ export async function writeImportedSourcePage(params: {
   state: ImportedSourceState;
   buildRendered: (raw: string, updatedAt: string) => string;
 }): Promise<{ pagePath: string; changed: boolean; created: boolean }> {
-  const vault = await fsRoot(params.vaultRoot);
-  const pageStat = await vault.stat(params.pagePath).catch((error: unknown) => {
-    if (
-      error instanceof FsSafeError &&
-      (error.code === "not-found" || error.code === "path-alias")
-    ) {
-      return null;
-    }
-    throw error;
-  });
-  const created = !pageStat;
+  const pageAbsPath = path.join(params.vaultRoot, params.pagePath);
+  const created = !(await pathExists(pageAbsPath));
   const updatedAt = new Date(params.sourceUpdatedAtMs).toISOString();
   const shouldSkip = await shouldSkipImportedSourceWrite({
     vaultRoot: params.vaultRoot,
@@ -48,22 +40,9 @@ export async function writeImportedSourcePage(params: {
 
   const raw = await fs.readFile(params.sourcePath, "utf8");
   const rendered = params.buildRendered(raw, updatedAt);
-  const existing = pageStat ? await vault.readText(params.pagePath).catch(() => "") : "";
+  const existing = await fs.readFile(pageAbsPath, "utf8").catch(() => "");
   if (existing !== rendered) {
-    try {
-      if (pageStat && pageStat.nlink > 1) {
-        await vault.remove(params.pagePath);
-      }
-      await vault.write(params.pagePath, rendered);
-    } catch (error) {
-      if (error instanceof FsSafeError) {
-        throw new Error(
-          `Refusing to write imported source page through symlink: ${params.pagePath}`,
-          { cause: error },
-        );
-      }
-      throw error;
-    }
+    await fs.writeFile(pageAbsPath, rendered, "utf8");
   }
 
   setImportedSourceEntry({

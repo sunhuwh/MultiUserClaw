@@ -1,16 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { expandQueryForFts, extractKeywords } from "./query-expansion.js";
 
-function countKeyword(keywords: readonly string[], keyword: string): number {
-  let count = 0;
-  for (const candidate of keywords) {
-    if (candidate === keyword) {
-      count++;
-    }
-  }
-  return count;
-}
-
 describe("extractKeywords", () => {
   it("extracts keywords from English conversational query", () => {
     const keywords = extractKeywords("that thing we discussed about the API");
@@ -170,8 +160,8 @@ describe("extractKeywords", () => {
   });
 
   it("handles empty query", () => {
-    expect(extractKeywords("")).toStrictEqual([]);
-    expect(extractKeywords("   ")).toStrictEqual([]);
+    expect(extractKeywords("")).toEqual([]);
+    expect(extractKeywords("   ")).toEqual([]);
   });
 
   it("handles query with only stop words", () => {
@@ -181,7 +171,8 @@ describe("extractKeywords", () => {
 
   it("removes duplicate keywords", () => {
     const keywords = extractKeywords("test test testing");
-    expect(countKeyword(keywords, "test")).toBe(1);
+    const testCount = keywords.filter((k) => k === "test").length;
+    expect(testCount).toBe(1);
   });
 
   describe("with trigram tokenizer", () => {

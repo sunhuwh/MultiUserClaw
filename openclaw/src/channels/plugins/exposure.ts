@@ -1,4 +1,4 @@
-import type { ChannelMeta } from "./types.core.js";
+import type { ChannelMeta } from "./types.js";
 
 export function resolveChannelExposure(
   meta: Pick<ChannelMeta, "exposure" | "showConfigured" | "showInSetup">,
@@ -20,4 +20,10 @@ export function isChannelVisibleInSetup(
   meta: Pick<ChannelMeta, "exposure" | "showConfigured" | "showInSetup">,
 ): boolean {
   return resolveChannelExposure(meta).setup;
+}
+
+export function isChannelVisibleInDocs(
+  meta: Pick<ChannelMeta, "exposure" | "showConfigured" | "showInSetup">,
+): boolean {
+  return resolveChannelExposure(meta).docs;
 }

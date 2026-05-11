@@ -1,5 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearAgentHarnesses,
   disposeRegisteredAgentHarnesses,
@@ -15,10 +14,7 @@ import { selectAgentHarness } from "./selection.js";
 import type { AgentHarness } from "./types.js";
 
 const originalRuntime = process.env.OPENCLAW_AGENT_RUNTIME;
-
-beforeEach(() => {
-  clearAgentHarnesses();
-});
+const originalHarnessFallback = process.env.OPENCLAW_AGENT_HARNESS_FALLBACK;
 
 afterEach(() => {
   clearAgentHarnesses();
@@ -26,6 +22,11 @@ afterEach(() => {
     delete process.env.OPENCLAW_AGENT_RUNTIME;
   } else {
     process.env.OPENCLAW_AGENT_RUNTIME = originalRuntime;
+  }
+  if (originalHarnessFallback == null) {
+    delete process.env.OPENCLAW_AGENT_HARNESS_FALLBACK;
+  } else {
+    process.env.OPENCLAW_AGENT_HARNESS_FALLBACK = originalHarnessFallback;
   }
 });
 
@@ -50,28 +51,12 @@ function makeHarness(
   };
 }
 
-function providerRuntimeConfig(provider: string, runtime: string): OpenClawConfig {
-  return {
-    models: {
-      providers: {
-        [provider]: {
-          baseUrl: "https://api.openclaw.test/v1",
-          agentRuntime: { id: runtime },
-          models: [],
-        },
-      },
-    },
-  } as OpenClawConfig;
-}
-
 describe("agent harness registry", () => {
   it("registers and retrieves a harness with owner metadata", () => {
     const harness = makeHarness("custom");
     registerAgentHarness(harness, { ownerPluginId: "plugin-a" });
 
-    const registeredHarness = getAgentHarness("custom");
-    expect(registeredHarness?.id).toBe("custom");
-    expect(registeredHarness?.pluginId).toBe("plugin-a");
+    expect(getAgentHarness("custom")).toMatchObject({ id: "custom", pluginId: "plugin-a" });
     expect(getRegisteredAgentHarness("custom")?.ownerPluginId).toBe("plugin-a");
     expect(listAgentHarnessIds()).toEqual(["custom"]);
   });
@@ -153,31 +138,21 @@ describe("agent harness registry", () => {
     expect(selectAgentHarness({ provider: "codex", modelId: "gpt-5.4" }).id).toBe("plugin-harness");
   });
 
-  it("honors explicit provider PI runtime policy", () => {
+  it("honors explicit PI mode", () => {
+    process.env.OPENCLAW_AGENT_RUNTIME = "pi";
     registerAgentHarness(makeHarness("plugin-harness", { priority: 200 }), {
       ownerPluginId: "plugin-a",
     });
 
-    expect(
-      selectAgentHarness({
-        provider: "codex",
-        modelId: "gpt-5.4",
-        config: providerRuntimeConfig("codex", "pi"),
-      }).id,
-    ).toBe("pi");
+    expect(selectAgentHarness({ provider: "codex", modelId: "gpt-5.4" }).id).toBe("pi");
   });
 
-  it("honors explicit provider plugin runtime policy when the plugin harness is registered", () => {
+  it("honors explicit plugin harness mode when the plugin harness is registered", () => {
+    process.env.OPENCLAW_AGENT_RUNTIME = "custom";
     registerAgentHarness(makeHarness("custom", { providers: ["custom-provider"] }), {
       ownerPluginId: "plugin-a",
     });
 
-    expect(
-      selectAgentHarness({
-        provider: "anthropic",
-        modelId: "sonnet-4.6",
-        config: providerRuntimeConfig("anthropic", "custom"),
-      }).id,
-    ).toBe("custom");
+    expect(selectAgentHarness({ provider: "anthropic", modelId: "sonnet-4.6" }).id).toBe("custom");
   });
 });

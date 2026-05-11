@@ -6,14 +6,10 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import path from "node:path";
 import { hasBinary } from "../agents/skills.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { resolveExecutable } from "../infra/executable-path.js";
-import { getWindowsInstallRoots } from "../infra/windows-install-roots.js";
+import type { OpenClawConfig } from "../config/config.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { runCommandWithTimeout } from "../process/exec.js";
-import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { ensureTailscaleEndpoint } from "./gmail-setup-utils.js";
 import { isAddressInUseError } from "./gmail-watcher-errors.js";
 import {
@@ -30,38 +26,6 @@ let watcherProcess: ChildProcess | null = null;
 let renewInterval: ReturnType<typeof setInterval> | null = null;
 let shuttingDown = false;
 let currentConfig: GmailHookRuntimeConfig | null = null;
-let gogBin: string | undefined;
-const WINDOWS_UNSAFE_CMD_CHARS_RE = /[&|<>^%\r\n]/;
-
-function escapeForCmdExe(arg: string): string {
-  if (WINDOWS_UNSAFE_CMD_CHARS_RE.test(arg)) {
-    throw new Error(`Unsafe Windows cmd.exe argument detected: ${JSON.stringify(arg)}`);
-  }
-  if (!arg.includes(" ") && !arg.includes('"')) {
-    return arg;
-  }
-  return `"${arg.replace(/"/g, '""')}"`;
-}
-
-function resolveGogServeInvocation(args: string[]): {
-  args: string[];
-  command: string;
-  windowsHide?: true;
-  windowsVerbatimArguments?: true;
-} {
-  const command = (gogBin ??= resolveExecutable("gog"));
-  const ext = normalizeLowercaseStringOrEmpty(path.extname(command));
-  if (process.platform !== "win32" || (ext !== ".cmd" && ext !== ".bat")) {
-    return { command, args, windowsHide: process.platform === "win32" ? true : undefined };
-  }
-  const cmdExe = path.win32.join(getWindowsInstallRoots().systemRoot, "System32", "cmd.exe");
-  return {
-    command: cmdExe,
-    args: ["/d", "/s", "/c", [command, ...args].map(escapeForCmdExe).join(" ")],
-    windowsHide: true,
-    windowsVerbatimArguments: true,
-  };
-}
 
 /**
  * Check if gog binary is available
@@ -76,7 +40,7 @@ function isGogAvailable(): boolean {
 async function startGmailWatch(
   cfg: Pick<GmailHookRuntimeConfig, "account" | "label" | "topic">,
 ): Promise<boolean> {
-  const args = [(gogBin ??= resolveExecutable("gog")), ...buildGogWatchStartArgs(cfg)];
+  const args = ["gog", ...buildGogWatchStartArgs(cfg)];
   try {
     const result = await runCommandWithTimeout(args, { timeoutMs: 120_000 });
     if (result.code !== 0) {
@@ -99,13 +63,10 @@ function spawnGogServe(cfg: GmailHookRuntimeConfig): ChildProcess {
   const args = buildGogWatchServeArgs(cfg);
   log.info(`starting gog ${buildGogWatchServeLogArgs(cfg).join(" ")}`);
   let addressInUse = false;
-  const invocation = resolveGogServeInvocation(args);
 
-  const child = spawn(invocation.command, invocation.args, {
+  const child = spawn("gog", args, {
     stdio: ["ignore", "pipe", "pipe"],
     detached: false,
-    windowsHide: invocation.windowsHide,
-    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
 
   child.stdout?.on("data", (data: Buffer) => {
@@ -271,4 +232,11 @@ export async function stopGmailWatcher(): Promise<void> {
 
   currentConfig = null;
   log.info("gmail watcher stopped");
+}
+
+/**
+ * Check if the Gmail watcher is running.
+ */
+export function isGmailWatcherRunning(): boolean {
+  return watcherProcess !== null && !shuttingDown;
 }

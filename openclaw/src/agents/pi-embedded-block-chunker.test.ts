@@ -17,14 +17,6 @@ function drainChunks(chunker: EmbeddedBlockChunker, force = false) {
   return chunks;
 }
 
-function expectChunksWithinLength(chunks: string[], maxLength: number) {
-  expect(
-    chunks
-      .map((chunk, index) => ({ index, length: chunk.length }))
-      .filter((entry) => entry.length > maxLength),
-  ).toStrictEqual([]);
-}
-
 describe("EmbeddedBlockChunker", () => {
   it("breaks at paragraph boundary right after fence close", () => {
     const chunker = new EmbeddedBlockChunker({
@@ -70,7 +62,7 @@ describe("EmbeddedBlockChunker", () => {
 
     chunker.append("First paragraph.\n \nSecond paragraph.");
 
-    expect(drainChunks(chunker)).toStrictEqual([]);
+    expect(drainChunks(chunker)).toEqual([]);
     expect(drainChunks(chunker, true)).toEqual(["First paragraph.\n \nSecond paragraph."]);
     expect(chunker.bufferedText).toBe("");
   });
@@ -103,7 +95,7 @@ describe("EmbeddedBlockChunker", () => {
 
     const chunks = drainChunks(chunker);
 
-    expectChunksWithinLength(chunks, 10);
+    expect(chunks.every((chunk) => chunk.length <= 10)).toBe(true);
     expect(chunks).toEqual(["abcdefghij", "k"]);
     expect(chunker.bufferedText).toBe("Rest");
   });

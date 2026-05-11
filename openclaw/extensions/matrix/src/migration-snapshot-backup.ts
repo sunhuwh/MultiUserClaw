@@ -2,7 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { writeJsonFileAtomically } from "openclaw/plugin-sdk/json-store";
-import { resolveRequiredHomeDir, resolveStateDir } from "openclaw/plugin-sdk/state-paths";
+import { resolveRequiredHomeDir } from "openclaw/plugin-sdk/provider-auth";
+import { resolveStateDir } from "openclaw/plugin-sdk/state-paths";
 
 const MATRIX_MIGRATION_SNAPSHOT_DIRNAME = "openclaw-migrations";
 
@@ -14,7 +15,7 @@ type MatrixMigrationSnapshotMarker = {
   includeWorkspace: boolean;
 };
 
-type MatrixMigrationSnapshotResult = {
+export type MatrixMigrationSnapshotResult = {
   created: boolean;
   archivePath: string;
   markerPath: string;

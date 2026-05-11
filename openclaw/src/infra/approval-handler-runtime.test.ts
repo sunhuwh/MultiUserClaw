@@ -2,11 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createChannelApprovalHandlerFromCapability,
   createLazyChannelApprovalNativeRuntimeAdapter,
+  type ChannelApprovalNativeRuntimeAdapter,
 } from "./approval-handler-runtime.js";
-import {
-  createApprovalNativeRuntimeAdapterStubs,
-  type ApprovalNativeRuntimeAdapterStubParams,
-} from "./approval-handler.test-helpers.js";
 import type { ExecApprovalRequest } from "./exec-approvals.js";
 
 type ApprovalCapability = NonNullable<
@@ -56,7 +53,15 @@ function makeNativeApprovalCapability(
     >["preferredSurface"];
     supportsApproverDmSurface?: boolean;
     resolveApproverDmTargets?: ApprovalNativeAdapter["resolveApproverDmTargets"];
-  } & ApprovalNativeRuntimeAdapterStubParams = {},
+    resolveApprovalKind?: ChannelApprovalNativeRuntimeAdapter["resolveApprovalKind"];
+    buildResolvedResult?: ChannelApprovalNativeRuntimeAdapter["presentation"]["buildResolvedResult"];
+    unbindPending?: NonNullable<
+      ChannelApprovalNativeRuntimeAdapter["interactions"]
+    >["unbindPending"];
+    prepareTarget?: ChannelApprovalNativeRuntimeAdapter["transport"]["prepareTarget"];
+    deliverPending?: ChannelApprovalNativeRuntimeAdapter["transport"]["deliverPending"];
+    bindPending?: NonNullable<ChannelApprovalNativeRuntimeAdapter["interactions"]>["bindPending"];
+  } = {},
 ): ApprovalCapability {
   const preferredSurface = params.preferredSurface ?? "origin";
   return {
@@ -73,7 +78,31 @@ function makeNativeApprovalCapability(
         ? { resolveApproverDmTargets: params.resolveApproverDmTargets }
         : {}),
     },
-    nativeRuntime: createApprovalNativeRuntimeAdapterStubs(params),
+    nativeRuntime: {
+      resolveApprovalKind: params.resolveApprovalKind,
+      availability: {
+        isConfigured: vi.fn().mockReturnValue(true),
+        shouldHandle: vi.fn().mockReturnValue(true),
+      },
+      presentation: {
+        buildPendingPayload: vi.fn().mockResolvedValue({ text: "pending" }),
+        buildResolvedResult: params.buildResolvedResult ?? vi.fn(),
+        buildExpiredResult: vi.fn(),
+      },
+      transport: {
+        prepareTarget:
+          params.prepareTarget ??
+          vi.fn().mockResolvedValue({
+            dedupeKey: "origin-chat",
+            target: { to: "origin-chat" },
+          }),
+        deliverPending: params.deliverPending ?? vi.fn().mockResolvedValue({ messageId: "1" }),
+      },
+      interactions: {
+        bindPending: params.bindPending ?? vi.fn().mockResolvedValue({ bindingId: "bound" }),
+        unbindPending: params.unbindPending,
+      },
+    },
   };
 }
 
@@ -82,18 +111,6 @@ function createTestApprovalHandler(capability: ApprovalCapability) {
     capability,
     ...TEST_HANDLER_PARAMS,
   });
-}
-
-type ApprovalHandlerRuntime = NonNullable<Awaited<ReturnType<typeof createTestApprovalHandler>>>;
-
-function expectApprovalRuntime(
-  runtime: Awaited<ReturnType<typeof createTestApprovalHandler>>,
-): ApprovalHandlerRuntime {
-  if (runtime === null) {
-    throw new Error("Expected approval handler runtime");
-  }
-  expect(typeof runtime.handleRequested).toBe("function");
-  return runtime;
 }
 
 describe("createChannelApprovalHandlerFromCapability", () => {
@@ -128,7 +145,7 @@ describe("createChannelApprovalHandlerFromCapability", () => {
       ...TEST_HANDLER_PARAMS,
     });
 
-    expectApprovalRuntime(runtime);
+    expect(runtime).not.toBeNull();
   });
 
   it("preserves the original request and resolved approval kind when stop-time cleanup unbinds", async () => {
@@ -140,7 +157,7 @@ describe("createChannelApprovalHandlerFromCapability", () => {
       }),
     );
 
-    const approvalRuntime = expectApprovalRuntime(runtime);
+    expect(runtime).not.toBeNull();
     const request = {
       id: "custom:1",
       expiresAtMs: Date.now() + 60_000,
@@ -150,8 +167,8 @@ describe("createChannelApprovalHandlerFromCapability", () => {
       },
     } as never;
 
-    await approvalRuntime.handleRequested(request);
-    await approvalRuntime.stop();
+    await runtime?.handleRequested(request);
+    await runtime?.stop();
 
     expect(unbindPending).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -173,12 +190,12 @@ describe("createChannelApprovalHandlerFromCapability", () => {
       }),
     );
 
-    const approvalRuntime = expectApprovalRuntime(runtime);
+    expect(runtime).not.toBeNull();
     const request = makeExecApprovalRequest("exec:1");
 
-    await approvalRuntime.handleRequested(request);
-    await approvalRuntime.handleRequested(request);
-    await approvalRuntime.handleResolved({
+    await runtime?.handleRequested(request);
+    await runtime?.handleRequested(request);
+    await runtime?.handleResolved({
       id: "exec:1",
       decision: "approved",
       resolvedBy: "operator",
@@ -219,10 +236,9 @@ describe("createChannelApprovalHandlerFromCapability", () => {
 
     const request = makeExecApprovalRequest("exec:2");
 
-    const approvalRuntime = expectApprovalRuntime(runtime);
-    await approvalRuntime.handleRequested(request);
+    await runtime?.handleRequested(request);
     await expect(
-      approvalRuntime.handleResolved({
+      runtime?.handleResolved({
         id: "exec:2",
         decision: "approved",
         resolvedBy: "operator",
@@ -253,16 +269,15 @@ describe("createChannelApprovalHandlerFromCapability", () => {
 
     const request = makeExecApprovalRequest("exec:stop-1");
 
-    const approvalRuntime = expectApprovalRuntime(runtime);
-    await approvalRuntime.handleRequested(request);
-    await approvalRuntime.handleRequested({
+    await runtime?.handleRequested(request);
+    await runtime?.handleRequested({
       ...request,
       id: "exec:stop-2",
     });
 
-    await expect(approvalRuntime.stop()).resolves.toBeUndefined();
+    await expect(runtime?.stop()).resolves.toBeUndefined();
     expect(unbindPending).toHaveBeenCalledTimes(2);
-    await expect(approvalRuntime.stop()).resolves.toBeUndefined();
+    await expect(runtime?.stop()).resolves.toBeUndefined();
     expect(unbindPending).toHaveBeenCalledTimes(2);
   });
 });

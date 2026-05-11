@@ -97,17 +97,14 @@ export function mergeProviderModels(
       implicitValue: implicitModel.maxTokens,
     });
 
-    return Object.assign(
-      {},
-      explicitModel,
-      {
-        input: "input" in explicitModel ? explicitModel.input : implicitModel.input,
-        reasoning: `reasoning` in explicitModel ? explicitModel.reasoning : implicitModel.reasoning,
-      },
-      contextWindow === undefined ? {} : { contextWindow },
-      contextTokens === undefined ? {} : { contextTokens },
-      maxTokens === undefined ? {} : { maxTokens },
-    );
+    return {
+      ...explicitModel,
+      input: implicitModel.input,
+      reasoning: "reasoning" in explicitModel ? explicitModel.reasoning : implicitModel.reasoning,
+      ...(contextWindow === undefined ? {} : { contextWindow }),
+      ...(contextTokens === undefined ? {} : { contextTokens }),
+      ...(maxTokens === undefined ? {} : { maxTokens }),
+    };
   });
 
   for (const implicitModel of implicitModels) {
@@ -199,11 +196,17 @@ function shouldPreserveExistingApiKey(params: {
 }
 
 function shouldPreserveExistingBaseUrl(params: {
+  providerKey: string;
   existing: ExistingProviderConfig;
   nextEntry: ProviderConfig;
+  explicitBaseUrlProviders: ReadonlySet<string>;
 }): boolean {
-  const { existing, nextEntry } = params;
-  if (typeof existing.baseUrl !== "string" || existing.baseUrl.length === 0) {
+  const { providerKey, existing, nextEntry, explicitBaseUrlProviders } = params;
+  if (
+    explicitBaseUrlProviders.has(providerKey) ||
+    typeof existing.baseUrl !== "string" ||
+    existing.baseUrl.length === 0
+  ) {
     return false;
   }
 
@@ -216,8 +219,10 @@ export function mergeWithExistingProviderSecrets(params: {
   nextProviders: Record<string, ProviderConfig>;
   existingProviders: Record<string, ExistingProviderConfig>;
   secretRefManagedProviders: ReadonlySet<string>;
+  explicitBaseUrlProviders: ReadonlySet<string>;
 }): Record<string, ProviderConfig> {
-  const { nextProviders, existingProviders, secretRefManagedProviders } = params;
+  const { nextProviders, existingProviders, secretRefManagedProviders, explicitBaseUrlProviders } =
+    params;
   const mergedProviders: Record<string, ProviderConfig> = {};
   for (const [key, entry] of Object.entries(existingProviders)) {
     mergedProviders[key] = entry;
@@ -241,8 +246,10 @@ export function mergeWithExistingProviderSecrets(params: {
     }
     if (
       shouldPreserveExistingBaseUrl({
+        providerKey: key,
         existing,
         nextEntry: newEntry,
+        explicitBaseUrlProviders,
       })
     ) {
       preserved.baseUrl = existing.baseUrl;

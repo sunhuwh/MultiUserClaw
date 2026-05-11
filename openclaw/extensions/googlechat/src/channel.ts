@@ -4,7 +4,6 @@ import {
   adaptScopedAccountAccessor,
   createScopedChannelConfigAdapter,
 } from "openclaw/plugin-sdk/channel-config-helpers";
-import type { ChannelMessageActionName } from "openclaw/plugin-sdk/channel-contract";
 import { createChatChannelPlugin } from "openclaw/plugin-sdk/channel-core";
 import { buildPassiveProbedChannelStatusSummary } from "openclaw/plugin-sdk/extension-shared";
 import { createLazyRuntimeNamedExport } from "openclaw/plugin-sdk/lazy-runtime";
@@ -12,13 +11,12 @@ import {
   createComputedAccountStatusAdapter,
   createDefaultChannelRuntimeState,
 } from "openclaw/plugin-sdk/status-helpers";
-import { extractToolSend } from "openclaw/plugin-sdk/tool-send";
+import { googlechatMessageActions } from "./actions.js";
 import { googleChatApprovalAuth } from "./approval-auth.js";
 import {
   formatAllowFromEntry,
   googlechatDirectoryAdapter,
   googlechatGroupsAdapter,
-  googlechatMessageAdapter,
   googlechatOutboundAdapter,
   googlechatPairingTextAdapter,
   googlechatSecurityAdapter,
@@ -32,18 +30,12 @@ import {
   isGoogleChatUserTarget,
   listGoogleChatAccountIds,
   normalizeGoogleChatTarget,
-  type GoogleChatConfigAccessorAccount,
-  resolveGoogleChatConfigAccessorAccount,
   resolveDefaultGoogleChatAccountId,
   resolveGoogleChatAccount,
   type ChannelMessageActionAdapter,
   type ChannelStatusIssue,
   type ResolvedGoogleChatAccount,
 } from "./channel.deps.runtime.js";
-import {
-  legacyConfigRules as GOOGLECHAT_LEGACY_CONFIG_RULES,
-  normalizeCompatibilityConfig as normalizeGoogleChatCompatibilityConfig,
-} from "./doctor-contract.js";
 import { collectGoogleChatMutableAllowlistWarnings } from "./doctor.js";
 import { startGoogleChatGatewayAccount } from "./gateway.js";
 import { collectRuntimeConfigAssignments, secretTargetRegistryEntries } from "./secret-contract.js";
@@ -69,14 +61,10 @@ const meta = {
   markdownCapable: true,
 };
 
-const googleChatConfigAdapter = createScopedChannelConfigAdapter<
-  ResolvedGoogleChatAccount,
-  GoogleChatConfigAccessorAccount
->({
+const googleChatConfigAdapter = createScopedChannelConfigAdapter<ResolvedGoogleChatAccount>({
   sectionKey: "googlechat",
   listAccountIds: listGoogleChatAccountIds,
   resolveAccount: adaptScopedAccountAccessor(resolveGoogleChatAccount),
-  resolveAccessorAccount: resolveGoogleChatConfigAccessorAccount,
   defaultAccountId: resolveDefaultGoogleChatAccountId,
   clearBaseFields: [
     "serviceAccount",
@@ -88,37 +76,19 @@ const googleChatConfigAdapter = createScopedChannelConfigAdapter<
     "botUser",
     "name",
   ],
-  resolveAllowFrom: (account) => account.config.dm?.allowFrom,
+  resolveAllowFrom: (account: ResolvedGoogleChatAccount) => account.config.dm?.allowFrom,
   formatAllowFrom: (allowFrom) =>
     formatNormalizedAllowFromEntries({
       allowFrom,
       normalizeEntry: formatAllowFromEntry,
     }),
-  resolveDefaultTo: (account) => account.config.defaultTo,
+  resolveDefaultTo: (account: ResolvedGoogleChatAccount) => account.config.defaultTo,
 });
 
 const googlechatActions: ChannelMessageActionAdapter = {
-  describeMessageTool: ({ cfg, accountId }) => {
-    const accounts = accountId
-      ? [resolveGoogleChatAccount({ cfg, accountId })].filter(
-          (account) => account.enabled && account.credentialSource !== "none",
-        )
-      : listGoogleChatAccountIds(cfg)
-          .map((id) => resolveGoogleChatAccount({ cfg, accountId: id }))
-          .filter((account) => account.enabled && account.credentialSource !== "none");
-    if (accounts.length === 0) {
-      return null;
-    }
-    const actions = new Set<ChannelMessageActionName>(["send", "upload-file"]);
-    if (accounts.some((account) => account.config.actions?.reactions !== false)) {
-      actions.add("react");
-      actions.add("reactions");
-    }
-    return { actions: Array.from(actions) };
-  },
-  extractToolSend: ({ args }) => extractToolSend(args, "sendMessage"),
+  describeMessageTool: (ctx) => googlechatMessageActions.describeMessageTool?.(ctx) ?? null,
+  extractToolSend: (ctx) => googlechatMessageActions.extractToolSend?.(ctx) ?? null,
   handleAction: async (ctx) => {
-    const { googlechatMessageActions } = await import("./actions.js");
     if (!googlechatMessageActions.handleAction) {
       throw new Error("Google Chat actions are not available.");
     }
@@ -164,7 +134,6 @@ export const googlechatPlugin = createChatChannelPlugin({
     },
     groups: googlechatGroupsAdapter,
     messaging: {
-      targetPrefixes: ["googlechat", "google-chat", "gchat"],
       normalizeTarget: normalizeGoogleChatTarget,
       targetResolver: {
         looksLikeId: (raw, normalized) => {
@@ -175,7 +144,6 @@ export const googlechatPlugin = createChatChannelPlugin({
       },
     },
     directory: googlechatDirectoryAdapter,
-    message: googlechatMessageAdapter,
     resolver: {
       resolveTargets: async ({ inputs, kind }) => {
         const resolved = inputs.map((input) => {
@@ -204,15 +172,13 @@ export const googlechatPlugin = createChatChannelPlugin({
       groupModel: "route",
       groupAllowFromFallbackToAllowFrom: false,
       warnOnEmptyGroupSenderAllowlist: false,
-      legacyConfigRules: GOOGLECHAT_LEGACY_CONFIG_RULES,
-      normalizeCompatibilityConfig: normalizeGoogleChatCompatibilityConfig,
       collectMutableAllowlistWarnings: collectGoogleChatMutableAllowlistWarnings,
     },
     status: createComputedAccountStatusAdapter<ResolvedGoogleChatAccount>({
       defaultRuntime: createDefaultChannelRuntimeState(DEFAULT_ACCOUNT_ID),
       collectStatusIssues: (accounts): ChannelStatusIssue[] =>
         accounts.flatMap((entry) => {
-          const accountId = entry.accountId ?? DEFAULT_ACCOUNT_ID;
+          const accountId = String(entry.accountId ?? DEFAULT_ACCOUNT_ID);
           const enabled = entry.enabled !== false;
           const configured = entry.configured === true;
           if (!enabled || !configured) {

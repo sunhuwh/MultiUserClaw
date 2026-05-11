@@ -1,6 +1,10 @@
 import crypto from "node:crypto";
-import type { GatewayAuthConfig, GatewayTailscaleConfig } from "../config/types.gateway.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type {
+  GatewayAuthConfig,
+  GatewayTailscaleConfig,
+  OpenClawConfig,
+} from "../config/config.js";
+import { replaceConfigFile } from "../config/config.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import {
   hasConfiguredGatewayAuthSecretInput,
@@ -14,9 +18,6 @@ import {
   hasGatewayTokenEnvCandidate,
   trimToUndefined,
 } from "./credentials.js";
-import { assertGatewayAuthNotKnownWeak } from "./known-weak-gateway-secrets.js";
-
-export { assertGatewayAuthNotKnownWeak } from "./known-weak-gateway-secrets.js";
 
 export function mergeGatewayAuthConfig(
   base?: GatewayAuthConfig,
@@ -61,9 +62,6 @@ export function mergeGatewayTailscaleConfig(
   if (override.resetOnExit !== undefined) {
     merged.resetOnExit = override.resetOnExit;
   }
-  if (override.preserveFunnel !== undefined) {
-    merged.preserveFunnel = override.preserveFunnel;
-  }
   return merged;
 }
 
@@ -85,6 +83,23 @@ function resolveGatewayAuthFromConfig(params: {
   });
 }
 
+function shouldPersistGeneratedToken(params: {
+  persistRequested: boolean;
+  resolvedAuth: ResolvedGatewayAuth;
+}): boolean {
+  if (!params.persistRequested) {
+    return false;
+  }
+
+  // Keep CLI/runtime mode overrides ephemeral: startup should not silently
+  // mutate durable auth policy when mode was chosen by an override flag.
+  if (params.resolvedAuth.modeSource === "override") {
+    return false;
+  }
+
+  return true;
+}
+
 function hasGatewayTokenCandidate(params: {
   cfg: OpenClawConfig;
   env: NodeJS.ProcessEnv;
@@ -104,8 +119,8 @@ function hasGatewayTokenCandidate(params: {
 }
 
 function hasGatewayTokenOverrideCandidate(params: { authOverride?: GatewayAuthConfig }): boolean {
-  return (
-    typeof params.authOverride?.token === "string" && params.authOverride.token.trim().length > 0
+  return Boolean(
+    typeof params.authOverride?.token === "string" && params.authOverride.token.trim().length > 0,
   );
 }
 
@@ -116,9 +131,9 @@ function hasGatewayPasswordOverrideCandidate(params: {
   if (hasGatewayPasswordEnvCandidate(params.env)) {
     return true;
   }
-  return (
+  return Boolean(
     typeof params.authOverride?.password === "string" &&
-    params.authOverride.password.trim().length > 0
+    params.authOverride.password.trim().length > 0,
   );
 }
 
@@ -127,10 +142,6 @@ export async function ensureGatewayStartupAuth(params: {
   env?: NodeJS.ProcessEnv;
   authOverride?: GatewayAuthConfig;
   tailscaleOverride?: GatewayTailscaleConfig;
-  /**
-   * Legacy startup option retained for external callers. Startup-generated auth
-   * is runtime-only; durable auth changes must go through explicit config tools.
-   */
   persist?: boolean;
   baseHash?: string;
 }): Promise<{
@@ -141,6 +152,7 @@ export async function ensureGatewayStartupAuth(params: {
 }> {
   assertExplicitGatewayAuthModeWhenBothConfigured(params.cfg);
   const env = params.env ?? process.env;
+  const persistRequested = params.persist === true;
   const explicitMode = params.authOverride?.mode ?? params.cfg.gateway?.auth?.mode;
   const [resolvedTokenRefValue, resolvedPasswordRefValue] = await Promise.all([
     resolveGatewayTokenSecretRefValue({
@@ -184,7 +196,6 @@ export async function ensureGatewayStartupAuth(params: {
     tailscaleOverride: params.tailscaleOverride,
   });
   if (resolved.mode !== "token" || (resolved.token?.trim().length ?? 0) > 0) {
-    assertGatewayAuthNotKnownWeak(resolved);
     assertHooksTokenSeparateFromGatewayAuth({ cfg: params.cfg, auth: resolved });
     return { cfg: params.cfg, auth: resolved, persistedGeneratedToken: false };
   }
@@ -201,23 +212,29 @@ export async function ensureGatewayStartupAuth(params: {
       },
     },
   };
+  const persist = shouldPersistGeneratedToken({
+    persistRequested,
+    resolvedAuth: resolved,
+  });
+  if (persist) {
+    await replaceConfigFile({
+      nextConfig: nextCfg,
+      baseHash: params.baseHash,
+    });
+  }
+
   const nextAuth = resolveGatewayAuthFromConfig({
     cfg: nextCfg,
     env,
     authOverride: params.authOverride,
     tailscaleOverride: params.tailscaleOverride,
   });
-  // The generated token is crypto-random, so this cannot match the weak set
-  // in practice — but running the assertion on both branches documents that
-  // the rule applies uniformly and guards against any future path that might
-  // feed a non-generated value through nextAuth.
-  assertGatewayAuthNotKnownWeak(nextAuth);
   assertHooksTokenSeparateFromGatewayAuth({ cfg: nextCfg, auth: nextAuth });
   return {
     cfg: nextCfg,
     auth: nextAuth,
     generatedToken,
-    persistedGeneratedToken: false,
+    persistedGeneratedToken: persist,
   };
 }
 

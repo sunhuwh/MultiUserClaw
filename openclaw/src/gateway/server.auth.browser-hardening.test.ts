@@ -115,34 +115,6 @@ async function withTrustedProxyBrowserWs(origin: string, run: (ws: WebSocket) =>
   });
 }
 
-async function expectBrowserOriginConnectRejected(params: {
-  client?: {
-    id: string;
-    version: string;
-    platform: string;
-    mode: string;
-  };
-}) {
-  testState.gatewayAuth = { mode: "token", token: "secret" };
-  await withGatewayServer(async ({ port }) => {
-    const ws = await openWs(port, { origin: "https://attacker.example" });
-    try {
-      const res = await connectReq(ws, {
-        token: "secret",
-        client: params.client ?? TEST_OPERATOR_CLIENT,
-        ...(params.client ? { device: null } : {}),
-      });
-      expect(res.ok).toBe(false);
-      expect(res.error?.message ?? "").toContain("origin not allowed");
-      expect((res.error?.details as { code?: string } | undefined)?.code).toBe(
-        ConnectErrorDetailCodes.CONTROL_UI_ORIGIN_NOT_ALLOWED,
-      );
-    } finally {
-      ws.close();
-    }
-  });
-}
-
 describe("gateway auth browser hardening", () => {
   test("rejects trusted-proxy browser connects from origins outside the allowlist", async () => {
     await withTrustedProxyBrowserWs("https://evil.example", async (ws) => {
@@ -233,17 +205,48 @@ describe("gateway auth browser hardening", () => {
   );
 
   test("rejects non-local browser origins for non-control-ui clients", async () => {
-    await expectBrowserOriginConnectRejected({});
+    testState.gatewayAuth = { mode: "token", token: "secret" };
+    await withGatewayServer(async ({ port }) => {
+      const ws = await openWs(port, { origin: "https://attacker.example" });
+      try {
+        const res = await connectReq(ws, {
+          token: "secret",
+          client: TEST_OPERATOR_CLIENT,
+        });
+        expect(res.ok).toBe(false);
+        expect(res.error?.message ?? "").toContain("origin not allowed");
+        expect((res.error?.details as { code?: string } | undefined)?.code).toBe(
+          ConnectErrorDetailCodes.CONTROL_UI_ORIGIN_NOT_ALLOWED,
+        );
+      } finally {
+        ws.close();
+      }
+    });
   });
 
   test("rejects browser-origin connects that claim to be tui clients", async () => {
-    await expectBrowserOriginConnectRejected({
-      client: {
-        id: GATEWAY_CLIENT_NAMES.TUI,
-        version: "1.0.0",
-        platform: "darwin",
-        mode: GATEWAY_CLIENT_MODES.UI,
-      },
+    testState.gatewayAuth = { mode: "token", token: "secret" };
+    await withGatewayServer(async ({ port }) => {
+      const ws = await openWs(port, { origin: "https://attacker.example" });
+      try {
+        const res = await connectReq(ws, {
+          token: "secret",
+          client: {
+            id: GATEWAY_CLIENT_NAMES.TUI,
+            version: "1.0.0",
+            platform: "darwin",
+            mode: GATEWAY_CLIENT_MODES.UI,
+          },
+          device: null,
+        });
+        expect(res.ok).toBe(false);
+        expect(res.error?.message ?? "").toContain("origin not allowed");
+        expect((res.error?.details as { code?: string } | undefined)?.code).toBe(
+          ConnectErrorDetailCodes.CONTROL_UI_ORIGIN_NOT_ALLOWED,
+        );
+      } finally {
+        ws.close();
+      }
     });
   });
 
@@ -335,12 +338,10 @@ describe("gateway auth browser hardening", () => {
         const snapshot = payload.snapshot as
           | { configPath?: unknown; stateDir?: unknown; authMode?: unknown }
           | undefined;
-        if (!snapshot) {
-          throw new Error("expected hello-ok snapshot for low-privilege browser session");
-        }
-        expect(snapshot.configPath).toBeUndefined();
-        expect(snapshot.stateDir).toBeUndefined();
-        expect(snapshot.authMode).toBeUndefined();
+        expect(snapshot).toBeDefined();
+        expect(snapshot?.configPath).toBeUndefined();
+        expect(snapshot?.stateDir).toBeUndefined();
+        expect(snapshot?.authMode).toBeUndefined();
       } finally {
         ws.close();
       }
@@ -362,7 +363,7 @@ describe("gateway auth browser hardening", () => {
           clientId: TEST_OPERATOR_CLIENT.id,
           clientMode: TEST_OPERATOR_CLIENT.mode,
           identityPath: path.join(os.tmpdir(), `openclaw-browser-device-${randomUUID()}.json`),
-          nonce: nonce ?? "",
+          nonce: String(nonce ?? ""),
         });
         const res = await connectReq(browserWs, {
           token: "secret",
@@ -375,10 +376,8 @@ describe("gateway auth browser hardening", () => {
 
         const pairing = await listDevicePairing();
         const pending = pairing.pending.find((entry) => entry.deviceId === identity.deviceId);
-        if (!pending) {
-          throw new Error("expected non-control browser client to create pending pairing request");
-        }
-        expect(pending.silent).toBe(false);
+        expect(pending).toBeTruthy();
+        expect(pending?.silent).toBe(false);
       } finally {
         browserWs.close();
       }

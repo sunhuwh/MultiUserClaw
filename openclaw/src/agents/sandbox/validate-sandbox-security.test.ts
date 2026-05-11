@@ -16,25 +16,16 @@ function expectBindMountsToThrow(binds: string[], expected: RegExp, label: strin
   expect(() => validateBindMounts(binds), label).toThrow(expected);
 }
 
-function expectBlockedTargetReason(
-  bind: string,
-): Extract<NonNullable<ReturnType<typeof getBlockedBindReason>>, { kind: "targets" }> {
-  const reason = getBlockedBindReason(bind);
-  expect(reason?.kind).toBe("targets");
-  if (reason?.kind !== "targets") {
-    throw new Error(`expected blocked target reason for ${bind}`);
-  }
-  return reason;
-}
-
 describe("getBlockedBindReason", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
   it("blocks common Docker socket directories", () => {
-    expectBlockedTargetReason("/run:/run");
-    expectBlockedTargetReason("/var/run:/var/run:ro");
+    expect(getBlockedBindReason("/run:/run")).toEqual(expect.objectContaining({ kind: "targets" }));
+    expect(getBlockedBindReason("/var/run:/var/run:ro")).toEqual(
+      expect.objectContaining({ kind: "targets" }),
+    );
   });
 
   it("does not block /var by default", () => {
@@ -56,7 +47,9 @@ describe("getBlockedBindReason", () => {
     ] as const;
 
     for (const source of cases) {
-      expectBlockedTargetReason(`${source}:/mnt/test:ro`);
+      expect(getBlockedBindReason(`${source}:/mnt/test:ro`)).toEqual(
+        expect.objectContaining({ kind: "targets" }),
+      );
     }
   });
 
@@ -64,8 +57,12 @@ describe("getBlockedBindReason", () => {
     vi.stubEnv("HOME", "/home/tester");
     vi.stubEnv("OPENCLAW_HOME", "/srv/openclaw-home");
 
-    const reason = expectBlockedTargetReason("/home/tester/.gnupg/secring.gpg:/mnt/gnupg:ro");
-    expect(reason?.blockedPath).toBe("/home/tester/.gnupg");
+    expect(getBlockedBindReason("/home/tester/.gnupg/secring.gpg:/mnt/gnupg:ro")).toEqual(
+      expect.objectContaining({
+        kind: "targets",
+        blockedPath: "/home/tester/.gnupg",
+      }),
+    );
   });
 
   it("blocks canonical OS-home aliases for credential paths", () => {
@@ -80,8 +77,12 @@ describe("getBlockedBindReason", () => {
     symlinkSync(realHome, aliasHome);
     vi.stubEnv("HOME", aliasHome);
 
-    const reason = expectBlockedTargetReason(`${join(realHome, ".ssh", "config")}:/mnt/ssh:ro`);
-    expect(reason?.blockedPath).toBe(normalizePathForSnapshot(join(realHome, ".ssh")));
+    expect(getBlockedBindReason(`${join(realHome, ".ssh", "config")}:/mnt/ssh:ro`)).toEqual(
+      expect.objectContaining({
+        kind: "targets",
+        blockedPath: normalizePathForSnapshot(join(realHome, ".ssh")),
+      }),
+    );
   });
 });
 
@@ -91,20 +92,19 @@ describe("validateBindMounts", () => {
   });
 
   it("allows legitimate project directory mounts", () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "openclaw-sbx-safe-"));
-    expect(
+    expect(() =>
       validateBindMounts([
-        `${join(projectRoot, "source")}:/source:rw`,
-        `${join(projectRoot, "projects")}:/projects:ro`,
-        `${join(projectRoot, "data")}:/data`,
-        `${join(projectRoot, "config")}:/config:ro`,
+        "/home/user/source:/source:rw",
+        "/home/user/projects:/projects:ro",
+        "/var/data/myapp:/data",
+        "/opt/myapp/config:/config:ro",
       ]),
-    ).toBeUndefined();
+    ).not.toThrow();
   });
 
   it("allows undefined or empty binds", () => {
-    expect(validateBindMounts(undefined)).toBeUndefined();
-    expect(validateBindMounts([])).toBeUndefined();
+    expect(() => validateBindMounts(undefined)).not.toThrow();
+    expect(() => validateBindMounts([])).not.toThrow();
   });
 
   it("blocks dangerous bind source paths", () => {
@@ -161,7 +161,7 @@ describe("validateBindMounts", () => {
   });
 
   it("allows parent mounts that are not blocked", () => {
-    expect(validateBindMounts(["/var:/var"])).toBeUndefined();
+    expect(() => validateBindMounts(["/var:/var"])).not.toThrow();
   });
 
   it("blocks sensitive home credential binds", () => {
@@ -171,25 +171,6 @@ describe("validateBindMounts", () => {
       /blocked path/,
     );
     expect(() => validateBindMounts(["/home/tester/.netrc:/mnt/netrc:ro"])).toThrow(/blocked path/);
-  });
-
-  it("allows drive-absolute Windows bind sources", () => {
-    expect(validateBindMounts(["D:/data/openclaw/src:/src:ro"])).toBeUndefined();
-    expect(validateBindMounts(["D:\\data\\openclaw\\output:/output:rw"])).toBeUndefined();
-  });
-
-  it("compares Windows allowed roots case-insensitively", () => {
-    expect(
-      validateBindMounts(["d:/DATA/OpenClaw/src:/src:ro"], {
-        allowedSourceRoots: ["D:/data/openclaw"],
-      }),
-    ).toBeUndefined();
-
-    expect(() =>
-      validateBindMounts(["D:/other/project:/src:ro"], {
-        allowedSourceRoots: ["d:/data/openclaw"],
-      }),
-    ).toThrow(/outside allowed roots/);
   });
 
   it("blocks credential binds through canonical home aliases", () => {
@@ -211,7 +192,14 @@ describe("validateBindMounts", () => {
 
   it("blocks symlink escapes into blocked directories", () => {
     if (process.platform === "win32") {
-      // Symlink setup for blocked POSIX targets like /etc is POSIX-only.
+      // Symlinks to non-existent targets like /etc require
+      // SeCreateSymbolicLinkPrivilege on Windows.  The Windows branch of this
+      // test does not need a real symlink — it only asserts that Windows source
+      // paths are rejected as non-POSIX.
+      const dir = mkdtempSync(join(tmpdir(), "openclaw-sbx-"));
+      const fakePath = join(dir, "etc-link", "passwd");
+      const run = () => validateBindMounts([`${fakePath}:/mnt/passwd:ro`]);
+      expect(run).toThrow(/non-absolute source path/);
       return;
     }
 
@@ -224,7 +212,7 @@ describe("validateBindMounts", () => {
 
   it("blocks symlink-parent escapes with non-existent leaf outside allowed roots", () => {
     if (process.platform === "win32") {
-      // Windows symlink semantics differ; POSIX symlink escape coverage runs on POSIX hosts.
+      // Windows source paths (e.g. C:\\...) are intentionally rejected as non-POSIX.
       return;
     }
     const dir = mkdtempSync(join(tmpdir(), "openclaw-sbx-"));
@@ -244,7 +232,7 @@ describe("validateBindMounts", () => {
 
   it("blocks symlink-parent escapes into blocked paths when leaf does not exist", () => {
     if (process.platform === "win32") {
-      // Symlink setup for blocked POSIX targets like /var/run is POSIX-only.
+      // Windows source paths (e.g. C:\\...) are intentionally rejected as non-POSIX.
       return;
     }
     const dir = mkdtempSync(join(tmpdir(), "openclaw-sbx-"));
@@ -268,49 +256,45 @@ describe("validateBindMounts", () => {
   });
 
   it("blocks bind sources outside allowed roots when allowlist is configured", () => {
-    const allowedRoot = mkdtempSync(join(tmpdir(), "openclaw-sbx-allowed-root-"));
-    const externalRoot = mkdtempSync(join(tmpdir(), "openclaw-sbx-external-"));
     expect(() =>
-      validateBindMounts([`${externalRoot}:/data:ro`], {
-        allowedSourceRoots: [allowedRoot],
+      validateBindMounts(["/opt/external:/data:ro"], {
+        allowedSourceRoots: ["/home/user/project"],
       }),
     ).toThrow(/outside allowed roots/);
   });
 
   it("allows bind sources in allowed roots when allowlist is configured", () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "openclaw-sbx-allowed-"));
-    expect(
-      validateBindMounts([`${join(projectRoot, "cache")}:/data:ro`], {
-        allowedSourceRoots: [projectRoot],
+    expect(() =>
+      validateBindMounts(["/home/user/project/cache:/data:ro"], {
+        allowedSourceRoots: ["/home/user/project"],
       }),
-    ).toBeUndefined();
+    ).not.toThrow();
   });
 
   it("allows bind sources outside allowed roots with explicit dangerous override", () => {
-    const allowedRoot = mkdtempSync(join(tmpdir(), "openclaw-sbx-allowed-root-"));
-    const externalRoot = mkdtempSync(join(tmpdir(), "openclaw-sbx-external-"));
-    expect(
-      validateBindMounts([`${externalRoot}:/data:ro`], {
-        allowedSourceRoots: [allowedRoot],
+    expect(() =>
+      validateBindMounts(["/opt/external:/data:ro"], {
+        allowedSourceRoots: ["/home/user/project"],
         allowSourcesOutsideAllowedRoots: true,
       }),
-    ).toBeUndefined();
+    ).not.toThrow();
   });
 
   it("blocks reserved container target paths by default", () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "openclaw-sbx-reserved-default-"));
     expect(() =>
-      validateBindMounts([`${projectRoot}:/workspace:rw`, `${projectRoot}:/agent/cache:rw`]),
+      validateBindMounts([
+        "/home/user/project:/workspace:rw",
+        "/home/user/project:/agent/cache:rw",
+      ]),
     ).toThrow(/reserved container path/);
   });
 
   it("allows reserved container target paths with explicit dangerous override", () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "openclaw-sbx-reserved-"));
-    expect(
-      validateBindMounts([`${projectRoot}:/workspace:rw`], {
+    expect(() =>
+      validateBindMounts(["/home/user/project:/workspace:rw"], {
         allowReservedContainerTargets: true,
       }),
-    ).toBeUndefined();
+    ).not.toThrow();
   });
 });
 
@@ -320,10 +304,10 @@ function normalizePathForSnapshot(input: string): string {
 
 describe("validateNetworkMode", () => {
   it("allows bridge/none/custom/undefined", () => {
-    expect(validateNetworkMode("bridge")).toBeUndefined();
-    expect(validateNetworkMode("none")).toBeUndefined();
-    expect(validateNetworkMode("my-custom-network")).toBeUndefined();
-    expect(validateNetworkMode(undefined)).toBeUndefined();
+    expect(() => validateNetworkMode("bridge")).not.toThrow();
+    expect(() => validateNetworkMode("none")).not.toThrow();
+    expect(() => validateNetworkMode("my-custom-network")).not.toThrow();
+    expect(() => validateNetworkMode(undefined)).not.toThrow();
   });
 
   it("blocks host mode (case-insensitive)", () => {
@@ -353,25 +337,25 @@ describe("validateNetworkMode", () => {
   });
 
   it("allows container namespace joins with explicit dangerous override", () => {
-    expect(
+    expect(() =>
       validateNetworkMode("container:abc123", {
         allowContainerNamespaceJoin: true,
       }),
-    ).toBeUndefined();
+    ).not.toThrow();
   });
 });
 
 describe("validateSeccompProfile", () => {
   it("allows custom profile paths/undefined", () => {
-    expect(validateSeccompProfile("/tmp/seccomp.json")).toBeUndefined();
-    expect(validateSeccompProfile(undefined)).toBeUndefined();
+    expect(() => validateSeccompProfile("/tmp/seccomp.json")).not.toThrow();
+    expect(() => validateSeccompProfile(undefined)).not.toThrow();
   });
 });
 
 describe("validateApparmorProfile", () => {
   it("allows named profile/undefined", () => {
-    expect(validateApparmorProfile("openclaw-sandbox")).toBeUndefined();
-    expect(validateApparmorProfile(undefined)).toBeUndefined();
+    expect(() => validateApparmorProfile("openclaw-sandbox")).not.toThrow();
+    expect(() => validateApparmorProfile(undefined)).not.toThrow();
   });
 });
 
@@ -395,14 +379,13 @@ describe("profile hardening", () => {
 
 describe("validateSandboxSecurity", () => {
   it("passes with safe config", () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "openclaw-sbx-safe-config-"));
-    expect(
+    expect(() =>
       validateSandboxSecurity({
-        binds: [`${projectRoot}:/src:rw`],
+        binds: ["/home/user/src:/src:rw"],
         network: "none",
         seccompProfile: "/tmp/seccomp.json",
         apparmorProfile: "openclaw-sandbox",
       }),
-    ).toBeUndefined();
+    ).not.toThrow();
   });
 });

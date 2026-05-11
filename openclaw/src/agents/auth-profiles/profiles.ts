@@ -1,40 +1,16 @@
 import { normalizeStringEntries } from "../../shared/string-normalization.js";
 import { normalizeSecretInput } from "../../utils/normalize-secret-input.js";
 import { resolveProviderIdForAuth } from "../provider-auth-aliases.js";
-import { findNormalizedProviderKey, normalizeProviderId } from "../provider-id.js";
-import { dedupeProfileIds, listProfilesForProvider } from "./profile-list.js";
+import { normalizeProviderId } from "../provider-id.js";
 import {
   ensureAuthProfileStoreForLocalUpdate,
   saveAuthProfileStore,
   updateAuthProfileStoreWithLock,
 } from "./store.js";
-import type { AuthProfileCredential, AuthProfileStore, ProfileUsageStats } from "./types.js";
-export { dedupeProfileIds, listProfilesForProvider } from "./profile-list.js";
+import type { AuthProfileCredential, AuthProfileStore } from "./types.js";
 
-function resetSuccessfulUsageStats(
-  existing: ProfileUsageStats | undefined,
-  lastUsed: number,
-): ProfileUsageStats {
-  return {
-    ...existing,
-    errorCount: 0,
-    cooldownUntil: undefined,
-    cooldownReason: undefined,
-    cooldownModel: undefined,
-    disabledUntil: undefined,
-    disabledReason: undefined,
-    failureCounts: undefined,
-    lastUsed,
-  };
-}
-
-function updateSuccessfulUsageStatsEntry(
-  store: AuthProfileStore,
-  profileId: string,
-  lastUsed: number,
-): void {
-  store.usageStats = store.usageStats ?? {};
-  store.usageStats[profileId] = resetSuccessfulUsageStats(store.usageStats[profileId], lastUsed);
+export function dedupeProfileIds(profileIds: string[]): string[] {
+  return [...new Set(profileIds)];
 }
 
 export async function setAuthProfileOrder(params: {
@@ -62,41 +38,6 @@ export async function setAuthProfileOrder(params: {
         return true;
       }
       store.order[providerKey] = deduped;
-      return true;
-    },
-  });
-}
-
-export async function promoteAuthProfileInOrder(params: {
-  agentDir?: string;
-  provider: string;
-  profileId: string;
-}): Promise<AuthProfileStore | null> {
-  const providerKey = resolveProviderIdForAuth(params.provider);
-  return await updateAuthProfileStoreWithLock({
-    agentDir: params.agentDir,
-    updater: (store) => {
-      const profile = store.profiles[params.profileId];
-      if (!profile || resolveProviderIdForAuth(profile.provider) !== providerKey) {
-        return false;
-      }
-      const orderKey =
-        findNormalizedProviderKey(store.order, providerKey) ?? normalizeProviderId(providerKey);
-      const existing = store.order?.[orderKey];
-      if (!existing || existing.length === 0) {
-        return false;
-      }
-      const next = dedupeProfileIds([
-        params.profileId,
-        ...existing.filter((profileId) => profileId !== params.profileId),
-      ]);
-      if (
-        next.length === existing.length &&
-        next.every((profileId, idx) => profileId === existing[idx])
-      ) {
-        return false;
-      }
-      store.order = { ...store.order, [orderKey]: next };
       return true;
     },
   });
@@ -140,50 +81,14 @@ export async function upsertAuthProfileWithLock(params: {
   });
 }
 
-export async function removeProviderAuthProfilesWithLock(params: {
-  provider: string;
-  agentDir?: string;
-}): Promise<AuthProfileStore | null> {
-  const providerKey = resolveProviderIdForAuth(params.provider);
-  const storeOrderKey = normalizeProviderId(params.provider);
-  return await updateAuthProfileStoreWithLock({
-    agentDir: params.agentDir,
-    updater: (store) => {
-      const profileIds = listProfilesForProvider(store, params.provider);
-      let changed = false;
-      for (const profileId of profileIds) {
-        if (store.profiles[profileId]) {
-          delete store.profiles[profileId];
-          changed = true;
-        }
-        if (store.usageStats?.[profileId]) {
-          delete store.usageStats[profileId];
-          changed = true;
-        }
-      }
-      if (store.order?.[storeOrderKey]) {
-        delete store.order[storeOrderKey];
-        changed = true;
-        if (Object.keys(store.order).length === 0) {
-          store.order = undefined;
-        }
-      }
-      if (store.lastGood?.[providerKey]) {
-        delete store.lastGood[providerKey];
-        changed = true;
-        if (Object.keys(store.lastGood).length === 0) {
-          store.lastGood = undefined;
-        }
-      }
-      if (store.usageStats && Object.keys(store.usageStats).length === 0) {
-        store.usageStats = undefined;
-      }
-      return changed;
-    },
-  });
+export function listProfilesForProvider(store: AuthProfileStore, provider: string): string[] {
+  const providerKey = resolveProviderIdForAuth(provider);
+  return Object.entries(store.profiles)
+    .filter(([, cred]) => resolveProviderIdForAuth(cred.provider) === providerKey)
+    .map(([id]) => id);
 }
 
-export async function markAuthProfileSuccess(params: {
+export async function markAuthProfileGood(params: {
   store: AuthProfileStore;
   provider: string;
   profileId: string;
@@ -191,7 +96,6 @@ export async function markAuthProfileSuccess(params: {
 }): Promise<void> {
   const { store, provider, profileId, agentDir } = params;
   const providerKey = resolveProviderIdForAuth(provider);
-  const lastUsed = Date.now();
   const updated = await updateAuthProfileStoreWithLock({
     agentDir,
     updater: (freshStore) => {
@@ -200,13 +104,11 @@ export async function markAuthProfileSuccess(params: {
         return false;
       }
       freshStore.lastGood = { ...freshStore.lastGood, [providerKey]: profileId };
-      updateSuccessfulUsageStatsEntry(freshStore, profileId, lastUsed);
       return true;
     },
   });
   if (updated) {
     store.lastGood = updated.lastGood;
-    store.usageStats = updated.usageStats;
     return;
   }
   const profile = store.profiles[profileId];
@@ -214,6 +116,5 @@ export async function markAuthProfileSuccess(params: {
     return;
   }
   store.lastGood = { ...store.lastGood, [providerKey]: profileId };
-  updateSuccessfulUsageStatsEntry(store, profileId, lastUsed);
   saveAuthProfileStore(store, agentDir);
 }

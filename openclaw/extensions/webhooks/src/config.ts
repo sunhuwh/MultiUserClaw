@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { normalizeWebhookPath } from "../runtime-api.js";
+import type { PluginLogger } from "../api.js";
+import {
+  normalizeWebhookPath,
+  resolveConfiguredSecretInputString,
+  type OpenClawConfig,
+} from "../runtime-api.js";
 
 const secretRefSchema = z
   .object({
@@ -28,22 +33,23 @@ const webhooksPluginConfigSchema = z
   })
   .strict();
 
-export type WebhookSecretInput = z.infer<typeof secretInputSchema>;
-
-type ConfiguredWebhookRouteConfig = {
+export type ResolvedWebhookRouteConfig = {
   routeId: string;
   path: string;
   sessionKey: string;
-  secret: WebhookSecretInput;
+  secret: string;
   controllerId: string;
   description?: string;
 };
 
-export function resolveWebhooksPluginConfig(params: {
+export async function resolveWebhooksPluginConfig(params: {
   pluginConfig: unknown;
-}): ConfiguredWebhookRouteConfig[] {
+  cfg: OpenClawConfig;
+  env: NodeJS.ProcessEnv;
+  logger?: PluginLogger;
+}): Promise<ResolvedWebhookRouteConfig[]> {
   const parsed = webhooksPluginConfigSchema.parse(params.pluginConfig ?? {});
-  const configuredRoutes: ConfiguredWebhookRouteConfig[] = [];
+  const resolvedRoutes: ResolvedWebhookRouteConfig[] = [];
   const seenPaths = new Map<string, string>();
 
   for (const [routeId, route] of Object.entries(parsed.routes)) {
@@ -58,16 +64,32 @@ export function resolveWebhooksPluginConfig(params: {
       );
     }
 
+    const secretResolution = await resolveConfiguredSecretInputString({
+      config: params.cfg,
+      env: params.env,
+      value: route.secret,
+      path: `plugins.entries.webhooks.routes.${routeId}.secret`,
+    });
+    const secret = secretResolution.value?.trim();
+    if (!secret) {
+      params.logger?.warn?.(
+        `[webhooks] skipping route ${routeId}: ${
+          secretResolution.unresolvedRefReason ?? "secret is empty or unresolved"
+        }`,
+      );
+      continue;
+    }
+
     seenPaths.set(path, routeId);
-    configuredRoutes.push({
+    resolvedRoutes.push({
       routeId,
       path,
       sessionKey: route.sessionKey,
-      secret: route.secret,
+      secret,
       controllerId: route.controllerId ?? `webhooks/${routeId}`,
       ...(route.description ? { description: route.description } : {}),
     });
   }
 
-  return configuredRoutes;
+  return resolvedRoutes;
 }

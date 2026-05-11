@@ -1,4 +1,3 @@
-import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { fetchWithSsrFGuard } from "../infra/net/fetch-guard.js";
 import type { SsrFPolicy } from "../infra/net/ssrf.js";
 import { logWarn } from "../logger.js";
@@ -110,7 +109,7 @@ export const DEFAULT_INPUT_FILE_MIMES = [
 ];
 export const DEFAULT_INPUT_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 export const DEFAULT_INPUT_FILE_MAX_BYTES = 5 * 1024 * 1024;
-export const DEFAULT_INPUT_FILE_MAX_CHARS = 60_000;
+export const DEFAULT_INPUT_FILE_MAX_CHARS = 200_000;
 export const DEFAULT_INPUT_MAX_REDIRECTS = 3;
 export const DEFAULT_INPUT_TIMEOUT_MS = 10_000;
 export const DEFAULT_INPUT_PDF_MAX_PAGES = 4;
@@ -323,7 +322,6 @@ export async function extractImageContentFromSource(
 export async function extractFileContentFromSource(params: {
   source: InputFileSource;
   limits: InputFileLimits;
-  config?: OpenClawConfig;
 }): Promise<InputFileExtractResult> {
   const { source, limits } = params;
   const filename = source.filename || "file";
@@ -380,7 +378,6 @@ export async function extractFileContentFromSource(params: {
       maxPages: limits.pdf.maxPages,
       maxPixels: limits.pdf.maxPixels,
       minTextChars: limits.pdf.minTextChars,
-      ...(params.config ? { config: params.config } : {}),
       onImageExtractionError: (err) => {
         logWarn(`media: PDF image extraction skipped, ${String(err)}`);
       },

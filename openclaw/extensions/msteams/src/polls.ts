@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
-import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { isRecord, readNestedString } from "./attachments/shared.js";
 import { resolveMSTeamsStorePath } from "./storage.js";
 import { readJsonFile, withFileLock, writeJsonFile } from "./store-fs.js";
 
-type MSTeamsPollVote = {
+export type MSTeamsPollVote = {
   pollId: string;
   selections: string[];
 };
@@ -30,7 +30,7 @@ export type MSTeamsPollStore = {
   }) => Promise<MSTeamsPoll | null>;
 };
 
-type MSTeamsPollCard = {
+export type MSTeamsPollCard = {
   pollId: string;
   question: string;
   options: string[];
@@ -85,10 +85,6 @@ function readNestedValue(value: unknown, keys: Array<string | number>): unknown 
     current = current[key as keyof typeof current];
   }
   return current;
-}
-
-function readNestedString(value: unknown, keys: Array<string | number>): string | undefined {
-  return normalizeOptionalString(readNestedValue(value, keys));
 }
 
 export function extractMSTeamsPollVote(
@@ -210,7 +206,7 @@ export function buildMSTeamsPollCard(params: {
   };
 }
 
-type MSTeamsPollStoreFsOptions = {
+export type MSTeamsPollStoreFsOptions = {
   env?: NodeJS.ProcessEnv;
   homedir?: () => string;
   stateDir?: string;

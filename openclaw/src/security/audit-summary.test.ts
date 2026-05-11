@@ -2,18 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import { collectAttackSurfaceSummaryFindings } from "./audit-extra.summary.js";
 
-function requireAttackSurfaceSummary(
-  findings: ReturnType<typeof collectAttackSurfaceSummaryFindings>,
-) {
-  const summary = findings.find((f) => f.checkId === "summary.attack_surface");
-  if (!summary) {
-    throw new Error("Expected attack surface summary finding");
-  }
-  expect(summary.checkId).toBe("summary.attack_surface");
-  expect(summary.severity).toBe("info");
-  return summary;
-}
-
 describe("security audit attack surface summary", () => {
   it("includes an attack surface summary (info)", () => {
     const cfg: OpenClawConfig = {
@@ -24,8 +12,13 @@ describe("security audit attack surface summary", () => {
     };
 
     const findings = collectAttackSurfaceSummaryFindings(cfg);
-    const summary = requireAttackSurfaceSummary(findings);
+    const summary = findings.find((f) => f.checkId === "summary.attack_surface");
 
-    expect(summary.detail).toContain("trust model: personal assistant");
+    expect(findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ checkId: "summary.attack_surface", severity: "info" }),
+      ]),
+    );
+    expect(summary?.detail).toContain("trust model: personal assistant");
   });
 });

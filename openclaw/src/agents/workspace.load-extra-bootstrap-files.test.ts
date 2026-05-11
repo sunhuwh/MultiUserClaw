@@ -106,6 +106,6 @@ describe("loadExtraBootstrapFiles", () => {
     ]);
 
     expect(files).toHaveLength(0);
-    expect(diagnostics.map((diagnostic) => diagnostic.reason)).toContain("security");
+    expect(diagnostics.some((d) => d.reason === "security")).toBe(true);
   });
 });

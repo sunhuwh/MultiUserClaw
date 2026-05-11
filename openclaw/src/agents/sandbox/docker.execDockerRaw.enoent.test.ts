@@ -13,10 +13,9 @@ describe("execDockerRaw", () => {
       }
 
       expect(err).toBeInstanceOf(Error);
-      const error = err as Error & { code?: string };
-      expect(error.code).toBe("INVALID_CONFIG");
-      expect(error.message).toContain("Sandbox mode requires Docker");
-      expect(error.message).toContain("agents.defaults.sandbox.mode=off");
+      expect(err).toMatchObject({ code: "INVALID_CONFIG" });
+      expect((err as Error).message).toContain("Sandbox mode requires Docker");
+      expect((err as Error).message).toContain("agents.defaults.sandbox.mode=off");
     });
   });
 });

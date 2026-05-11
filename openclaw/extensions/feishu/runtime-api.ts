@@ -19,7 +19,7 @@ export type {
 } from "openclaw/plugin-sdk/core";
 export type { OpenClawConfig as ClawdbotConfig } from "openclaw/plugin-sdk/core";
 export type { RuntimeEnv } from "openclaw/plugin-sdk/runtime";
-export type { GroupToolPolicyConfig } from "openclaw/plugin-sdk/config-contracts";
+export type { GroupToolPolicyConfig } from "openclaw/plugin-sdk/config-runtime";
 export {
   DEFAULT_ACCOUNT_ID,
   buildChannelConfigSchema,
@@ -33,16 +33,13 @@ export {
 } from "openclaw/plugin-sdk/channel-status";
 export { buildAgentMediaPayload } from "openclaw/plugin-sdk/agent-media-payload";
 export { createChannelPairingController } from "openclaw/plugin-sdk/channel-pairing";
-export { createReplyPrefixContext } from "openclaw/plugin-sdk/channel-message";
+export { createReplyPrefixContext } from "openclaw/plugin-sdk/channel-reply-pipeline";
 export {
   evaluateSupplementalContextVisibility,
   filterSupplementalContextItems,
   resolveChannelContextVisibilityMode,
-} from "openclaw/plugin-sdk/context-visibility-runtime";
-export {
-  loadSessionStore,
-  resolveSessionStoreEntry,
-} from "openclaw/plugin-sdk/session-store-runtime";
+} from "openclaw/plugin-sdk/config-runtime";
+export { loadSessionStore, resolveSessionStoreEntry } from "openclaw/plugin-sdk/config-runtime";
 export { readJsonFileWithFallback } from "openclaw/plugin-sdk/json-store";
 export { createPersistentDedupe } from "openclaw/plugin-sdk/persistent-dedupe";
 export { normalizeAgentId } from "openclaw/plugin-sdk/routing";

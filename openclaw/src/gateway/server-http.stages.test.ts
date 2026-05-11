@@ -19,8 +19,7 @@ describe("runGatewayHttpRequestStages", () => {
     expect(await runGatewayHttpRequestStages(stages)).toBe(false);
   });
 
-  it("skips a throwing stage marked continueOnError and continues to subsequent stages", async () => {
-    const stageError = new Error("Cannot find module '@slack/bolt'");
+  it("skips a throwing stage and continues to subsequent stages", async () => {
     const stageC = vi.fn(() => true);
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -28,9 +27,8 @@ describe("runGatewayHttpRequestStages", () => {
       { name: "a", run: () => false },
       {
         name: "broken-facade",
-        continueOnError: true,
         run: () => {
-          throw stageError;
+          throw new Error("Cannot find module '@slack/bolt'");
         },
       },
       { name: "c", run: stageC },
@@ -42,23 +40,21 @@ describe("runGatewayHttpRequestStages", () => {
     expect(stageC).toHaveBeenCalled();
     expect(consoleSpy).toHaveBeenCalledWith(
       expect.stringContaining('stage "broken-facade" threw'),
-      stageError,
+      expect.any(Error),
     );
 
     consoleSpy.mockRestore();
   });
 
-  it("skips a rejecting async stage marked continueOnError and continues", async () => {
-    const stageError = new Error("ERR_MODULE_NOT_FOUND");
+  it("skips a rejecting async stage and continues", async () => {
     const stageC = vi.fn(() => true);
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const stages = [
       {
         name: "async-broken",
-        continueOnError: true,
         run: async () => {
-          throw stageError;
+          throw new Error("ERR_MODULE_NOT_FOUND");
         },
       },
       { name: "c", run: stageC },
@@ -70,13 +66,15 @@ describe("runGatewayHttpRequestStages", () => {
     expect(stageC).toHaveBeenCalled();
     expect(consoleSpy).toHaveBeenCalledWith(
       expect.stringContaining('stage "async-broken" threw'),
-      stageError,
+      expect.any(Error),
     );
 
     consoleSpy.mockRestore();
   });
 
-  it("rethrows when a stage throws without continueOnError", async () => {
+  it("returns false when the only non-throwing stages do not handle", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
     const stages = [
       {
         name: "broken",
@@ -87,6 +85,10 @@ describe("runGatewayHttpRequestStages", () => {
       { name: "unmatched", run: () => false },
     ];
 
-    await expect(runGatewayHttpRequestStages(stages)).rejects.toThrow("load failed");
+    const result = await runGatewayHttpRequestStages(stages);
+
+    expect(result).toBe(false);
+
+    consoleSpy.mockRestore();
   });
 });

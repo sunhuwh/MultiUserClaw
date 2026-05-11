@@ -10,7 +10,6 @@ import {
   VLLM_MODEL_PLACEHOLDER,
   VLLM_PROVIDER_LABEL,
 } from "./api.js";
-import { wrapVllmProviderStream } from "./stream.js";
 
 const PROVIDER_ID = "vllm";
 
@@ -59,7 +58,7 @@ export default definePluginEntry({
           },
         },
       ],
-      catalog: {
+      discovery: {
         order: "late",
         run: async (ctx) => {
           const providerSetup = await loadProviderSetup();
@@ -90,7 +89,6 @@ export default definePluginEntry({
         "vLLM requires authentication to be registered as a provider. " +
         'Set VLLM_API_KEY (any value works) or run "openclaw configure". ' +
         "See: https://docs.openclaw.ai/providers/vllm",
-      wrapStreamFn: wrapVllmProviderStream,
     });
   },
 });

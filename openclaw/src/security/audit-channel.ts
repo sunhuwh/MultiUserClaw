@@ -2,16 +2,16 @@ import {
   hasConfiguredUnavailableCredentialStatus,
   hasResolvedCredentialValue,
 } from "../channels/account-snapshot-fields.js";
-import { resolveDmAllowAuditState } from "../channels/message-access/dm-allow-state.js";
 import { resolveChannelDefaultAccountId } from "../channels/plugins/helpers.js";
-import type { ChannelPlugin } from "../channels/plugins/types.plugin.js";
-import type { ChannelId } from "../channels/plugins/types.public.js";
+import type { listChannelPlugins } from "../channels/plugins/index.js";
+import type { ChannelId } from "../channels/plugins/types.js";
 import { inspectReadOnlyChannelAccount } from "../channels/read-only-account-inspect.js";
 import { formatCliCommand } from "../cli/command-format.js";
+import type { OpenClawConfig } from "../config/config.js";
 import { isDangerousNameMatchingEnabled } from "../config/dangerous-name-matching.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { formatErrorMessage } from "../infra/errors.js";
-import type { SecurityAuditFinding, SecurityAuditSeverity } from "./audit.types.js";
+import type { SecurityAuditFinding, SecurityAuditSeverity } from "./audit.js";
+import { resolveDmAllowState } from "./dm-policy-shared.js";
 
 function classifyChannelWarningSeverity(message: string): SecurityAuditSeverity {
   const s = message.toLowerCase();
@@ -80,7 +80,7 @@ function formatChannelAccountNote(params: {
 export async function collectChannelSecurityFindings(params: {
   cfg: OpenClawConfig;
   sourceConfig?: OpenClawConfig;
-  plugins: ChannelPlugin[];
+  plugins: ReturnType<typeof listChannelPlugins>;
 }): Promise<SecurityAuditFinding[]> {
   const findings: SecurityAuditFinding[] = [];
   const sourceConfig = params.sourceConfig ?? params.cfg;
@@ -89,16 +89,13 @@ export async function collectChannelSecurityFindings(params: {
     plugin: (typeof params.plugins)[number],
     cfg: OpenClawConfig,
     accountId: string,
-  ) => {
-    if (plugin.config.inspectAccount) {
-      return await plugin.config.inspectAccount(cfg, accountId);
-    }
-    return await inspectReadOnlyChannelAccount({
+  ) =>
+    plugin.config.inspectAccount?.(cfg, accountId) ??
+    (await inspectReadOnlyChannelAccount({
       channelId: plugin.id,
       cfg,
       accountId,
-    });
-  };
+    }));
 
   const asAccountRecord = (value: unknown): Record<string, unknown> | null =>
     value && typeof value === "object" && !Array.isArray(value)
@@ -206,11 +203,10 @@ export async function collectChannelSecurityFindings(params: {
     normalizeEntry?: (raw: string) => string;
   }) => {
     const policyPath = input.policyPath ?? `${input.allowFromPath}policy`;
-    const { hasWildcard, isMultiUserDm } = await resolveDmAllowAuditState({
+    const { hasWildcard, isMultiUserDm } = await resolveDmAllowState({
       provider: input.provider,
       accountId: input.accountId,
       allowFrom: input.allowFrom,
-      dmPolicy: input.dmPolicy,
       normalizeEntry: input.normalizeEntry,
     });
     const dmScope = params.cfg.session?.dmScope ?? "main";
@@ -342,7 +338,7 @@ export async function collectChannelSecurityFindings(params: {
           account,
         });
         for (const message of warnings ?? []) {
-          const trimmed = message.trim();
+          const trimmed = String(message).trim();
           if (!trimmed) {
             continue;
           }

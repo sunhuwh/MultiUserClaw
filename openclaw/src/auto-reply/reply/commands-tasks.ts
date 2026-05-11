@@ -70,10 +70,7 @@ function formatVisibleTask(task: TaskRecord, index: number): string {
   const status = task.status.replaceAll("_", " ");
   const timing = formatTaskTiming(task);
   const detail = formatTaskDetail(task);
-  let meta = `${TASK_RUNTIME_LABELS[task.runtime]} · ${status}`;
-  if (timing) {
-    meta += ` · ${timing}`;
-  }
+  const meta = [TASK_RUNTIME_LABELS[task.runtime], status, timing].filter(Boolean).join(" · ");
   const lines = [`${index + 1}. ${TASK_STATUS_ICONS[task.status]} ${title}`, `   ${meta}`];
   if (detail) {
     lines.push(`   ${detail}`);
@@ -81,7 +78,7 @@ function formatVisibleTask(task: TaskRecord, index: number): string {
   return lines.join("\n");
 }
 
-function buildTasksText(params: { sessionKey: string; agentId: string }): string {
+export function buildTasksText(params: { sessionKey: string; agentId: string }): string {
   const sessionSnapshot = buildTaskStatusSnapshot(
     listTasksForSessionKeyForStatus(params.sessionKey),
   );
@@ -111,10 +108,12 @@ function buildTasksText(params: { sessionKey: string; agentId: string }): string
 }
 
 export async function buildTasksReply(params: HandleCommandsParams): Promise<ReplyPayload> {
-  const agentId = resolveSessionAgentId({
-    sessionKey: params.sessionKey,
-    config: params.cfg,
-  });
+  const agentId =
+    params.agentId ??
+    resolveSessionAgentId({
+      sessionKey: params.sessionKey,
+      config: params.cfg,
+    });
   return {
     text: buildTasksText({
       sessionKey: params.sessionKey,

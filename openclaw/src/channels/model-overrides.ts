@@ -1,4 +1,4 @@
-import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { OpenClawConfig } from "../config/config.js";
 import {
   parseRawSessionConversationRef,
   parseThreadSessionSuffix,
@@ -68,15 +68,19 @@ function buildChannelCandidates(
     normalizeMessageChannel(params.channel ?? "") ??
     normalizeOptionalLowercaseString(params.channel);
   const groupId = normalizeOptionalString(params.groupId);
-  const rawParentConversation = parseRawSessionConversationRef(params.parentSessionKey);
-  const channelPlugin = normalizedChannel ? getChannelPlugin(normalizedChannel) : undefined;
+  const sessionConversation = resolveSessionConversationRef(params.parentSessionKey);
+  const feishuParentOverrideFallbacks =
+    normalizedChannel === "feishu"
+      ? buildFeishuParentOverrideCandidates(sessionConversation?.rawId)
+      : [];
   const parentOverrideFallbacks =
-    channelPlugin?.conversationBindings?.buildModelOverrideParentCandidates?.({
-      parentConversationId: rawParentConversation?.rawId,
-    }) ?? [];
-  const sessionConversation = resolveSessionConversationRef(params.parentSessionKey, {
-    bundledFallback: parentOverrideFallbacks.length === 0,
-  });
+    (normalizedChannel
+      ? getChannelPlugin(
+          normalizedChannel,
+        )?.conversationBindings?.buildModelOverrideParentCandidates?.({
+          parentConversationId: sessionConversation?.rawId,
+        })
+      : null) ?? [];
   const groupConversationKind =
     normalizeChatType(params.groupChatType ?? undefined) === "channel"
       ? "channel"
@@ -101,6 +105,7 @@ function buildChannelCandidates(
       sessionConversation?.rawId,
       ...(groupConversation?.parentConversationCandidates ?? []),
       ...(sessionConversation?.parentConversationCandidates ?? []),
+      ...feishuParentOverrideFallbacks,
       ...parentOverrideFallbacks,
     ),
     parentKeys: buildChannelKeyCandidates(
@@ -120,7 +125,36 @@ function buildGenericParentOverrideCandidates(sessionKey: string | null | undefi
     return [];
   }
   const { baseSessionKey, threadId } = parseThreadSessionSuffix(raw.rawId);
-  return buildChannelKeyCandidates(threadId ? baseSessionKey : raw.rawId);
+  return buildChannelKeyCandidates(threadId ? baseSessionKey : undefined);
+}
+
+function buildFeishuParentOverrideCandidates(rawId: string | undefined): string[] {
+  const value = normalizeOptionalString(rawId);
+  if (!value) {
+    return [];
+  }
+  const topicSenderMatch = value.match(/^(.+):topic:([^:]+):sender:([^:]+)$/i);
+  if (topicSenderMatch) {
+    const chatId = normalizeOptionalLowercaseString(topicSenderMatch[1]);
+    const topicId = normalizeOptionalLowercaseString(topicSenderMatch[2]);
+    return [`${chatId}:topic:${topicId}`, chatId].filter((entry): entry is string =>
+      Boolean(entry),
+    );
+  }
+  const topicMatch = value.match(/^(.+):topic:([^:]+)$/i);
+  if (topicMatch) {
+    const chatId = normalizeOptionalLowercaseString(topicMatch[1]);
+    const topicId = normalizeOptionalLowercaseString(topicMatch[2]);
+    return [`${chatId}:topic:${topicId}`, chatId].filter((entry): entry is string =>
+      Boolean(entry),
+    );
+  }
+  const senderMatch = value.match(/^(.+):sender:([^:]+)$/i);
+  if (senderMatch) {
+    const chatId = normalizeOptionalLowercaseString(senderMatch[1]);
+    return chatId ? [chatId] : [];
+  }
+  return [];
 }
 
 function resolveDirectChannelModelMatch(params: {
@@ -129,9 +163,13 @@ function resolveDirectChannelModelMatch(params: {
   groupId?: string | null;
   parentSessionKey?: string | null;
 }): { model: string; matchKey?: string; matchSource?: ChannelMatchSource } | null {
+  const rawParent = parseRawSessionConversationRef(params.parentSessionKey);
   const directKeys = buildChannelKeyCandidates(
     params.groupId,
     ...buildGenericParentOverrideCandidates(params.parentSessionKey),
+    ...(normalizeOptionalLowercaseString(params.channel) === "feishu"
+      ? buildFeishuParentOverrideCandidates(rawParent?.rawId)
+      : []),
   );
   if (directKeys.length === 0) {
     return null;

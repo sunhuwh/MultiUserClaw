@@ -25,7 +25,6 @@ export type MediaSuiteConfig = {
   testFile: string;
   providerEnvVar: string;
   providers: string[];
-  defaultProviders?: string[];
 };
 
 export const MEDIA_SUITES: Record<MediaSuiteId, MediaSuiteConfig> = {
@@ -33,7 +32,7 @@ export const MEDIA_SUITES: Record<MediaSuiteId, MediaSuiteConfig> = {
     id: "image",
     testFile: "test/image-generation.runtime.live.test.ts",
     providerEnvVar: "OPENCLAW_LIVE_IMAGE_GENERATION_PROVIDERS",
-    providers: ["deepinfra", "fal", "google", "minimax", "openai", "vydra", "xai"],
+    providers: ["fal", "google", "minimax", "openai", "vydra"],
   },
   music: {
     id: "music",
@@ -48,21 +47,7 @@ export const MEDIA_SUITES: Record<MediaSuiteId, MediaSuiteConfig> = {
     providers: [
       "alibaba",
       "byteplus",
-      "deepinfra",
       "fal",
-      "google",
-      "minimax",
-      "openai",
-      "qwen",
-      "runway",
-      "together",
-      "vydra",
-      "xai",
-    ],
-    defaultProviders: [
-      "alibaba",
-      "byteplus",
-      "deepinfra",
       "google",
       "minimax",
       "openai",
@@ -228,10 +213,9 @@ function selectProviders(params: {
   requireAuth: boolean;
 }): string[] {
   const explicit = params.suiteProviders ?? params.globalProviders;
-  const candidates = explicit
-    ? params.suite.providers
-    : (params.suite.defaultProviders ?? params.suite.providers);
-  let providers = candidates.filter((provider) => (explicit ? explicit.has(provider) : true));
+  let providers = params.suite.providers.filter((provider) =>
+    explicit ? explicit.has(provider) : true,
+  );
   if (!params.requireAuth) {
     return providers;
   }
@@ -291,7 +275,6 @@ Defaults:
   - runs image + music + video
   - auto-loads missing provider env vars from ~/.profile
   - narrows each suite to providers that currently have usable auth
-  - skips the slow fal video smoke by default; pass --video-providers fal to run it
   - forwards extra args to scripts/test-live.mjs
 
 Flags:

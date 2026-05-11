@@ -16,8 +16,5 @@ const {
   setRuntime: setDiscordRuntime,
   tryGetRuntime: getOptionalDiscordRuntime,
   getRuntime: getDiscordRuntime,
-} = createPluginRuntimeStore<DiscordRuntime>({
-  pluginId: "discord",
-  errorMessage: "Discord runtime not initialized",
-});
+} = createPluginRuntimeStore<DiscordRuntime>("Discord runtime not initialized");
 export { getDiscordRuntime, getOptionalDiscordRuntime, setDiscordRuntime };

@@ -46,6 +46,7 @@ describe("browser state option collisions", () => {
 
   const getLastRequest = () => {
     const call = mocks.callBrowserRequest.mock.calls.at(-1);
+    expect(call).toBeDefined();
     if (!call) {
       throw new Error("expected browser request call");
     }
@@ -100,7 +101,9 @@ describe("browser state option collisions", () => {
       ],
       { from: "user" },
     );
-    const request = getLastRequest() as { body?: { cookie?: { url?: string } } };
+    const call = mocks.callBrowserRequest.mock.calls.at(-1);
+    expect(call).toBeDefined();
+    const request = call![1] as { body?: { cookie?: { url?: string } } };
     expect(request.body?.cookie?.url).toBe("https://example.com");
   });
 
@@ -110,7 +113,9 @@ describe("browser state option collisions", () => {
       ["browser", "--url", "https://inherited.example.com", "cookies", "set", "session", "abc"],
       { from: "user" },
     );
-    const request = getLastRequest() as { body?: { cookie?: { url?: string } } };
+    const call = mocks.callBrowserRequest.mock.calls.at(-1);
+    expect(call).toBeDefined();
+    const request = call![1] as { body?: { cookie?: { url?: string } } };
     expect(request.body?.cookie?.url).toBe("https://inherited.example.com");
   });
 

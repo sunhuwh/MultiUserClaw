@@ -10,7 +10,6 @@ import {
 } from "./completion-fish.js";
 import {
   COMPLETION_SHELLS,
-  COMPLETION_SKIP_PLUGIN_COMMANDS_ENV,
   installCompletion,
   isCompletionShell,
   resolveCompletionCachePath,
@@ -46,26 +45,6 @@ async function writeCompletionCache(params: {
     const script = getCompletionScript(shell, params.program);
     const targetPath = resolveCompletionCachePath(shell, params.binName);
     await fs.writeFile(targetPath, script, "utf-8");
-  }
-}
-
-function writeCompletionRegistrationWarning(message: string): void {
-  process.stderr.write(`[completion] ${message}\n`);
-}
-
-async function registerSubcommandsForCompletion(program: Command): Promise<void> {
-  const entries = getSubCliEntries();
-  for (const entry of entries) {
-    if (entry.name === "completion") {
-      continue;
-    }
-    try {
-      await registerSubCliByName(program, entry.name, process.argv, { purpose: "completion" });
-    } catch (error) {
-      writeCompletionRegistrationWarning(
-        `skipping subcommand \`${entry.name}\` while building completion cache: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
   }
 }
 
@@ -105,14 +84,18 @@ export function registerCompletionCli(program: Command) {
       }
 
       // Eagerly register all subcommands except completion itself to build the full tree.
-      await registerSubcommandsForCompletion(program);
-
-      if (process.env[COMPLETION_SKIP_PLUGIN_COMMANDS_ENV] !== "1") {
-        const { registerPluginCliCommandsFromValidatedConfig } = await import("../plugins/cli.js");
-        await registerPluginCliCommandsFromValidatedConfig(program, undefined, undefined, {
-          mode: "eager",
-        });
+      const entries = getSubCliEntries();
+      for (const entry of entries) {
+        if (entry.name === "completion") {
+          continue;
+        }
+        await registerSubCliByName(program, entry.name);
       }
+
+      const { registerPluginCliCommandsFromValidatedConfig } = await import("../plugins/cli.js");
+      await registerPluginCliCommandsFromValidatedConfig(program, undefined, undefined, {
+        mode: "eager",
+      });
 
       if (options.writeState) {
         const writeShells = options.shell ? [shell] : [...COMPLETION_SHELLS];

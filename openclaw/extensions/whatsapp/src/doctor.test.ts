@@ -13,7 +13,7 @@ describe("whatsapp doctor compatibility", () => {
     });
 
     expect(result.config.channels?.whatsapp).toBeUndefined();
-    expect(result.changes).toStrictEqual([]);
+    expect(result.changes).toEqual([]);
   });
 
   it("copies legacy ack reaction into configured whatsapp channel", () => {
@@ -69,6 +69,6 @@ describe("whatsapp doctor compatibility", () => {
       direct: true,
       group: "always",
     });
-    expect(result.changes).toStrictEqual([]);
+    expect(result.changes).toEqual([]);
   });
 });

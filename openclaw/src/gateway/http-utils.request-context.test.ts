@@ -63,7 +63,7 @@ describe("resolveTrustedHttpOperatorScopes", () => {
       tokenAuth,
     );
 
-    expect(scopes).toStrictEqual([]);
+    expect(scopes).toEqual([]);
   });
 
   it("keeps declared scopes for non-bearer HTTP requests", () => {
@@ -98,7 +98,7 @@ describe("resolveTrustedHttpOperatorScopes", () => {
       { trustDeclaredOperatorScopes: false },
     );
 
-    expect(scopes).toStrictEqual([]);
+    expect(scopes).toEqual([]);
   });
 });
 

@@ -1,25 +1,21 @@
-import { formatAllowlistMatchMeta } from "openclaw/plugin-sdk/allow-from";
 import { resolveInboundMentionDecision } from "openclaw/plugin-sdk/channel-inbound";
-import {
-  logInboundDrop,
-  resolveInboundSessionEnvelopeContext,
-} from "openclaw/plugin-sdk/channel-inbound";
-import {
-  filterSupplementalContextItems,
-  resolveChannelContextVisibilityMode,
-  shouldIncludeSupplementalContext,
-} from "openclaw/plugin-sdk/context-visibility-runtime";
-import {
-  dispatchReplyFromConfigWithSettledDispatcher,
-  hasFinalInboundReplyDispatch,
-  resolveInboundReplyDispatchCounts,
-} from "openclaw/plugin-sdk/inbound-reply-dispatch";
+import { resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
 import {
   buildPendingHistoryContextFromMap,
+  clearHistoryEntriesIfEnabled,
+  dispatchReplyFromConfigWithSettledDispatcher,
   DEFAULT_GROUP_HISTORY_LIMIT,
+  logInboundDrop,
+  evaluateSenderGroupAccessForPolicy,
+  filterSupplementalContextItems,
   recordPendingHistoryEntryIfEnabled,
+  resolveChannelContextVisibilityMode,
+  resolveDualTextControlCommandGate,
+  resolveInboundSessionEnvelopeContext,
+  shouldIncludeSupplementalContext,
+  formatAllowlistMatchMeta,
   type HistoryEntry,
-} from "openclaw/plugin-sdk/reply-history";
+} from "../../runtime-api.js";
 import {
   buildMSTeamsAttachmentPlaceholder,
   buildMSTeamsMediaPayload,
@@ -86,52 +82,19 @@ function extractTextFromHtmlAttachments(attachments: MSTeamsAttachmentLike[]): s
   }
   return "";
 }
-
 import type { MSTeamsMessageHandlerDeps } from "../monitor-handler.types.js";
-import { resolveMSTeamsAllowlistMatch, resolveMSTeamsReplyPolicy } from "../policy.js";
+import {
+  isMSTeamsGroupAllowed,
+  resolveMSTeamsAllowlistMatch,
+  resolveMSTeamsReplyPolicy,
+} from "../policy.js";
 import { extractMSTeamsPollVote } from "../polls.js";
 import { createMSTeamsReplyDispatcher } from "../reply-dispatcher.js";
 import { getMSTeamsRuntime } from "../runtime.js";
 import type { MSTeamsTurnContext } from "../sdk-types.js";
-import {
-  recordMSTeamsSentMessage,
-  wasMSTeamsMessageSentWithPersistence,
-} from "../sent-message-cache.js";
+import { recordMSTeamsSentMessage, wasMSTeamsMessageSent } from "../sent-message-cache.js";
 import { resolveMSTeamsSenderAccess } from "./access.js";
 import { resolveMSTeamsInboundMedia } from "./inbound-media.js";
-import { resolveMSTeamsRouteSessionKey } from "./thread-session.js";
-
-function formatMSTeamsSenderReason(params: {
-  reasonCode: string;
-  dmPolicy?: string;
-  groupPolicy?: string;
-}): string {
-  switch (params.reasonCode) {
-    case "dm_policy_open":
-      return "dmPolicy=open";
-    case "dm_policy_disabled":
-      return "dmPolicy=disabled";
-    case "dm_policy_pairing_required":
-      return "dmPolicy=pairing (not allowlisted)";
-    case "dm_policy_allowlisted":
-      return `dmPolicy=${params.dmPolicy ?? "allowlist"} (allowlisted)`;
-    case "dm_policy_not_allowlisted":
-      return `dmPolicy=${params.dmPolicy ?? "allowlist"} (not allowlisted)`;
-    case "group_policy_disabled":
-      return "groupPolicy=disabled";
-    case "group_policy_empty_allowlist":
-    case "route_sender_empty":
-      return "groupPolicy=allowlist (empty allowlist)";
-    case "group_policy_not_allowlisted":
-      return "groupPolicy=allowlist (not allowlisted)";
-    case "group_policy_open":
-      return "groupPolicy=open";
-    case "group_policy_allowed":
-      return `groupPolicy=${params.groupPolicy ?? "allowlist"}`;
-    default:
-      return params.reasonCode;
-  }
-}
 
 function buildStoredConversationReference(params: {
   activity: MSTeamsTurnContext["activity"];
@@ -289,22 +252,21 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       pairing,
       isDirectMessage,
       channelGate,
-      senderAccess,
-      commandAccess,
+      access,
+      configuredDmAllowFrom,
+      effectiveDmAllowFrom,
+      effectiveGroupAllowFrom,
       allowNameMatching,
       groupPolicy,
     } = await resolveMSTeamsSenderAccess({
       cfg,
       activity,
-      hasControlCommand: core.channel.text.hasControlCommand(text, cfg),
     });
-    const commandAuthorized = commandAccess.requested ? commandAccess.authorized : undefined;
-    const effectiveDmAllowFrom = senderAccess.effectiveAllowFrom;
-    const effectiveGroupAllowFrom = senderAccess.effectiveGroupAllowFrom;
+    const useAccessGroups = cfg.commands?.useAccessGroups !== false;
     const isChannel = conversationType === "channel";
 
-    if (isDirectMessage && msteamsCfg && senderAccess.decision !== "allow") {
-      if (senderAccess.reasonCode === "dm_policy_disabled") {
+    if (isDirectMessage && msteamsCfg && access.decision !== "allow") {
+      if (access.reason === "dmPolicy=disabled") {
         log.info("dropping dm (dms disabled)", {
           sender: senderId,
           label: senderName,
@@ -318,7 +280,7 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
         senderName,
         allowNameMatching,
       });
-      if (senderAccess.decision === "pairing") {
+      if (access.decision === "pairing") {
         conversationStore.upsert(conversationId, conversationRef).catch((err) => {
           log.debug?.("failed to save conversation reference", {
             error: formatUnknownError(err),
@@ -344,11 +306,7 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
         sender: senderId,
         label: senderName,
         dmPolicy,
-        reason: formatMSTeamsSenderReason({
-          reasonCode: senderAccess.reasonCode,
-          dmPolicy,
-          groupPolicy,
-        }),
+        reason: access.reason,
         allowlistMatch: formatAllowlistMatchMeta(allowMatch),
       });
       return;
@@ -372,8 +330,20 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
         });
         return;
       }
+      const senderGroupAccess = evaluateSenderGroupAccessForPolicy({
+        groupPolicy,
+        groupAllowFrom: effectiveGroupAllowFrom,
+        senderId,
+        isSenderAllowed: (_senderId, allowFrom) =>
+          resolveMSTeamsAllowlistMatch({
+            allowFrom,
+            senderId,
+            senderName,
+            allowNameMatching,
+          }).allowed,
+      });
 
-      if (!senderAccess.allowed && senderAccess.reasonCode === "group_policy_disabled") {
+      if (!senderGroupAccess.allowed && senderGroupAccess.reason === "disabled") {
         log.info("dropping group message (groupPolicy: disabled)", {
           conversationId,
         });
@@ -382,11 +352,7 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
         });
         return;
       }
-      if (
-        !senderAccess.allowed &&
-        (senderAccess.reasonCode === "group_policy_empty_allowlist" ||
-          senderAccess.reasonCode === "route_sender_empty")
-      ) {
+      if (!senderGroupAccess.allowed && senderGroupAccess.reason === "empty_allowlist") {
         log.info("dropping group message (groupPolicy: allowlist, no allowlist)", {
           conversationId,
         });
@@ -395,7 +361,7 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
         });
         return;
       }
-      if (!senderAccess.allowed && senderAccess.reasonCode === "group_policy_not_allowlisted") {
+      if (!senderGroupAccess.allowed && senderGroupAccess.reason === "sender_not_allowlisted") {
         const allowMatch = resolveMSTeamsAllowlistMatch({
           allowFrom: effectiveGroupAllowFrom,
           senderId,
@@ -416,7 +382,30 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       }
     }
 
-    if (commandAccess.shouldBlockControlCommand) {
+    const commandDmAllowFrom = isDirectMessage ? effectiveDmAllowFrom : configuredDmAllowFrom;
+    const ownerAllowedForCommands = isMSTeamsGroupAllowed({
+      groupPolicy: "allowlist",
+      allowFrom: commandDmAllowFrom,
+      senderId,
+      senderName,
+      allowNameMatching,
+    });
+    const groupAllowedForCommands = isMSTeamsGroupAllowed({
+      groupPolicy: "allowlist",
+      allowFrom: effectiveGroupAllowFrom,
+      senderId,
+      senderName,
+      allowNameMatching,
+    });
+    const { commandAuthorized, shouldBlock } = resolveDualTextControlCommandGate({
+      useAccessGroups,
+      primaryConfigured: commandDmAllowFrom.length > 0,
+      primaryAllowed: ownerAllowedForCommands,
+      secondaryConfigured: effectiveGroupAllowFrom.length > 0,
+      secondaryAllowed: groupAllowedForCommands,
+      hasControlCommand: core.channel.text.hasControlCommand(text, cfg),
+    });
+    if (shouldBlock) {
       logInboundDrop({
         log: logVerboseMessage,
         channel: "msteams",
@@ -487,12 +476,15 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
     // ;messageid= portion of conversation.id, i.e. the thread root) over
     // activity.replyToId (which may point to a non-root parent in deep threads).
     // DMs and group chats are unaffected — only channel thread replies fork.
-    route.sessionKey = resolveMSTeamsRouteSessionKey({
+    const channelThreadId = isChannel
+      ? (conversationMessageId ?? activity.replyToId ?? undefined)
+      : undefined;
+    const threadKeys = resolveThreadSessionKeys({
       baseSessionKey: route.sessionKey,
-      isChannel,
-      conversationMessageId,
-      replyToId: activity.replyToId,
+      threadId: channelThreadId,
+      parentSessionKey: channelThreadId ? route.sessionKey : undefined,
     });
+    route.sessionKey = threadKeys.sessionKey;
 
     const preview = rawBody.replace(/\s+/g, " ").slice(0, 160);
     const inboundLabel = isDirectMessage
@@ -521,7 +513,7 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       },
       policy: {
         isGroup: !isDirectMessage,
-        requireMention,
+        requireMention: Boolean(requireMention),
         allowTextCommands: false,
         hasControlCommand: false,
         commandAuthorized: false,
@@ -760,13 +752,6 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       ? `[Thread history]\n${threadContext}\n[/Thread history]\n\n${rawBody}`
       : rawBody;
 
-    // For Teams *channel* messages (not group chats / DMs), preserve the
-    // `teamId/channelId` pair on NativeChannelId so downstream action handlers
-    // can route through `/teams/{teamId}/channels/{channelId}` via Graph API.
-    // The bare conversation id (`19:...@thread.tacv2`) is insufficient on its
-    // own because channel Graph endpoints require the owning team id too.
-    const nativeChannelId = isChannel && teamId ? `${teamId}/${conversationId}` : undefined;
-
     const ctxPayload = core.channel.reply.finalizeInboundContext({
       Body: combinedBody,
       BodyForAgent: bodyForAgent,
@@ -781,7 +766,6 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       ChatType: isDirectMessage ? "direct" : isChannel ? "channel" : "group",
       ConversationLabel: envelopeFrom,
       GroupSubject: !isDirectMessage ? conversationType : undefined,
-      GroupSpace: teamId,
       SenderName: senderName,
       SenderId: senderId,
       Provider: "msteams" as const,
@@ -792,12 +776,20 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       CommandAuthorized: commandAuthorized,
       OriginatingChannel: "msteams" as const,
       OriginatingTo: teamsTo,
-      NativeChannelId: nativeChannelId,
       ReplyToId: activity.replyToId ?? undefined,
       ReplyToBody: includeQuoteContext ? quoteInfo?.body : undefined,
       ReplyToSender: includeQuoteContext ? quoteInfo?.sender : undefined,
       ReplyToIsQuote: quoteInfo ? true : undefined,
       ...mediaPayload,
+    });
+
+    await core.channel.session.recordInboundSession({
+      storePath,
+      sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
+      ctx: ctxPayload,
+      onRecordError: (err) => {
+        logVerboseMessage(`msteams: failed updating session meta: ${formatUnknownError(err)}`);
+      },
     });
 
     logVerboseMessage(`msteams inbound: from=${ctxPayload.From} preview="${preview}"`);
@@ -843,73 +835,41 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
 
     log.info("dispatching to agent", { sessionKey: route.sessionKey });
     try {
-      const turnResult = await core.channel.turn.run({
-        channel: "msteams",
-        accountId: route.accountId,
-        raw: context,
-        adapter: {
-          ingest: () => ({
-            id: activity.id ?? `${teamsFrom}:${Date.now()}`,
-            timestamp: timestamp?.getTime(),
-            rawText: rawBody,
-            textForAgent: bodyForAgent,
-            textForCommands: commandBody,
-            raw: activity,
-          }),
-          resolveTurn: () => ({
-            channel: "msteams",
-            accountId: route.accountId,
-            routeSessionKey: route.sessionKey,
-            storePath,
-            ctxPayload,
-            recordInboundSession: core.channel.session.recordInboundSession,
-            record: {
-              onRecordError: (err) => {
-                logVerboseMessage(
-                  `msteams: failed updating session meta: ${formatUnknownError(err)}`,
-                );
-              },
-            },
-            history: {
-              isGroup: isRoomish,
-              historyKey,
-              historyMap: conversationHistories,
-              limit: historyLimit,
-            },
-            onPreDispatchFailure: () =>
-              core.channel.reply.settleReplyDispatcher({
-                dispatcher,
-                onSettled: () => markDispatchIdle(),
-              }),
-            runDispatch: () =>
-              dispatchReplyFromConfigWithSettledDispatcher({
-                cfg,
-                ctxPayload,
-                dispatcher,
-                onSettled: () => markDispatchIdle(),
-                replyOptions,
-                configOverride,
-              }),
-          }),
-        },
+      const { queuedFinal, counts } = await dispatchReplyFromConfigWithSettledDispatcher({
+        cfg,
+        ctxPayload,
+        dispatcher,
+        onSettled: () => markDispatchIdle(),
+        replyOptions,
+        configOverride,
       });
-      const dispatchResult = turnResult.dispatched ? turnResult.dispatchResult : undefined;
-      const queuedFinal = dispatchResult?.queuedFinal ?? false;
-      const counts = resolveInboundReplyDispatchCounts(dispatchResult);
-      const hasFinalResponse = hasFinalInboundReplyDispatch(dispatchResult);
 
       log.info("dispatch complete", { queuedFinal, counts });
 
-      if (!hasFinalResponse) {
+      if (!queuedFinal) {
+        if (isRoomish && historyKey) {
+          clearHistoryEntriesIfEnabled({
+            historyMap: conversationHistories,
+            historyKey,
+            limit: historyLimit,
+          });
+        }
         return;
       }
       const finalCount = counts.final;
       logVerboseMessage(
         `msteams: delivered ${finalCount} reply${finalCount === 1 ? "" : "ies"} to ${teamsTo}`,
       );
+      if (isRoomish && historyKey) {
+        clearHistoryEntriesIfEnabled({
+          historyMap: conversationHistories,
+          historyKey,
+          limit: historyLimit,
+        });
+      }
     } catch (err) {
       log.error("dispatch failed", { error: formatUnknownError(err) });
-      runtime.error(`msteams dispatch failed: ${formatUnknownError(err)}`);
+      runtime.error?.(`msteams dispatch failed: ${formatUnknownError(err)}`);
       try {
         await context.sendActivity("⚠️ Something went wrong. Please try again.");
       } catch {
@@ -972,7 +932,7 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       });
     },
     onError: (err) => {
-      runtime.error(`msteams debounce flush failed: ${formatUnknownError(err)}`);
+      runtime.error?.(`msteams debounce flush failed: ${formatUnknownError(err)}`);
     },
   });
 
@@ -988,9 +948,7 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
     const conversationId = normalizeMSTeamsConversationId(activity.conversation?.id ?? "");
     const replyToId = activity.replyToId ?? undefined;
     const implicitMentionKinds: Array<"reply_to_bot"> =
-      conversationId &&
-      replyToId &&
-      (await wasMSTeamsMessageSentWithPersistence({ conversationId, messageId: replyToId }))
+      conversationId && replyToId && wasMSTeamsMessageSent(conversationId, replyToId)
         ? ["reply_to_bot"]
         : [];
 

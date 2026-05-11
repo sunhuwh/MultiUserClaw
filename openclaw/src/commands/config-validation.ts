@@ -6,7 +6,7 @@ import {
 } from "../config/config.js";
 import { formatConfigIssueLines } from "../config/issue-format.js";
 import {
-  buildPluginCompatibilitySnapshotNotices,
+  buildPluginCompatibilityNotices,
   formatPluginCompatibilityNotice,
 } from "../plugins/status.js";
 import type { RuntimeEnv } from "../runtime.js";
@@ -21,16 +21,15 @@ export async function requireValidConfigFileSnapshot(
       snapshot.issues.length > 0
         ? formatConfigIssueLines(snapshot.issues, "-").join("\n")
         : "Unknown validation issue.";
-    runtime.error(`OpenClaw config is invalid: ${snapshot.path}\n${issues}`);
-    runtime.error(`Fix: ${formatCliCommand("openclaw doctor --fix")}`);
-    runtime.error(`Inspect: ${formatCliCommand("openclaw config validate")}`);
+    runtime.error(`Config invalid:\n${issues}`);
+    runtime.error(`Fix the config or run ${formatCliCommand("openclaw doctor")}.`);
     runtime.exit(1);
     return null;
   }
   if (opts?.includeCompatibilityAdvisory !== true) {
     return snapshot;
   }
-  const compatibility = buildPluginCompatibilitySnapshotNotices({ config: snapshot.config });
+  const compatibility = buildPluginCompatibilityNotices({ config: snapshot.config });
   if (compatibility.length > 0) {
     runtime.log(
       [

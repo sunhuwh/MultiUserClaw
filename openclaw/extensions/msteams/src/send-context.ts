@@ -1,8 +1,6 @@
-import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import {
   resolveChannelMediaMaxBytes,
-  type MSTeamsConfig,
-  type MSTeamsReplyStyle,
   type OpenClawConfig,
   type PluginRuntime,
 } from "../runtime-api.js";
@@ -15,12 +13,11 @@ import type {
 import { formatUnknownError } from "./errors.js";
 import { resolveGraphChatId } from "./graph-upload.js";
 import type { MSTeamsAdapter } from "./messenger.js";
-import { resolveMSTeamsReplyPolicy, resolveMSTeamsRouteConfig } from "./policy.js";
 import { getMSTeamsRuntime } from "./runtime.js";
 import { createMSTeamsAdapter, createMSTeamsTokenProvider, loadMSTeamsSdkWithAuth } from "./sdk.js";
 import { resolveMSTeamsCredentials } from "./token.js";
 
-type MSTeamsConversationType = "personal" | "groupChat" | "channel";
+export type MSTeamsConversationType = "personal" | "groupChat" | "channel";
 
 export type MSTeamsProactiveContext = {
   appId: string;
@@ -30,8 +27,6 @@ export type MSTeamsProactiveContext = {
   log: ReturnType<PluginRuntime["logging"]["getChildLogger"]>;
   /** The type of conversation: personal (1:1), groupChat, or channel */
   conversationType: MSTeamsConversationType;
-  /** Reply style resolved for proactive text/media sends. */
-  replyStyle: MSTeamsReplyStyle;
   /** Token provider for Graph API / OneDrive operations */
   tokenProvider: MSTeamsAccessTokenProvider;
   /** SharePoint site ID for file uploads in group chats/channels */
@@ -46,32 +41,6 @@ export type MSTeamsProactiveContext = {
    */
   graphChatId?: string | null;
 };
-
-export function resolveMSTeamsProactiveReplyStyle(params: {
-  cfg?: MSTeamsConfig;
-  conversationId: string;
-  ref: StoredConversationReference;
-  conversationType: MSTeamsConversationType;
-}): MSTeamsReplyStyle {
-  const threadRootId = params.ref.threadId ?? params.ref.activityId;
-  if (params.conversationType !== "channel" || !threadRootId) {
-    return "top-level";
-  }
-
-  const routeConfig = resolveMSTeamsRouteConfig({
-    cfg: params.cfg,
-    teamId: params.ref.teamId,
-    conversationId: params.conversationId,
-    allowNameMatching: false,
-  });
-  const { replyStyle } = resolveMSTeamsReplyPolicy({
-    isDirectMessage: false,
-    globalConfig: params.cfg,
-    teamConfig: routeConfig.teamConfig,
-    channelConfig: routeConfig.channelConfig,
-  });
-  return replyStyle;
-}
 
 /**
  * Parse the target value into a conversation reference lookup key.
@@ -198,12 +167,6 @@ export async function resolveMSTeamsSendContext(params: {
     // groupChat, or unknown defaults to groupChat behavior
     conversationType = "groupChat";
   }
-  const replyStyle = resolveMSTeamsProactiveReplyStyle({
-    cfg: msteamsCfg,
-    conversationId,
-    ref,
-    conversationType,
-  });
 
   // Get SharePoint site ID from config (required for file uploads in group chats/channels)
   const sharePointSiteId = msteamsCfg.sharePointSiteId;
@@ -260,7 +223,6 @@ export async function resolveMSTeamsSendContext(params: {
     adapter: adapter as unknown as MSTeamsAdapter,
     log,
     conversationType,
-    replyStyle,
     tokenProvider,
     sharePointSiteId,
     mediaMaxBytes,

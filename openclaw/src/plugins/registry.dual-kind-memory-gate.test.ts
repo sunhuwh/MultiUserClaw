@@ -1,9 +1,9 @@
+import { afterEach, describe, expect, it } from "vitest";
 import {
   createPluginRegistryFixture,
   registerTestPlugin,
   registerVirtualTestPlugin,
-} from "openclaw/plugin-sdk/plugin-test-contracts";
-import { afterEach, describe, expect, it } from "vitest";
+} from "../../test/helpers/plugins/contracts-testkit.js";
 import { clearMemoryEmbeddingProviders } from "./memory-embedding-providers.js";
 import {
   _resetMemoryPluginState,
@@ -26,14 +26,6 @@ function createStubMemoryRuntime() {
       return { backend: "builtin" as const };
     },
   };
-}
-
-function requireMemoryRuntime() {
-  const runtime = getMemoryRuntime();
-  if (!runtime) {
-    throw new Error("expected memory runtime registration");
-  }
-  return runtime;
 }
 
 describe("dual-kind memory registration gate", () => {
@@ -80,9 +72,7 @@ describe("dual-kind memory registration gate", () => {
       },
     });
 
-    expect(
-      requireMemoryRuntime().resolveMemoryBackendConfig({ cfg: {} as never, agentId: "main" }),
-    ).toEqual({ backend: "builtin" });
+    expect(getMemoryRuntime()).toBeDefined();
     expect(
       registry.registry.diagnostics.filter(
         (d) => d.pluginId === "dual-plugin" && d.level === "warn",
@@ -104,9 +94,7 @@ describe("dual-kind memory registration gate", () => {
       },
     });
 
-    expect(
-      requireMemoryRuntime().resolveMemoryBackendConfig({ cfg: {} as never, agentId: "main" }),
-    ).toEqual({ backend: "builtin" });
+    expect(getMemoryRuntime()).toBeDefined();
   });
 
   it("allows selected dual-kind plugins to register the unified memory capability", () => {
@@ -132,8 +120,6 @@ describe("dual-kind memory registration gate", () => {
     expect(getMemoryCapabilityRegistration()).toMatchObject({
       pluginId: "dual-plugin",
     });
-    expect(
-      requireMemoryRuntime().resolveMemoryBackendConfig({ cfg: {} as never, agentId: "main" }),
-    ).toEqual({ backend: "builtin" });
+    expect(getMemoryRuntime()).toBeDefined();
   });
 });

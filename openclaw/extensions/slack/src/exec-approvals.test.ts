@@ -1,4 +1,4 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { describe, expect, it } from "vitest";
 import {
   getSlackExecApprovalApprovers,
@@ -29,7 +29,7 @@ function buildConfig(
 }
 
 describe("slack exec approvals", () => {
-  it("requires explicit enablement even when owner approvers resolve", () => {
+  it("auto-enables when owner approvers resolve and disables only when forced off", () => {
     expect(isSlackExecApprovalClientEnabled({ cfg: buildConfig() })).toBe(false);
     expect(
       isSlackExecApprovalClientEnabled({
@@ -40,18 +40,13 @@ describe("slack exec approvals", () => {
       isSlackExecApprovalClientEnabled({
         cfg: buildConfig({ approvers: ["U123"] }),
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       isSlackExecApprovalClientEnabled({
         cfg: {
           ...buildConfig(),
           commands: { ownerAllowFrom: ["slack:U123OWNER"] },
         } as OpenClawConfig,
-      }),
-    ).toBe(false);
-    expect(
-      isSlackExecApprovalClientEnabled({
-        cfg: buildConfig({ enabled: "auto", approvers: ["U123"] }),
       }),
     ).toBe(true);
     expect(
@@ -82,7 +77,7 @@ describe("slack exec approvals", () => {
       },
     );
 
-    expect(getSlackExecApprovalApprovers({ cfg })).toStrictEqual([]);
+    expect(getSlackExecApprovalApprovers({ cfg })).toEqual([]);
     expect(isSlackExecApprovalApprover({ cfg, senderId: "U789" })).toBe(false);
   });
 

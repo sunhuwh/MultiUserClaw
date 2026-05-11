@@ -1,15 +1,15 @@
 import { mapAllowFromEntries } from "openclaw/plugin-sdk/channel-config-helpers";
 import { normalizeChatType, type ChatType } from "../../channels/chat-type.js";
-import type { ChannelOutboundTargetMode } from "../../channels/plugins/types.core.js";
+import type { ChannelOutboundTargetMode } from "../../channels/plugins/types.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import type { AgentDefaultsConfig } from "../../config/types.agent-defaults.js";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { normalizeAccountId } from "../../routing/session-key.js";
 import {
   deliveryContextFromSession,
   mergeDeliveryContext,
-} from "../../utils/delivery-context.shared.js";
-import type { DeliveryContext } from "../../utils/delivery-context.types.js";
+  type DeliveryContext,
+} from "../../utils/delivery-context.js";
 import type {
   DeliverableMessageChannel,
   GatewayMessageChannel,
@@ -49,7 +49,7 @@ export type HeartbeatSenderContext = {
 
 export type { OutboundTargetResolution } from "./targets-resolve-shared.js";
 export { resolveSessionDeliveryTarget, type SessionDeliveryTarget } from "./targets-session.js";
-import { resolveSessionDeliveryTarget, type SessionDeliveryTarget } from "./targets-session.js";
+import { resolveSessionDeliveryTarget } from "./targets-session.js";
 
 // Channel docking: prefer plugin.outbound.resolveTarget + allowFrom to normalize destinations.
 export function resolveOutboundTarget(params: {
@@ -220,25 +220,12 @@ export function resolveHeartbeatDeliveryTarget(params: {
     }
   }
 
-  const inheritedHeartbeatThreadId = shouldReuseHeartbeatRouteThreadId({
-    cfg,
-    target,
-    heartbeat,
-    turnSource: params.turnSource,
-    entry,
-    resolvedTarget,
-  })
-    ? resolvedTarget.lastThreadId
-    : undefined;
-
   return {
     channel: resolvedTarget.channel,
     to: resolved.to,
     reason,
     accountId: effectiveAccountId,
-    // Heartbeats normally avoid inheriting session reply-thread IDs, but some
-    // plugins encode thread/topic ids as part of the destination identity.
-    threadId: resolvedTarget.threadId ?? inheritedHeartbeatThreadId,
+    threadId: resolvedTarget.threadId,
     lastChannel: resolvedTarget.lastChannel,
     lastAccountId: resolvedTarget.lastAccountId,
   };
@@ -296,31 +283,6 @@ function resolveHeartbeatDeliveryChatType(params: {
     channel: params.channel,
     to: params.to,
   });
-}
-
-function shouldReuseHeartbeatRouteThreadId(params: {
-  cfg: OpenClawConfig;
-  target: HeartbeatTarget;
-  heartbeat?: AgentDefaultsConfig["heartbeat"];
-  turnSource?: DeliveryContext;
-  entry?: SessionEntry;
-  resolvedTarget: SessionDeliveryTarget;
-}): boolean {
-  const channel = params.resolvedTarget.channel;
-  const messaging =
-    channel && resolveOutboundChannelPlugin({ channel, cfg: params.cfg })?.messaging;
-  return (
-    messaging?.preserveHeartbeatThreadIdForGroupRoute === true &&
-    params.resolvedTarget.threadId == null &&
-    params.target === "last" &&
-    !params.heartbeat?.to &&
-    params.turnSource?.threadId == null &&
-    params.resolvedTarget.channel === params.resolvedTarget.lastChannel &&
-    Boolean(params.resolvedTarget.to) &&
-    Boolean(params.resolvedTarget.lastTo) &&
-    params.resolvedTarget.to === params.resolvedTarget.lastTo &&
-    normalizeChatType(params.entry?.chatType) === "group"
-  );
 }
 
 function resolveHeartbeatSenderId(params: {

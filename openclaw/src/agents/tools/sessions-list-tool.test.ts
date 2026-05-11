@@ -1,5 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createSessionsListTool } from "./sessions-list-tool.js";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   gatewayCall: vi.fn(),
@@ -31,28 +30,13 @@ vi.mock("./sessions-helpers.js", async (importActual) => {
   };
 });
 
-type SessionsListDetails = {
-  sessions?: Array<{
-    deliveryContext?: {
-      accountId?: string;
-      channel?: string;
-      threadId?: string | number;
-      to?: string;
-    };
-    elevatedLevel?: string;
-    fastMode?: boolean;
-    reasoningLevel?: string;
-    responseUsage?: string;
-    thinkingLevel?: string;
-    verboseLevel?: string;
-  }>;
-};
-
-function getSessionsListDetails(result: { details?: unknown }): SessionsListDetails {
-  return result.details as SessionsListDetails;
-}
-
 describe("sessions-list-tool", () => {
+  let createSessionsListTool: typeof import("./sessions-list-tool.js").createSessionsListTool;
+
+  beforeAll(async () => {
+    ({ createSessionsListTool } = await import("./sessions-list-tool.js"));
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.createAgentToAgentPolicy.mockReturnValue({});
@@ -105,7 +89,16 @@ describe("sessions-list-tool", () => {
     const tool = createSessionsListTool({ config: {} as never });
 
     const result = await tool.execute("call-1", {});
-    const details = getSessionsListDetails(result);
+    const details = result.details as {
+      sessions?: Array<{
+        deliveryContext?: {
+          channel?: string;
+          to?: string;
+          accountId?: string;
+          threadId?: string | number;
+        };
+      }>;
+    };
 
     expect(details.sessions?.[0]?.deliveryContext).toEqual({
       channel: "discord",
@@ -147,7 +140,16 @@ describe("sessions-list-tool", () => {
     const tool = createSessionsListTool({ config: {} as never });
 
     const result = await tool.execute("call-2", {});
-    const details = getSessionsListDetails(result);
+    const details = result.details as {
+      sessions?: Array<{
+        deliveryContext?: {
+          channel?: string;
+          to?: string;
+          accountId?: string;
+          threadId?: string | number;
+        };
+      }>;
+    };
 
     expect(details.sessions?.[0]?.deliveryContext).toEqual({
       channel: "telegram",
@@ -183,14 +185,24 @@ describe("sessions-list-tool", () => {
     const tool = createSessionsListTool({ config: {} as never });
 
     const result = await tool.execute("call-3", {});
-    const details = getSessionsListDetails(result);
+    const details = result.details as {
+      sessions?: Array<{
+        thinkingLevel?: string;
+        fastMode?: boolean;
+        verboseLevel?: string;
+        reasoningLevel?: string;
+        elevatedLevel?: string;
+        responseUsage?: string;
+      }>;
+    };
 
-    const session = details.sessions?.[0];
-    expect(session?.thinkingLevel).toBe("high");
-    expect(session?.fastMode).toBe(true);
-    expect(session?.verboseLevel).toBe("on");
-    expect(session?.reasoningLevel).toBe("deep");
-    expect(session?.elevatedLevel).toBe("on");
-    expect(session?.responseUsage).toBe("full");
+    expect(details.sessions?.[0]).toMatchObject({
+      thinkingLevel: "high",
+      fastMode: true,
+      verboseLevel: "on",
+      reasoningLevel: "deep",
+      elevatedLevel: "on",
+      responseUsage: "full",
+    });
   });
 });

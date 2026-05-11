@@ -216,10 +216,8 @@ describe("stripInlineDirectiveTagsFromMessageForDisplay", () => {
       content: [{ type: "text", text: "hello [[reply_to_current]] world [[audio_as_voice]]" }],
     };
     const result = stripInlineDirectiveTagsFromMessageForDisplay(input);
-    if (!result) {
-      throw new Error("expected stripped message");
-    }
-    expect(result.content).toEqual([{ type: "text", text: "hello  world " }]);
+    expect(result).toBeDefined();
+    expect(result?.content).toEqual([{ type: "text", text: "hello  world " }]);
   });
 
   test("preserves empty-string text when directives are entire content", () => {
@@ -228,10 +226,8 @@ describe("stripInlineDirectiveTagsFromMessageForDisplay", () => {
       content: [{ type: "text", text: "[[reply_to_current]]" }],
     };
     const result = stripInlineDirectiveTagsFromMessageForDisplay(input);
-    if (!result) {
-      throw new Error("expected stripped message");
-    }
-    expect(result.content).toEqual([{ type: "text", text: "" }]);
+    expect(result).toBeDefined();
+    expect(result?.content).toEqual([{ type: "text", text: "" }]);
   });
 
   test("returns original message when content is not an array", () => {

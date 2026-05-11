@@ -1,8 +1,8 @@
-import type { Guild, Message, User } from "../internal/discord.js";
+import type { Guild, Message, User } from "@buape/carbon";
 import { resolveTimestampMs } from "./format.js";
 import { resolveDiscordSenderIdentity } from "./sender-identity.js";
 
-type DiscordReplyContext = {
+export type DiscordReplyContext = {
   id: string;
   channelId: string;
   sender: string;
@@ -41,7 +41,7 @@ export function resolveReplyContext(
     senderTag: sender.tag ?? undefined,
     memberRoleIds: (() => {
       const roles = (referenced as { member?: { roles?: string[] } }).member?.roles;
-      return Array.isArray(roles) ? roles.map((roleId) => roleId) : undefined;
+      return Array.isArray(roles) ? roles.map((roleId) => String(roleId)) : undefined;
     })(),
     body: referencedText,
     timestamp: resolveTimestampMs(referenced.timestamp),

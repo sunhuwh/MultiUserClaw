@@ -3,10 +3,9 @@ import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { basename } from "node:path";
 import type * as Lark from "@larksuiteoapi/node-sdk";
+import { Type } from "@sinclair/typebox";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
-import { extensionForMime } from "openclaw/plugin-sdk/media-mime";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { Type } from "typebox";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import type { OpenClawPluginApi } from "../runtime-api.js";
 import { listEnabledFeishuAccounts } from "./accounts.js";
 import { FeishuDocSchema, type FeishuDocParams } from "./doc-schema.js";
@@ -111,7 +110,7 @@ function cleanBlocksForInsert(blocks: FeishuDocxBlock[]): {
     .map((block) => {
       if (block.block_type === 31 && block.table?.merge_info) {
         const { merge_info: _merge_info, ...tableRest } = block.table;
-        return Object.assign({}, block, { table: tableRest });
+        return { ...block, table: tableRest };
       }
       return block;
     });
@@ -121,6 +120,7 @@ function cleanBlocksForInsert(blocks: FeishuDocxBlock[]): {
 // ============ Core Functions ============
 
 /** Max blocks per documentBlockChildren.create request */
+const MAX_BLOCKS_PER_INSERT = 50;
 const MAX_CONVERT_RETRY_DEPTH = 8;
 
 async function convertMarkdown(client: Lark.Client, markdown: string) {
@@ -415,6 +415,26 @@ async function chunkedConvertMarkdown(client: Lark.Client, markdown: string) {
   return { blocks: allBlocks, firstLevelBlockIds: allRootIds };
 }
 
+/** Insert blocks in batches of MAX_BLOCKS_PER_INSERT to avoid API 400 errors */
+async function _chunkedInsertBlocks(
+  client: Lark.Client,
+  docToken: string,
+  blocks: FeishuDocxBlock[],
+  parentBlockId?: string,
+): Promise<{ children: FeishuDocxBlockChild[]; skipped: string[] }> {
+  const allChildren: FeishuDocxBlockChild[] = [];
+  const allSkipped: string[] = [];
+
+  for (let i = 0; i < blocks.length; i += MAX_BLOCKS_PER_INSERT) {
+    const batch = blocks.slice(i, i + MAX_BLOCKS_PER_INSERT);
+    const { children, skipped } = await insertBlocks(client, docToken, batch, parentBlockId);
+    allChildren.push(...children);
+    allSkipped.push(...skipped);
+  }
+
+  return { children: allChildren, skipped: allSkipped };
+}
+
 type Logger = { info?: (msg: string) => void };
 
 /**
@@ -557,7 +577,7 @@ async function resolveUploadInput(
       );
     }
     const mimeMatch = header.match(/data:([^;]+)/);
-    const ext = extensionForMime(mimeMatch?.[1])?.slice(1) ?? "png";
+    const ext = mimeMatch?.[1]?.split("/")[1] ?? "png";
     // Estimate decoded byte count from base64 length BEFORE allocating the
     // full buffer to avoid spiking memory on oversized payloads.
     const estimatedBytes = Math.ceil((trimmedData.length * 3) / 4);
@@ -1366,12 +1386,14 @@ async function listAppScopes(client: Lark.Client) {
 
 export function registerFeishuDocTools(api: OpenClawPluginApi) {
   if (!api.config) {
+    api.logger.debug?.("feishu_doc: No config available, skipping doc tools");
     return;
   }
 
   // Check if any account is configured
   const accounts = listEnabledFeishuAccounts(api.config);
   if (accounts.length === 0) {
+    api.logger.debug?.("feishu_doc: No Feishu accounts configured, skipping doc tools");
     return;
   }
 
@@ -1592,5 +1614,9 @@ export function registerFeishuDocTools(api: OpenClawPluginApi) {
       { name: "feishu_app_scopes" },
     );
     registered.push("feishu_app_scopes");
+  }
+
+  if (registered.length > 0) {
+    api.logger.info?.(`feishu_doc: Registered ${registered.join(", ")}`);
   }
 }

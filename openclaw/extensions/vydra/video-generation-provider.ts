@@ -1,10 +1,5 @@
 import { isProviderApiKeyConfigured } from "openclaw/plugin-sdk/provider-auth";
-import {
-  assertOkOrThrowHttpError,
-  createProviderOperationDeadline,
-  postJsonRequest,
-  resolveProviderOperationTimeoutMs,
-} from "openclaw/plugin-sdk/provider-http";
+import { assertOkOrThrowHttpError, postJsonRequest } from "openclaw/plugin-sdk/provider-http";
 import type { VideoGenerationProvider } from "openclaw/plugin-sdk/video-generation";
 import {
   DEFAULT_VYDRA_VIDEO_MODEL,
@@ -87,19 +82,12 @@ export function buildVydraVideoGenerationProvider(): VideoGenerationProvider {
           authStore: req.authStore,
           capability: "video",
         });
-      const deadline = createProviderOperationDeadline({
-        timeoutMs: req.timeoutMs,
-        label: "Vydra video generation",
-      });
       const { model, body } = resolveVydraVideoRequestBody(req);
       const { response, release } = await postJsonRequest({
         url: `${baseUrl}/models/${model}`,
         headers,
         body,
-        timeoutMs: resolveProviderOperationTimeoutMs({
-          deadline,
-          defaultTimeoutMs: 120_000,
-        }),
+        timeoutMs: req.timeoutMs,
         fetchFn,
         allowPrivateNetwork,
         dispatcherPolicy,
@@ -112,10 +100,7 @@ export function buildVydraVideoGenerationProvider(): VideoGenerationProvider {
           submitted,
           baseUrl,
           headers,
-          timeoutMs: resolveProviderOperationTimeoutMs({
-            deadline,
-            defaultTimeoutMs: 120_000,
-          }),
+          timeoutMs: req.timeoutMs,
           fetchFn,
           kind: "video",
           missingJobIdMessage: "Vydra video generation response missing job id",
@@ -127,10 +112,7 @@ export function buildVydraVideoGenerationProvider(): VideoGenerationProvider {
         const video = await downloadVydraAsset({
           url: videoUrl,
           kind: "video",
-          timeoutMs: resolveProviderOperationTimeoutMs({
-            deadline,
-            defaultTimeoutMs: 120_000,
-          }),
+          timeoutMs: req.timeoutMs,
           fetchFn,
         });
         return {

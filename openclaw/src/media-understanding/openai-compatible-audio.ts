@@ -1,6 +1,6 @@
+import path from "node:path";
 import {
   assertOkOrThrowHttpError,
-  buildAudioTranscriptionFormData,
   postTranscriptionRequest,
   resolveProviderHttpRequestConfig,
   requireTranscriptionText,
@@ -39,16 +39,20 @@ export async function transcribeOpenAiCompatibleAudio(
   const url = `${baseUrl}/audio/transcriptions`;
 
   const model = resolveModel(params.model, params.defaultModel);
-  const form = buildAudioTranscriptionFormData({
-    buffer: params.buffer,
-    fileName: params.fileName,
-    mime: params.mime,
-    fields: {
-      model,
-      language: params.language,
-      prompt: params.prompt,
-    },
+  const form = new FormData();
+  const fileName = params.fileName?.trim() || path.basename(params.fileName) || "audio";
+  const bytes = new Uint8Array(params.buffer);
+  const blob = new Blob([bytes], {
+    type: params.mime ?? "application/octet-stream",
   });
+  form.append("file", blob, fileName);
+  form.append("model", model);
+  if (params.language?.trim()) {
+    form.append("language", params.language.trim());
+  }
+  if (params.prompt?.trim()) {
+    form.append("prompt", params.prompt.trim());
+  }
 
   const { response: res, release } = await postTranscriptionRequest({
     url,
@@ -56,7 +60,6 @@ export async function transcribeOpenAiCompatibleAudio(
     body: form,
     timeoutMs: params.timeoutMs,
     fetchFn,
-    pinDns: false,
     allowPrivateNetwork,
     dispatcherPolicy,
   });

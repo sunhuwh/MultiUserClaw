@@ -1,8 +1,9 @@
+import { readFileSync } from "node:fs";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { ssrfPolicyFromPrivateNetworkOptIn } from "openclaw/plugin-sdk/ssrf-runtime";
 import { fetchWithSsrFGuard, type RuntimeEnv } from "../runtime-api.js";
 import type { ResolvedNextcloudTalkAccount } from "./accounts.js";
-import { resolveNextcloudTalkApiCredentials } from "./api-credentials.js";
+import { normalizeResolvedSecretInputString } from "./secret-input.js";
 
 const ROOM_CACHE_TTL_MS = 5 * 60 * 1000;
 const ROOM_CACHE_ERROR_TTL_MS = 30 * 1000;
@@ -20,6 +21,28 @@ export const __testing = {
 
 function resolveRoomCacheKey(params: { accountId: string; roomToken: string }) {
   return `${params.accountId}:${params.roomToken}`;
+}
+
+function readApiPassword(params: {
+  apiPassword?: unknown;
+  apiPasswordFile?: string;
+}): string | undefined {
+  const inlinePassword = normalizeResolvedSecretInputString({
+    value: params.apiPassword,
+    path: "channels.nextcloud-talk.apiPassword",
+  });
+  if (inlinePassword) {
+    return inlinePassword;
+  }
+  if (!params.apiPasswordFile) {
+    return undefined;
+  }
+  try {
+    const value = readFileSync(params.apiPasswordFile, "utf-8").trim();
+    return value || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function coerceRoomType(value: unknown): number | undefined {
@@ -61,12 +84,12 @@ export async function resolveNextcloudTalkRoomKind(params: {
     }
   }
 
-  const apiCredentials = resolveNextcloudTalkApiCredentials({
-    apiUser: account.config.apiUser,
+  const apiUser = account.config.apiUser?.trim();
+  const apiPassword = readApiPassword({
     apiPassword: account.config.apiPassword,
     apiPasswordFile: account.config.apiPasswordFile,
   });
-  if (!apiCredentials) {
+  if (!apiUser || !apiPassword) {
     return undefined;
   }
 
@@ -76,10 +99,7 @@ export async function resolveNextcloudTalkRoomKind(params: {
   }
 
   const url = `${baseUrl}/ocs/v2.php/apps/spreed/api/v4/room/${roomToken}`;
-  const auth = Buffer.from(
-    `${apiCredentials.apiUser}:${apiCredentials.apiPassword}`,
-    "utf-8",
-  ).toString("base64");
+  const auth = Buffer.from(`${apiUser}:${apiPassword}`, "utf-8").toString("base64");
 
   try {
     const { response, release } = await fetchWithSsrFGuard({

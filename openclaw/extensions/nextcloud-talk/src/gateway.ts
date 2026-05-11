@@ -7,7 +7,7 @@ import {
   type ChannelPlugin,
   type OpenClawConfig,
 } from "./channel-api.js";
-import { monitorNextcloudTalkProvider } from "./monitor-runtime.js";
+import { monitorNextcloudTalkProvider } from "./monitor.js";
 import { getNextcloudTalkRuntime } from "./runtime.js";
 import type { CoreConfig } from "./types.js";
 
@@ -94,10 +94,7 @@ export const nextcloudTalkGatewayAdapter: NonNullable<
     const loggedOut = resolved.secretSource === "none";
 
     if (changed) {
-      await getNextcloudTalkRuntime().config.replaceConfigFile({
-        nextConfig: nextCfg,
-        afterWrite: { mode: "auto" },
-      });
+      await getNextcloudTalkRuntime().config.writeConfigFile(nextCfg);
     }
 
     return {

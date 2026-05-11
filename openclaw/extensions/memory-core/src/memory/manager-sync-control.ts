@@ -11,7 +11,12 @@ const log = createSubsystemLogger("memory");
 export type MemoryReadonlyRecoveryState = {
   closed: boolean;
   db: DatabaseSync;
+  vectorReady: Promise<boolean> | null;
   vector: {
+    enabled: boolean;
+    available: boolean | null;
+    extensionPath?: string;
+    loadError?: string;
     dims?: number;
   };
   readonlyRecoveryAttempts: number;
@@ -25,8 +30,6 @@ export type MemoryReadonlyRecoveryState = {
     progress?: (update: MemorySyncProgressUpdate) => void;
   }) => Promise<void>;
   openDatabase: () => DatabaseSync;
-  closeDatabase: (db: DatabaseSync) => void;
-  resetVectorState: () => void;
   ensureSchema: () => void;
   readMeta: () => { vectorDims?: number } | undefined;
 };
@@ -101,14 +104,15 @@ export async function runMemorySyncWithReadonlyRecovery(
     state.readonlyRecoveryLastError = reason;
     log.warn(`memory sync readonly handle detected; reopening sqlite connection`, { reason });
     try {
-      state.closeDatabase(state.db);
+      state.db.close();
     } catch {}
-    const previousVectorDims = state.vector.dims;
     state.db = state.openDatabase();
-    state.resetVectorState();
+    state.vectorReady = null;
+    state.vector.available = null;
+    state.vector.loadError = undefined;
     state.ensureSchema();
     const meta = state.readMeta();
-    state.vector.dims = meta?.vectorDims ?? previousVectorDims;
+    state.vector.dims = meta?.vectorDims;
     try {
       await state.runSync(params);
       state.readonlyRecoverySuccesses += 1;

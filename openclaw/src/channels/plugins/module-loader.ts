@@ -1,73 +1,58 @@
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { openRootFileSync } from "../../infra/boundary-file-read.js";
-import { isJavaScriptModulePath } from "../../plugins/native-module-require.js";
+import { createJiti } from "jiti";
+import { openBoundaryFileSync } from "../../infra/boundary-file-read.js";
 import {
-  getCachedPluginModuleLoader,
-  type PluginModuleLoaderCache,
-  type PluginModuleLoaderFactory,
-} from "../../plugins/plugin-module-loader-cache.js";
+  buildPluginLoaderJitiOptions,
+  resolvePluginLoaderJitiConfig,
+} from "../../plugins/sdk-alias.js";
+import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
 
 const nodeRequire = createRequire(import.meta.url);
-const SOURCE_MODULE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
-const jitiLoaders: PluginModuleLoaderCache = new Map();
-let channelPluginModuleLoaderFactoryForTest: PluginModuleLoaderFactory | undefined;
 
-export function setChannelPluginModuleLoaderFactoryForTest(
-  factory?: PluginModuleLoaderFactory,
-): void {
-  channelPluginModuleLoaderFactoryForTest = factory;
-  jitiLoaders.clear();
+function createModuleLoader() {
+  const jitiLoaders = new Map<string, ReturnType<typeof createJiti>>();
+
+  return (modulePath: string) => {
+    const { tryNative, aliasMap, cacheKey } = resolvePluginLoaderJitiConfig({
+      modulePath,
+      argv1: process.argv[1],
+      moduleUrl: import.meta.url,
+      preferBuiltDist: true,
+    });
+    const cached = jitiLoaders.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    const loader = createJiti(import.meta.url, {
+      ...buildPluginLoaderJitiOptions(aliasMap),
+      tryNative,
+    });
+    jitiLoaders.set(cacheKey, loader);
+    return loader;
+  };
 }
 
-function hasNativeSourceRequireHook(modulePath: string): boolean {
-  const extension = path.extname(modulePath).toLowerCase();
-  return (
-    SOURCE_MODULE_EXTENSIONS.has(extension) &&
-    typeof nodeRequire.extensions?.[extension] === "function"
+let loadModule = createModuleLoader();
+
+export function isJavaScriptModulePath(modulePath: string): boolean {
+  return [".js", ".mjs", ".cjs"].includes(
+    normalizeLowercaseStringOrEmpty(path.extname(modulePath)),
   );
 }
 
-function isSourceModulePath(modulePath: string): boolean {
-  return SOURCE_MODULE_EXTENSIONS.has(path.extname(modulePath).toLowerCase());
+export function resolveCompiledBundledModulePath(modulePath: string): string {
+  const compiledDistModulePath = modulePath.replace(
+    `${path.sep}dist-runtime${path.sep}`,
+    `${path.sep}dist${path.sep}`,
+  );
+  return compiledDistModulePath !== modulePath && fs.existsSync(compiledDistModulePath)
+    ? compiledDistModulePath
+    : modulePath;
 }
 
-function loadModuleWithJiti(modulePath: string): unknown {
-  const loadWithJiti = getCachedPluginModuleLoader({
-    cache: jitiLoaders,
-    modulePath,
-    importerUrl: import.meta.url,
-    loaderFilename: import.meta.url,
-    tryNative: false,
-    cacheScopeKey: "channel-plugin-module-loader",
-    ...(channelPluginModuleLoaderFactoryForTest
-      ? { createLoader: channelPluginModuleLoaderFactoryForTest }
-      : {}),
-  });
-  return loadWithJiti(modulePath);
-}
-
-function loadModule(modulePath: string): unknown {
-  if (!isJavaScriptModulePath(modulePath) && !hasNativeSourceRequireHook(modulePath)) {
-    if (isSourceModulePath(modulePath)) {
-      return loadModuleWithJiti(modulePath);
-    }
-    throw new Error(`channel plugin module must be built JavaScript: ${modulePath}`);
-  }
-  try {
-    return nodeRequire(modulePath);
-  } catch (error) {
-    if (isSourceModulePath(modulePath)) {
-      return loadModuleWithJiti(modulePath);
-    }
-    throw new Error(`failed to load channel plugin module with native require: ${modulePath}`, {
-      cause: error,
-    });
-  }
-}
-
-function resolvePluginModuleCandidates(rootDir: string, specifier: string): string[] {
+export function resolvePluginModuleCandidates(rootDir: string, specifier: string): string[] {
   const normalizedSpecifier = specifier.replace(/\\/g, "/");
   const resolvedPath = path.resolve(rootDir, normalizedSpecifier);
   const ext = path.extname(resolvedPath);
@@ -77,10 +62,8 @@ function resolvePluginModuleCandidates(rootDir: string, specifier: string): stri
   return [
     resolvedPath,
     `${resolvedPath}.ts`,
-    `${resolvedPath}.mts`,
     `${resolvedPath}.js`,
     `${resolvedPath}.mjs`,
-    `${resolvedPath}.cts`,
     `${resolvedPath}.cjs`,
   ];
 }
@@ -99,8 +82,9 @@ export function loadChannelPluginModule(params: {
   rootDir: string;
   boundaryRootDir?: string;
   boundaryLabel?: string;
+  shouldTryNativeRequire?: (safePath: string) => boolean;
 }): unknown {
-  const opened = openRootFileSync({
+  const opened = openBoundaryFileSync({
     absolutePath: params.modulePath,
     rootPath: params.boundaryRootDir ?? params.rootDir,
     boundaryLabel: params.boundaryLabel ?? "plugin root",
@@ -114,5 +98,12 @@ export function loadChannelPluginModule(params: {
   }
   const safePath = opened.path;
   fs.closeSync(opened.fd);
-  return loadModule(safePath);
+  if (process.platform === "win32" && params.shouldTryNativeRequire?.(safePath)) {
+    try {
+      return nodeRequire(safePath);
+    } catch {
+      // Fall back to the Jiti loader path when require() cannot handle the entry.
+    }
+  }
+  return loadModule(safePath)(safePath);
 }

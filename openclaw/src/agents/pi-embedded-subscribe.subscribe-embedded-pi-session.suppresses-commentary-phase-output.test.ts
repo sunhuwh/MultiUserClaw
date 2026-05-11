@@ -29,7 +29,7 @@ describe("subscribeEmbeddedPiSession", () => {
 
     expect(onBlockReply).not.toHaveBeenCalled();
     expect(onPartialReply).not.toHaveBeenCalled();
-    expect(subscription.assistantTexts).toStrictEqual([]);
+    expect(subscription.assistantTexts).toEqual([]);
   });
 
   it("suppresses commentary when phase is only present in textSignature metadata", () => {
@@ -64,6 +64,6 @@ describe("subscribeEmbeddedPiSession", () => {
 
     expect(onBlockReply).not.toHaveBeenCalled();
     expect(onPartialReply).not.toHaveBeenCalled();
-    expect(subscription.assistantTexts).toStrictEqual([]);
+    expect(subscription.assistantTexts).toEqual([]);
   });
 });

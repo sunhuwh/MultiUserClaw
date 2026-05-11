@@ -80,6 +80,6 @@ describe("applyPluginAutoEnable modelSupport", () => {
 
     expect(result.config.plugins?.entries?.openai).toBeUndefined();
     expect(result.config.plugins?.entries?.["proxy-openai"]).toBeUndefined();
-    expect(result.changes).toStrictEqual([]);
+    expect(result.changes).toEqual([]);
   });
 });

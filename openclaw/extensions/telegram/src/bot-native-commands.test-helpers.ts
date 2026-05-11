@@ -1,9 +1,10 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
-import type { ChannelGroupPolicy } from "openclaw/plugin-sdk/config-contracts";
-import type { TelegramAccountConfig } from "openclaw/plugin-sdk/config-contracts";
-import type { MockFn } from "openclaw/plugin-sdk/plugin-test-runtime";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
+import type { ChannelGroupPolicy } from "openclaw/plugin-sdk/config-runtime";
+import type { TelegramAccountConfig } from "openclaw/plugin-sdk/config-runtime";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
+import type { MockFn } from "openclaw/plugin-sdk/testing";
 import { vi } from "vitest";
+import { createNativeCommandTestParams } from "./bot-native-commands.fixture-test-support.js";
 import type { RegisterTelegramNativeCommandsParams } from "./bot-native-commands.js";
 import { registerTelegramNativeCommands } from "./bot-native-commands.js";
 
@@ -25,7 +26,7 @@ type EnsureConfiguredBindingRouteReadyFn =
 type GetAgentScopedMediaLocalRootsFn =
   typeof import("./bot-native-commands.runtime.js").getAgentScopedMediaLocalRoots;
 type CreateChannelReplyPipelineFn =
-  typeof import("./bot-native-commands.delivery.runtime.js").createChannelMessageReplyPipeline;
+  typeof import("./bot-native-commands.delivery.runtime.js").createChannelReplyPipeline;
 type AnyMock = MockFn<(...args: unknown[]) => unknown>;
 type AnyAsyncMock = MockFn<(...args: unknown[]) => Promise<unknown>>;
 type NativeCommandHarness = {
@@ -41,6 +42,10 @@ const pluginCommandMocks = vi.hoisted(() => ({
   matchPluginCommand: vi.fn<MatchPluginCommandFn>(() => null),
   executePluginCommand: vi.fn<ExecutePluginCommandFn>(async () => ({ text: "ok" })),
 }));
+export const getPluginCommandSpecs = pluginCommandMocks.getPluginCommandSpecs;
+export const matchPluginCommand = pluginCommandMocks.matchPluginCommand;
+export const executePluginCommand = pluginCommandMocks.executePluginCommand;
+
 vi.mock("openclaw/plugin-sdk/plugin-runtime", () => ({
   getPluginCommandSpecs: pluginCommandMocks.getPluginCommandSpecs,
   matchPluginCommand: pluginCommandMocks.matchPluginCommand,
@@ -57,7 +62,7 @@ const replyPipelineMocks = vi.hoisted(() => {
     dispatchReplyWithBufferedBlockDispatcher: vi.fn(
       (async () => dispatchReplyResult) as DispatchReplyWithBufferedBlockDispatcherFn,
     ),
-    createChannelMessageReplyPipeline: vi.fn((() => ({
+    createChannelReplyPipeline: vi.fn((() => ({
       onModelSelected: () => {},
       responsePrefixContextProvider: () => undefined,
     })) as unknown as CreateChannelReplyPipelineFn),
@@ -69,9 +74,13 @@ const replyPipelineMocks = vi.hoisted(() => {
     getAgentScopedMediaLocalRoots: vi.fn<GetAgentScopedMediaLocalRootsFn>(() => []),
   };
 });
+export const dispatchReplyWithBufferedBlockDispatcher =
+  replyPipelineMocks.dispatchReplyWithBufferedBlockDispatcher;
+
 const deliveryMocks = vi.hoisted(() => ({
   deliverReplies: vi.fn(async () => {}),
 }));
+export const deliverReplies = deliveryMocks.deliverReplies;
 
 vi.mock("./bot-native-commands.runtime.js", () => ({
   getPluginCommandSpecs: pluginCommandMocks.getPluginCommandSpecs,
@@ -84,7 +93,7 @@ vi.mock("./bot-native-commands.runtime.js", () => ({
   getAgentScopedMediaLocalRoots: replyPipelineMocks.getAgentScopedMediaLocalRoots,
 }));
 vi.mock("./bot-native-commands.delivery.runtime.js", () => ({
-  createChannelMessageReplyPipeline: replyPipelineMocks.createChannelMessageReplyPipeline,
+  createChannelReplyPipeline: replyPipelineMocks.createChannelReplyPipeline,
   deliverReplies: deliveryMocks.deliverReplies,
   emitTelegramMessageSentHooks: vi.fn(),
 }));
@@ -99,10 +108,6 @@ vi.mock("openclaw/plugin-sdk/conversation-runtime", () => ({
     bindingResolution: null,
     boundSessionKey: "",
   })),
-  resolveRuntimeConversationBindingRoute: vi.fn(({ route }: { route: unknown }) => ({
-    bindingRecord: null,
-    route,
-  })),
   getSessionBindingService: vi.fn(() => ({
     resolveByConversation: vi.fn(() => null),
     touch: vi.fn(),
@@ -111,6 +116,7 @@ vi.mock("openclaw/plugin-sdk/conversation-runtime", () => ({
 }));
 vi.mock("./bot/delivery.js", () => ({ deliverReplies: deliveryMocks.deliverReplies }));
 vi.mock("./bot/delivery.replies.js", () => ({ deliverReplies: deliveryMocks.deliverReplies }));
+export { createNativeCommandTestParams };
 
 export function createNativeCommandsHarness(params?: {
   cfg?: OpenClawConfig;
@@ -118,7 +124,6 @@ export function createNativeCommandsHarness(params?: {
   telegramCfg?: TelegramAccountConfig;
   allowFrom?: string[];
   groupAllowFrom?: string[];
-  storeAllowFrom?: string[];
   useAccessGroups?: boolean;
   nativeEnabled?: boolean;
   groupConfig?: Record<string, unknown>;
@@ -129,8 +134,8 @@ export function createNativeCommandsHarness(params?: {
   const setMyCommands: AnyAsyncMock = vi.fn(async () => undefined);
   const log: AnyMock = vi.fn();
   const telegramDeps = {
-    getRuntimeConfig: vi.fn(() => params?.cfg ?? ({} as OpenClawConfig)),
-    readChannelAllowFromStore: vi.fn(async () => params?.storeAllowFrom ?? []),
+    loadConfig: vi.fn(() => params?.cfg ?? ({} as OpenClawConfig)),
+    readChannelAllowFromStore: vi.fn(async () => []),
     dispatchReplyWithBufferedBlockDispatcher:
       replyPipelineMocks.dispatchReplyWithBufferedBlockDispatcher,
     getPluginCommandSpecs: pluginCommandMocks.getPluginCommandSpecs,

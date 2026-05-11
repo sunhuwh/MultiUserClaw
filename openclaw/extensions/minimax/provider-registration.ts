@@ -1,7 +1,6 @@
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import type {
   OpenClawPluginApi,
-  OpenClawConfig,
   ProviderAuthContext,
   ProviderAuthResult,
   ProviderCatalogContext,
@@ -14,9 +13,9 @@ import {
 import { buildOauthProviderAuthResult } from "openclaw/plugin-sdk/provider-auth";
 import { createProviderApiKeyAuthMethod } from "openclaw/plugin-sdk/provider-auth-api-key";
 import { buildProviderReplayFamilyHooks } from "openclaw/plugin-sdk/provider-model-shared";
-import { MINIMAX_FAST_MODE_STREAM_HOOKS } from "openclaw/plugin-sdk/provider-stream-family";
+import { buildProviderStreamFamilyHooks } from "openclaw/plugin-sdk/provider-stream-family";
 import { fetchMinimaxUsage } from "openclaw/plugin-sdk/provider-usage";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import { isMiniMaxModernModelId, MINIMAX_DEFAULT_MODEL_ID } from "./api.js";
 import type { MiniMaxRegion } from "./oauth.js";
 import { applyMinimaxApiConfig, applyMinimaxApiConfigCn } from "./onboard.js";
@@ -34,31 +33,18 @@ const MINIMAX_USAGE_ENV_VAR_KEYS = [
   "MINIMAX_CODING_API_KEY",
   "MINIMAX_API_KEY",
 ] as const;
-const MINIMAX_WIZARD_GROUP = {
-  groupId: "minimax",
-  groupLabel: "MiniMax",
-  groupHint: "M2.7 (recommended)",
-} as const;
 const HYBRID_ANTHROPIC_OPENAI_REPLAY_HOOKS = buildProviderReplayFamilyHooks({
   family: "hybrid-anthropic-openai",
   anthropicModelDropThinkingBlocks: true,
 });
-const MINIMAX_PROVIDER_HOOKS = {
-  ...HYBRID_ANTHROPIC_OPENAI_REPLAY_HOOKS,
-  ...MINIMAX_FAST_MODE_STREAM_HOOKS,
-  resolveReasoningOutputMode: () => "native" as const,
-};
+const MINIMAX_FAST_MODE_STREAM_HOOKS = buildProviderStreamFamilyHooks("minimax-fast-mode");
+
+function resolveMinimaxReasoningOutputMode(): "native" {
+  return "native";
+}
 
 function getDefaultBaseUrl(region: MiniMaxRegion): string {
   return region === "cn" ? DEFAULT_BASE_URL_CN : DEFAULT_BASE_URL_GLOBAL;
-}
-
-function resolveMinimaxRegionLabel(region: MiniMaxRegion): string {
-  return region === "cn" ? "CN" : "Global";
-}
-
-function resolveMinimaxEndpointHint(region: MiniMaxRegion): string {
-  return region === "cn" ? "CN endpoint - api.minimaxi.com" : "Global endpoint - api.minimax.io";
 }
 
 function apiModelRef(modelId: string): string {
@@ -67,14 +53,6 @@ function apiModelRef(modelId: string): string {
 
 function portalModelRef(modelId: string): string {
   return `${PORTAL_PROVIDER_ID}/${modelId}`;
-}
-
-function getProviderBaseUrl(cfg: OpenClawConfig, providerId: string): string | undefined {
-  return normalizeOptionalString(cfg.models?.providers?.[providerId]?.baseUrl);
-}
-
-function resolveMinimaxUsageBaseUrl(cfg: OpenClawConfig): string | undefined {
-  return getProviderBaseUrl(cfg, PORTAL_PROVIDER_ID) ?? getProviderBaseUrl(cfg, API_PROVIDER_ID);
 }
 
 function buildPortalProviderCatalog(params: { baseUrl: string; apiKey: string }) {
@@ -123,7 +101,7 @@ function resolvePortalCatalog(ctx: ProviderCatalogContext) {
 
 function createOAuthHandler(region: MiniMaxRegion) {
   const defaultBaseUrl = getDefaultBaseUrl(region);
-  const regionLabel = resolveMinimaxRegionLabel(region);
+  const regionLabel = region === "cn" ? "CN" : "Global";
 
   return async (ctx: ProviderAuthContext): Promise<ProviderAuthResult> => {
     const progress = ctx.prompter.progress(`Starting MiniMax OAuth (${regionLabel})…`);
@@ -155,8 +133,6 @@ function createOAuthHandler(region: MiniMaxRegion) {
             providers: {
               [PORTAL_PROVIDER_ID]: {
                 baseUrl,
-                api: "anthropic-messages",
-                authHeader: true,
                 models: [],
               },
             },
@@ -190,54 +166,6 @@ function createOAuthHandler(region: MiniMaxRegion) {
   };
 }
 
-function createMinimaxApiKeyMethod(region: MiniMaxRegion) {
-  const regionLabel = resolveMinimaxRegionLabel(region);
-  const endpointHint = resolveMinimaxEndpointHint(region);
-  const isCn = region === "cn";
-  return createProviderApiKeyAuthMethod({
-    providerId: API_PROVIDER_ID,
-    methodId: isCn ? "api-cn" : "api-global",
-    label: `MiniMax API key (${regionLabel})`,
-    hint: endpointHint,
-    optionKey: "minimaxApiKey",
-    flagName: "--minimax-api-key",
-    envVar: "MINIMAX_API_KEY",
-    promptMessage: isCn
-      ? "Enter MiniMax CN API key (sk-api- or sk-cp-)\nhttps://platform.minimaxi.com/user-center/basic-information/interface-key"
-      : "Enter MiniMax API key (sk-api- or sk-cp-)\nhttps://platform.minimax.io/user-center/basic-information/interface-key",
-    profileId: isCn ? "minimax:cn" : "minimax:global",
-    allowProfile: false,
-    defaultModel: apiModelRef(DEFAULT_MODEL),
-    expectedProviders: isCn ? ["minimax", "minimax-cn"] : ["minimax"],
-    applyConfig: (cfg) => (isCn ? applyMinimaxApiConfigCn(cfg) : applyMinimaxApiConfig(cfg)),
-    wizard: {
-      choiceId: isCn ? "minimax-cn-api" : "minimax-global-api",
-      choiceLabel: `MiniMax API key (${regionLabel})`,
-      choiceHint: endpointHint,
-      ...MINIMAX_WIZARD_GROUP,
-    },
-  });
-}
-
-function createMinimaxOAuthMethod(region: MiniMaxRegion) {
-  const regionLabel = resolveMinimaxRegionLabel(region);
-  const endpointHint = resolveMinimaxEndpointHint(region);
-  const isCn = region === "cn";
-  return {
-    id: isCn ? "oauth-cn" : "oauth",
-    label: `MiniMax OAuth (${regionLabel})`,
-    hint: endpointHint,
-    kind: "device_code" as const,
-    wizard: {
-      choiceId: isCn ? "minimax-cn-oauth" : "minimax-global-oauth",
-      choiceLabel: `MiniMax OAuth (${regionLabel})`,
-      choiceHint: endpointHint,
-      ...MINIMAX_WIZARD_GROUP,
-    },
-    run: createOAuthHandler(region),
-  };
-}
-
 export function registerMinimaxProviders(api: OpenClawPluginApi) {
   api.registerProvider({
     id: API_PROVIDER_ID,
@@ -245,7 +173,56 @@ export function registerMinimaxProviders(api: OpenClawPluginApi) {
     hookAliases: ["minimax-cn"],
     docsPath: "/providers/minimax",
     envVars: ["MINIMAX_API_KEY"],
-    auth: [createMinimaxApiKeyMethod("global"), createMinimaxApiKeyMethod("cn")],
+    auth: [
+      createProviderApiKeyAuthMethod({
+        providerId: API_PROVIDER_ID,
+        methodId: "api-global",
+        label: "MiniMax API key (Global)",
+        hint: "Global endpoint - api.minimax.io",
+        optionKey: "minimaxApiKey",
+        flagName: "--minimax-api-key",
+        envVar: "MINIMAX_API_KEY",
+        promptMessage:
+          "Enter MiniMax API key (sk-api- or sk-cp-)\nhttps://platform.minimax.io/user-center/basic-information/interface-key",
+        profileId: "minimax:global",
+        allowProfile: false,
+        defaultModel: apiModelRef(DEFAULT_MODEL),
+        expectedProviders: ["minimax"],
+        applyConfig: (cfg) => applyMinimaxApiConfig(cfg),
+        wizard: {
+          choiceId: "minimax-global-api",
+          choiceLabel: "MiniMax API key (Global)",
+          choiceHint: "Global endpoint - api.minimax.io",
+          groupId: "minimax",
+          groupLabel: "MiniMax",
+          groupHint: "M2.7 (recommended)",
+        },
+      }),
+      createProviderApiKeyAuthMethod({
+        providerId: API_PROVIDER_ID,
+        methodId: "api-cn",
+        label: "MiniMax API key (CN)",
+        hint: "CN endpoint - api.minimaxi.com",
+        optionKey: "minimaxApiKey",
+        flagName: "--minimax-api-key",
+        envVar: "MINIMAX_API_KEY",
+        promptMessage:
+          "Enter MiniMax CN API key (sk-api- or sk-cp-)\nhttps://platform.minimaxi.com/user-center/basic-information/interface-key",
+        profileId: "minimax:cn",
+        allowProfile: false,
+        defaultModel: apiModelRef(DEFAULT_MODEL),
+        expectedProviders: ["minimax", "minimax-cn"],
+        applyConfig: (cfg) => applyMinimaxApiConfigCn(cfg),
+        wizard: {
+          choiceId: "minimax-cn-api",
+          choiceLabel: "MiniMax API key (CN)",
+          choiceHint: "CN endpoint - api.minimaxi.com",
+          groupId: "minimax",
+          groupLabel: "MiniMax",
+          groupHint: "M2.7 (recommended)",
+        },
+      }),
+    ],
     catalog: {
       order: "simple",
       run: async (ctx) => resolveApiCatalog(ctx),
@@ -261,12 +238,12 @@ export function registerMinimaxProviders(api: OpenClawPluginApi) {
       });
       return apiKey ? { token: apiKey } : null;
     },
-    ...MINIMAX_PROVIDER_HOOKS,
+    ...HYBRID_ANTHROPIC_OPENAI_REPLAY_HOOKS,
+    ...MINIMAX_FAST_MODE_STREAM_HOOKS,
+    resolveReasoningOutputMode: () => resolveMinimaxReasoningOutputMode(),
     isModernModelRef: ({ modelId }) => isMiniMaxModernModelId(modelId),
     fetchUsageSnapshot: async (ctx) =>
-      await fetchMinimaxUsage(ctx.token, ctx.timeoutMs, ctx.fetchFn, {
-        baseUrl: resolveMinimaxUsageBaseUrl(ctx.config),
-      }),
+      await fetchMinimaxUsage(ctx.token, ctx.timeoutMs, ctx.fetchFn),
   });
 
   api.registerProvider({
@@ -278,8 +255,41 @@ export function registerMinimaxProviders(api: OpenClawPluginApi) {
     catalog: {
       run: async (ctx) => resolvePortalCatalog(ctx),
     },
-    auth: [createMinimaxOAuthMethod("global"), createMinimaxOAuthMethod("cn")],
-    ...MINIMAX_PROVIDER_HOOKS,
+    auth: [
+      {
+        id: "oauth",
+        label: "MiniMax OAuth (Global)",
+        hint: "Global endpoint - api.minimax.io",
+        kind: "device_code",
+        wizard: {
+          choiceId: "minimax-global-oauth",
+          choiceLabel: "MiniMax OAuth (Global)",
+          choiceHint: "Global endpoint - api.minimax.io",
+          groupId: "minimax",
+          groupLabel: "MiniMax",
+          groupHint: "M2.7 (recommended)",
+        },
+        run: createOAuthHandler("global"),
+      },
+      {
+        id: "oauth-cn",
+        label: "MiniMax OAuth (CN)",
+        hint: "CN endpoint - api.minimaxi.com",
+        kind: "device_code",
+        wizard: {
+          choiceId: "minimax-cn-oauth",
+          choiceLabel: "MiniMax OAuth (CN)",
+          choiceHint: "CN endpoint - api.minimaxi.com",
+          groupId: "minimax",
+          groupLabel: "MiniMax",
+          groupHint: "M2.7 (recommended)",
+        },
+        run: createOAuthHandler("cn"),
+      },
+    ],
+    ...HYBRID_ANTHROPIC_OPENAI_REPLAY_HOOKS,
+    ...MINIMAX_FAST_MODE_STREAM_HOOKS,
+    resolveReasoningOutputMode: () => resolveMinimaxReasoningOutputMode(),
     isModernModelRef: ({ modelId }) => isMiniMaxModernModelId(modelId),
   });
 }

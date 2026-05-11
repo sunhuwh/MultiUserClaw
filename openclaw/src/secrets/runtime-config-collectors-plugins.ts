@@ -1,11 +1,11 @@
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { OpenClawConfig } from "../config/config.js";
 import {
   collectPluginConfigContractMatches,
   resolvePluginConfigContractsById,
 } from "../plugins/config-contracts.js";
 import { normalizePluginsConfig, resolveEnableState } from "../plugins/config-state.js";
-import type { PluginOrigin } from "../plugins/plugin-origin.types.js";
+import type { PluginOrigin } from "../plugins/types.js";
 import {
   collectSecretInputAssignment,
   type ResolverContext,
@@ -40,18 +40,13 @@ export function collectPluginConfigAssignments(params: {
     params.config,
     resolveDefaultAgentId(params.config),
   );
-  const bundledLoadablePluginIds = [...(params.loadablePluginOrigins?.entries() ?? [])]
-    .filter(([, origin]) => origin === "bundled")
-    .map(([pluginId]) => pluginId);
   const pluginSecretInputs = new Map(
     [
       ...resolvePluginConfigContractsById({
         config: params.config,
         workspaceDir,
         env: params.context.env,
-        fallbackToBundledMetadata: true,
-        fallbackToBundledMetadataForResolvedBundled: true,
-        fallbackBundledPluginIds: bundledLoadablePluginIds,
+        cache: true,
         pluginIds: Object.keys(entries),
       }).entries(),
     ].flatMap(([pluginId, metadata]) => {

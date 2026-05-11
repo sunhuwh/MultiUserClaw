@@ -1,20 +1,9 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/plugin-entry";
-import { CLAUDE_CLI_BACKEND_ID, CLAUDE_CLI_DEFAULT_ALLOWLIST_REFS } from "./cli-constants.js";
+import { normalizeProviderId } from "openclaw/plugin-sdk/provider-model-shared";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
+import { CLAUDE_CLI_BACKEND_ID, CLAUDE_CLI_DEFAULT_ALLOWLIST_REFS } from "./cli-shared.js";
 
 const ANTHROPIC_PROVIDER_API = "anthropic-messages";
-const ANTHROPIC_API_KEY_DEFAULT_ALLOWLIST_REFS = ["anthropic/claude-haiku-4-5"] as const;
-
-function normalizeLowercaseStringOrEmpty(value: unknown): string {
-  return typeof value === "string" ? value.trim().toLowerCase() : "";
-}
-
-function normalizeProviderId(provider: string): string {
-  const normalized = normalizeLowercaseStringOrEmpty(provider);
-  if (normalized === "bedrock" || normalized === "aws-bedrock") {
-    return "amazon-bedrock";
-  }
-  return normalized;
-}
 
 function resolveAnthropicDefaultAuthMode(
   config: OpenClawConfig,
@@ -98,7 +87,7 @@ function resolveAnthropicPrimaryModelRef(raw?: string): string | null {
   }
   const aliasKey = normalizeLowercaseStringOrEmpty(trimmed);
   if (aliasKey === "opus") {
-    return "anthropic/claude-opus-4-7";
+    return "anthropic/claude-opus-4-6";
   }
   if (aliasKey === "sonnet") {
     return "anthropic/claude-sonnet-4-6";
@@ -141,9 +130,6 @@ function isAnthropicCacheRetentionTarget(
 }
 
 function usesClaudeCliModelSelection(config: OpenClawConfig): boolean {
-  if (config.agents?.defaults?.agentRuntime?.id === CLAUDE_CLI_BACKEND_ID) {
-    return true;
-  }
   const primary = resolveModelPrimaryValue(
     config.agents?.defaults?.model as
       | string
@@ -160,13 +146,7 @@ function usesClaudeCliModelSelection(config: OpenClawConfig): boolean {
   });
 }
 
-function toCanonicalAnthropicModelRef(ref: string): string {
-  return ref.startsWith(`${CLAUDE_CLI_BACKEND_ID}/`)
-    ? `anthropic/${ref.slice(CLAUDE_CLI_BACKEND_ID.length + 1)}`
-    : ref;
-}
-
-function normalizeAnthropicProviderConfig<T extends { api?: string; models?: unknown[] }>(
+export function normalizeAnthropicProviderConfig<T extends { api?: string; models?: unknown[] }>(
   providerConfig: T,
 ): T {
   if (
@@ -177,16 +157,6 @@ function normalizeAnthropicProviderConfig<T extends { api?: string; models?: unk
     return providerConfig;
   }
   return { ...providerConfig, api: ANTHROPIC_PROVIDER_API };
-}
-
-export function normalizeAnthropicProviderConfigForProvider<
-  T extends { api?: string; models?: unknown[] },
->(params: { provider: string; providerConfig: T }): T {
-  const provider = normalizeProviderId(params.provider);
-  if (provider !== "anthropic" && provider !== CLAUDE_CLI_BACKEND_ID) {
-    return params.providerConfig;
-  }
-  return normalizeAnthropicProviderConfig(params.providerConfig);
 }
 
 export function applyAnthropicConfigDefaults(params: {
@@ -268,19 +238,6 @@ export function applyAnthropicConfigDefaults(params: {
       }
     }
 
-    const hasAnthropicApiKeyModel = Object.keys(nextModels).some((key) =>
-      isAnthropicCacheRetentionTarget(parseProviderModelRef(key, "anthropic")),
-    );
-    if (hasAnthropicApiKeyModel) {
-      for (const ref of ANTHROPIC_API_KEY_DEFAULT_ALLOWLIST_REFS) {
-        if (ref in nextModels) {
-          continue;
-        }
-        nextModels[ref] = { params: { cacheRetention: "short" } };
-        modelsMutated = true;
-      }
-    }
-
     if (modelsMutated) {
       nextDefaults.models = nextModels;
       mutated = true;
@@ -290,8 +247,7 @@ export function applyAnthropicConfigDefaults(params: {
   if (authMode === "oauth" && usesClaudeCliModelSelection(params.config)) {
     const nextModels = defaults.models ? { ...defaults.models } : {};
     let modelsMutated = false;
-    for (const rawRef of CLAUDE_CLI_DEFAULT_ALLOWLIST_REFS) {
-      const ref = toCanonicalAnthropicModelRef(rawRef);
+    for (const ref of CLAUDE_CLI_DEFAULT_ALLOWLIST_REFS) {
       if (ref in nextModels) {
         continue;
       }

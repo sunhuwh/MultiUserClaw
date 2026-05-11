@@ -104,10 +104,6 @@ vi.mock("../plugins/hook-runner-global.js", () => ({
   getGlobalHookRunner: vi.fn(() => null),
 }));
 
-vi.mock("../browser-lifecycle-cleanup.js", () => ({
-  cleanupBrowserSessionsForLifecycleEnd: vi.fn(async () => {}),
-}));
-
 vi.mock("./subagent-depth.js", () => ({
   getSubagentDepthFromSessionStore: () => 0,
 }));
@@ -118,11 +114,7 @@ vi.mock("./subagent-registry.store.js", () => ({
 }));
 
 describe("subagent registry lifecycle error grace", () => {
-  let previousFastTestEnv: string | undefined;
-
   beforeEach(async () => {
-    previousFastTestEnv = process.env.OPENCLAW_TEST_FAST;
-    process.env.OPENCLAW_TEST_FAST = "1";
     vi.useFakeTimers();
     callGatewayMock.mockClear();
     onAgentEventMock.mockClear();
@@ -159,40 +151,21 @@ describe("subagent registry lifecycle error grace", () => {
     );
     mod.__testing.setDepsForTest({
       callGateway: callGatewayMock as typeof import("../gateway/call.js").callGateway,
-      getRuntimeConfig: loadConfigMock as typeof import("../config/config.js").getRuntimeConfig,
+      loadConfig: loadConfigMock as typeof import("../config/config.js").loadConfig,
       onAgentEvent:
         onAgentEventMock as unknown as typeof import("../infra/agent-events.js").onAgentEvent,
     });
     subagentAnnounceTesting.setDepsForTest({
       callGateway: callGatewayMock as typeof import("../gateway/call.js").callGateway,
-      getRuntimeConfig: loadConfigMock as typeof import("../config/config.js").getRuntimeConfig,
-      loadSubagentRegistryRuntime: async () => ({
-        countActiveDescendantRuns: mod.countActiveDescendantRuns,
-        countPendingDescendantRuns: mod.countPendingDescendantRuns,
-        countPendingDescendantRunsExcludingRun: mod.countPendingDescendantRunsExcludingRun,
-        getLatestSubagentRunByChildSessionKey: mod.getLatestSubagentRunByChildSessionKey,
-        isSubagentSessionRunActive: mod.isSubagentSessionRunActive,
-        listSubagentRunsForRequester: mod.listSubagentRunsForRequester,
-        replaceSubagentRunAfterSteer: mod.replaceSubagentRunAfterSteer,
-        resolveRequesterForChildSession: mod.resolveRequesterForChildSession,
-        shouldIgnorePostCompletionAnnounceForSession:
-          mod.shouldIgnorePostCompletionAnnounceForSession,
-      }),
+      loadConfig: loadConfigMock as typeof import("../config/config.js").loadConfig,
     });
     subagentAnnounceDeliveryTesting.setDepsForTest({
       callGateway: callGatewayMock as typeof import("../gateway/call.js").callGateway,
-      getRuntimeConfig: loadConfigMock as typeof import("../config/config.js").getRuntimeConfig,
-      getRequesterSessionActivity: (requesterSessionKey: string) => {
-        const entry = sessionStore[requesterSessionKey];
-        return {
-          sessionId: entry?.sessionId,
-          isActive: false,
-        };
-      },
+      loadConfig: loadConfigMock as typeof import("../config/config.js").loadConfig,
     });
     subagentAnnounceOutputTesting.setDepsForTest({
       callGateway: callGatewayMock as typeof import("../gateway/call.js").callGateway,
-      getRuntimeConfig: loadConfigMock as typeof import("../config/config.js").getRuntimeConfig,
+      loadConfig: loadConfigMock as typeof import("../config/config.js").loadConfig,
     });
   });
 
@@ -204,11 +177,6 @@ describe("subagent registry lifecycle error grace", () => {
     mod.__testing.setDepsForTest();
     mod.resetSubagentRegistryForTests({ persist: false });
     vi.useRealTimers();
-    if (previousFastTestEnv === undefined) {
-      delete process.env.OPENCLAW_TEST_FAST;
-    } else {
-      process.env.OPENCLAW_TEST_FAST = previousFastTestEnv;
-    }
   });
 
   const flushAsync = async () => {
@@ -239,20 +207,6 @@ describe("subagent registry lifecycle error grace", () => {
       await flushAsync();
     }
     throw new Error(`expected ${expectedCount} agent call(s), got ${getAgentCalls().length}`);
-  };
-
-  const waitForFrozenResultText = async (runId: string, expectedText: string) => {
-    for (let attempt = 0; attempt < 80; attempt += 1) {
-      const run = mod
-        .listSubagentRunsForRequester(MAIN_REQUESTER_SESSION_KEY)
-        .find((candidate) => candidate.runId === runId);
-      if (run?.frozenResultText === expectedText) {
-        return run;
-      }
-      await vi.advanceTimersByTimeAsync(1);
-      await flushAsync();
-    }
-    throw new Error(`run ${runId} frozen result did not refresh`);
   };
 
   function registerCompletionRun(runId: string, childSuffix: string, task: string) {
@@ -440,10 +394,11 @@ describe("subagent registry lifecycle error grace", () => {
       { phase: "end", endedAt: endedAt + 200 },
       { sessionKey: "agent:main:subagent:refresh" },
     );
-    const runAfterRefresh = await waitForFrozenResultText(
-      "run-refresh",
-      "All 3 subagents complete. Here's the final summary.",
-    );
+    await flushAsync();
+
+    const runAfterRefresh = mod
+      .listSubagentRunsForRequester(MAIN_REQUESTER_SESSION_KEY)
+      .find((candidate) => candidate.runId === "run-refresh");
     expect(runAfterRefresh?.frozenResultText).toBe(
       "All 3 subagents complete. Here's the final summary.",
     );
@@ -468,7 +423,6 @@ describe("subagent registry lifecycle error grace", () => {
     emitLifecycleEvent("run-refresh-silent", { phase: "end", endedAt });
     await flushAsync();
     await waitForCleanupHandledFalse("run-refresh-silent");
-    await waitForFrozenResultText("run-refresh-silent", "All work complete, final summary");
 
     setAssistantOutput("agent:main:subagent:refresh-silent", "NO_REPLY");
     emitLifecycleEvent(
@@ -509,10 +463,10 @@ describe("subagent registry lifecycle error grace", () => {
     const run = mod
       .listSubagentRunsForRequester(MAIN_REQUESTER_SESSION_KEY)
       .find((candidate) => candidate.runId === "run-capped");
+    expect(run).toBeDefined();
     if (!run) {
       throw new Error("expected capped run to exist");
     }
-    expect(run.runId).toBe("run-capped");
     expect(typeof run.frozenResultText).toBe("string");
     expect(run.frozenResultText).toContain("[truncated: frozen completion output exceeded 100KB");
     expect(run.frozenResultCapturedAt).toBeTypeOf("number");

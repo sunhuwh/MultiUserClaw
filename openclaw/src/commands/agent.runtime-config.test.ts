@@ -1,94 +1,91 @@
 import path from "node:path";
-import { withTempHome as withTempHomeBase } from "openclaw/plugin-sdk/test-env";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveAgentRuntimeConfig } from "../agents/agent-runtime-config.js";
+import "./agent-command.test-mocks.js";
+import "../cron/isolated-agent.mocks.js";
+import { __testing as acpManagerTesting } from "../acp/control-plane/manager.js";
+import { __testing as agentCommandTesting } from "../agents/agent-command.js";
 import { resolveSession } from "../agents/command/session.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { loadModelCatalog } from "../agents/model-catalog.js";
+import * as modelSelectionModule from "../agents/model-selection.js";
+import { runEmbeddedPiAgent } from "../agents/pi-embedded.js";
+import * as commandConfigResolutionModule from "../cli/command-config-resolution.js";
+import type { OpenClawConfig } from "../config/config.js";
+import * as configModule from "../config/config.js";
+import { clearSessionStoreCacheForTest } from "../config/sessions.js";
+import { resetAgentEventsForTest, resetAgentRunContextForTest } from "../infra/agent-events.js";
+import { resetPluginRuntimeStateForTest } from "../plugins/runtime.js";
 import type { RuntimeEnv } from "../runtime.js";
-import { createThrowingTestRuntime } from "./test-runtime-config-helpers.js";
+import {
+  createDefaultAgentCommandResult,
+  mockAgentCommandConfig,
+  withAgentCommandTempHome,
+} from "./agent-command.test-support.js";
 
-type ConfigSnapshotForWrite = {
-  snapshot: { valid: boolean; resolved: OpenClawConfig };
-  writeOptions: Record<string, never>;
+vi.mock("../agents/auth-profiles.js", async () => {
+  const actual = await vi.importActual<typeof import("../agents/auth-profiles.js")>(
+    "../agents/auth-profiles.js",
+  );
+  return {
+    ...actual,
+    ensureAuthProfileStore: vi.fn(() => ({ version: 1, profiles: {} })),
+  };
+});
+
+vi.mock("../agents/command/session-store.js", async () => {
+  const actual = await vi.importActual<typeof import("../agents/command/session-store.js")>(
+    "../agents/command/session-store.js",
+  );
+  return {
+    ...actual,
+    updateSessionStoreAfterAgentRun: vi.fn(async () => undefined),
+  };
+});
+
+const runtime: RuntimeEnv = {
+  log: vi.fn(),
+  error: vi.fn(),
+  exit: vi.fn(() => {
+    throw new Error("exit");
+  }),
 };
 
-type ResolveCommandConfigParams = {
-  config: OpenClawConfig;
-  commandName: string;
-  targetIds: Set<string>;
-  runtime: RuntimeEnv;
-};
-
-const loadConfigMock = vi.hoisted(() => vi.fn<() => OpenClawConfig>());
-const readConfigFileSnapshotForWriteMock = vi.hoisted(() =>
-  vi.fn<() => Promise<ConfigSnapshotForWrite>>(),
-);
-vi.mock("../config/io.js", () => ({
-  getRuntimeConfig: loadConfigMock,
-  loadConfig: loadConfigMock,
-  readConfigFileSnapshotForWrite: readConfigFileSnapshotForWriteMock,
-}));
-
-vi.mock("../cli/command-secret-targets.js", () => ({
-  getAgentRuntimeCommandSecretTargetIds: (params?: { includeChannelTargets?: boolean }) =>
-    new Set([
-      "models.providers.*.apiKey",
-      ...(params?.includeChannelTargets === true ? ["channels.telegram.botToken"] : []),
-    ]),
-}));
-
-const setRuntimeConfigSnapshotMock = vi.hoisted(() =>
-  vi.fn<(cfg: OpenClawConfig, sourceConfig: OpenClawConfig) => void>(),
-);
-vi.mock("../config/runtime-snapshot.js", () => ({
-  setRuntimeConfigSnapshot: setRuntimeConfigSnapshotMock,
-}));
-
-const resolveCommandConfigWithSecretsMock = vi.hoisted(() =>
-  vi.fn<
-    (params: ResolveCommandConfigParams) => Promise<{
-      resolvedConfig: OpenClawConfig;
-      effectiveConfig: OpenClawConfig;
-      diagnostics: never[];
-    }>
-  >(),
-);
-vi.mock("../cli/command-config-resolution.runtime.js", () => ({
-  resolveCommandConfigWithSecrets: resolveCommandConfigWithSecretsMock,
-}));
-
-const runtime = createThrowingTestRuntime();
+const configSpy = vi.spyOn(configModule, "loadConfig");
+const readConfigFileSnapshotForWriteSpy = vi.spyOn(configModule, "readConfigFileSnapshotForWrite");
 
 async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
-  return withTempHomeBase(fn, { prefix: "openclaw-agent-" });
+  return withAgentCommandTempHome("openclaw-agent-", fn);
 }
 
-function mockConfig(home: string, storePath: string): OpenClawConfig {
-  const cfg = {
-    agents: {
-      defaults: {
-        model: { primary: "anthropic/claude-opus-4-6" },
-        models: { "anthropic/claude-opus-4-6": {} },
-        workspace: path.join(home, "openclaw"),
-      },
-    },
-    session: { store: storePath, mainKey: "main" },
-  } as OpenClawConfig;
-  loadConfigMock.mockReturnValue(cfg);
-  return cfg;
+function mockConfig(
+  home: string,
+  storePath: string,
+  agentOverrides?: Parameters<typeof mockAgentCommandConfig>[3],
+) {
+  return mockAgentCommandConfig(configSpy, home, storePath, agentOverrides);
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  readConfigFileSnapshotForWriteMock.mockResolvedValue({
+  clearSessionStoreCacheForTest();
+  resetAgentEventsForTest();
+  resetAgentRunContextForTest();
+  resetPluginRuntimeStateForTest();
+  acpManagerTesting.resetAcpSessionManagerForTests();
+  configModule.clearRuntimeConfigSnapshot();
+  vi.mocked(runEmbeddedPiAgent).mockResolvedValue(createDefaultAgentCommandResult());
+  vi.mocked(loadModelCatalog).mockResolvedValue([]);
+  vi.mocked(modelSelectionModule.isCliProvider).mockImplementation(() => false);
+  readConfigFileSnapshotForWriteSpy.mockResolvedValue({
     snapshot: { valid: false, resolved: {} as OpenClawConfig },
     writeOptions: {},
-  });
+  } as Awaited<ReturnType<typeof configModule.readConfigFileSnapshotForWrite>>);
 });
 
 describe("agentCommand runtime config", () => {
   it("sets runtime snapshots from source config before embedded agent run", async () => {
     await withTempHome(async (home) => {
+      const setRuntimeConfigSnapshotSpy = vi.spyOn(configModule, "setRuntimeConfigSnapshot");
+
       const store = path.join(home, "sessions.json");
       const loadedConfig = {
         agents: {
@@ -134,29 +131,33 @@ describe("agentCommand runtime config", () => {
         },
       } as unknown as OpenClawConfig;
 
-      loadConfigMock.mockReturnValue(loadedConfig);
-      readConfigFileSnapshotForWriteMock.mockResolvedValue({
+      configSpy.mockReturnValue(loadedConfig);
+      readConfigFileSnapshotForWriteSpy.mockResolvedValue({
         snapshot: { valid: true, resolved: sourceConfig },
         writeOptions: {},
-      });
-      resolveCommandConfigWithSecretsMock.mockResolvedValueOnce({
-        resolvedConfig,
-        effectiveConfig: resolvedConfig,
-        diagnostics: [],
-      });
+      } as Awaited<ReturnType<typeof configModule.readConfigFileSnapshotForWrite>>);
+      const resolveConfigWithSecretsSpy = vi
+        .spyOn(commandConfigResolutionModule, "resolveCommandConfigWithSecrets")
+        .mockResolvedValueOnce({
+          resolvedConfig,
+          effectiveConfig: resolvedConfig,
+          diagnostics: [],
+        });
 
-      const prepared = await resolveAgentRuntimeConfig(runtime);
+      const prepared = await agentCommandTesting.resolveAgentRuntimeConfig(runtime);
 
-      expect(resolveCommandConfigWithSecretsMock).toHaveBeenCalledWith({
+      expect(resolveConfigWithSecretsSpy).toHaveBeenCalledWith({
         config: loadedConfig,
         commandName: "agent",
-        targetIds: new Set(["models.providers.*.apiKey"]),
+        targetIds: expect.objectContaining({
+          has: expect.any(Function),
+        }),
         runtime,
       });
-      const targetIds = resolveCommandConfigWithSecretsMock.mock.calls[0]?.[0].targetIds;
+      const targetIds = resolveConfigWithSecretsSpy.mock.calls[0]?.[0].targetIds;
       expect(targetIds.has("models.providers.*.apiKey")).toBe(true);
       expect(targetIds.has("channels.telegram.botToken")).toBe(false);
-      expect(setRuntimeConfigSnapshotMock).toHaveBeenCalledWith(resolvedConfig, sourceConfig);
+      expect(setRuntimeConfigSnapshotSpy).toHaveBeenCalledWith(resolvedConfig, sourceConfig);
       expect(prepared.cfg).toBe(resolvedConfig);
     });
   });
@@ -165,35 +166,20 @@ describe("agentCommand runtime config", () => {
     await withTempHome(async (home) => {
       const store = path.join(home, "sessions.json");
       const loadedConfig = mockConfig(home, store);
-      loadedConfig.channels = {
-        telegram: {
-          botToken: { source: "env", provider: "default", id: "TELEGRAM_BOT_TOKEN" },
-        },
-      } as unknown as OpenClawConfig["channels"];
-      resolveCommandConfigWithSecretsMock.mockResolvedValueOnce({
-        resolvedConfig: loadedConfig,
-        effectiveConfig: loadedConfig,
-        diagnostics: [],
-      });
+      const resolveConfigWithSecretsSpy = vi
+        .spyOn(commandConfigResolutionModule, "resolveCommandConfigWithSecrets")
+        .mockResolvedValueOnce({
+          resolvedConfig: loadedConfig,
+          effectiveConfig: loadedConfig,
+          diagnostics: [],
+        });
 
-      await resolveAgentRuntimeConfig(runtime, {
+      await agentCommandTesting.resolveAgentRuntimeConfig(runtime, {
         runtimeTargetsChannelSecrets: true,
       });
 
-      const targetIds = resolveCommandConfigWithSecretsMock.mock.calls[0]?.[0].targetIds;
+      const targetIds = resolveConfigWithSecretsSpy.mock.calls[0]?.[0].targetIds;
       expect(targetIds.has("channels.telegram.botToken")).toBe(true);
-    });
-  });
-
-  it("skips command secret resolution when no relevant SecretRef values exist", async () => {
-    await withTempHome(async (home) => {
-      const store = path.join(home, "sessions.json");
-      const loadedConfig = mockConfig(home, store);
-
-      const prepared = await resolveAgentRuntimeConfig(runtime);
-
-      expect(resolveCommandConfigWithSecretsMock).not.toHaveBeenCalled();
-      expect(prepared.cfg).toBe(loadedConfig);
     });
   });
 
@@ -205,14 +191,8 @@ describe("agentCommand runtime config", () => {
       const resolved = resolveSession({ cfg, to: "+1555" });
 
       expect(resolved.storePath).toBe(store);
-      expect(resolved.sessionKey).toBeTypeOf("string");
-      const sessionKey = resolved.sessionKey;
-      if (!sessionKey) {
-        throw new Error("expected session key");
-      }
-      expect(sessionKey.length).toBeGreaterThan(0);
-      expect(resolved.sessionId).toBeTypeOf("string");
-      expect(resolved.sessionId.length).toBeGreaterThan(0);
+      expect(resolved.sessionKey).toBeTruthy();
+      expect(resolved.sessionId).toBeTruthy();
       expect(resolved.isNewSession).toBe(true);
     });
   });

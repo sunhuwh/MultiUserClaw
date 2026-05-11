@@ -17,14 +17,6 @@ vi.mock("./hooks.js", async () => {
   };
 });
 
-function expectRetryAfterHeader(setHeader: ReturnType<typeof vi.fn>): void {
-  const retryAfterCall = setHeader.mock.calls.find(([name]) => name === "Retry-After");
-  expect(retryAfterCall).toBeDefined();
-  const retryAfterValue = retryAfterCall?.[1];
-  expect(typeof retryAfterValue).toBe("string");
-  expect(Number.parseInt(String(retryAfterValue), 10)).toBeGreaterThan(0);
-}
-
 describe("createHooksRequestHandler timeout status mapping", () => {
   beforeEach(() => {
     readJsonBodyMock.mockClear();
@@ -70,7 +62,7 @@ describe("createHooksRequestHandler timeout status mapping", () => {
 
     expect(handled).toBe(true);
     expect(mappedRes.statusCode).toBe(429);
-    expectRetryAfterHeader(setHeader);
+    expect(setHeader).toHaveBeenCalledWith("Retry-After", expect.any(String));
   });
 
   test("uses trusted proxy forwarded client ip for hook auth throttling", async () => {
@@ -100,11 +92,11 @@ describe("createHooksRequestHandler timeout status mapping", () => {
 
     expect(handled).toBe(true);
     expect(forwardedRes.statusCode).toBe(429);
-    expectRetryAfterHeader(setHeader);
+    expect(setHeader).toHaveBeenCalledWith("Retry-After", expect.any(String));
   });
 
   test.each(["0.0.0.0", "::"])(
-    "returns unhandled when bindHost=%s sees a non-hook request URL",
+    "does not throw when bindHost=%s while parsing non-hook request URL",
     async (bindHost) => {
       const handler = createHooksHandler({ bindHost });
       const req = createHookRequest({ url: "/" });

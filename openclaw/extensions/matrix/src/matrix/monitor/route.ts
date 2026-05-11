@@ -1,11 +1,10 @@
-import { resolveConfiguredAcpBindingRecord } from "openclaw/plugin-sdk/acp-binding-resolve-runtime";
-import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
+import { buildAgentSessionKey, deriveLastRoutePolicy } from "openclaw/plugin-sdk/routing";
 import {
-  buildAgentSessionKey,
-  deriveLastRoutePolicy,
+  getSessionBindingService,
   resolveAgentIdFromSessionKey,
-} from "openclaw/plugin-sdk/routing";
-import { getSessionBindingService } from "openclaw/plugin-sdk/session-binding-runtime";
+  resolveConfiguredAcpBindingRecord,
+  type PluginRuntime,
+} from "../../runtime-api.js";
 import type { CoreConfig } from "../../types.js";
 import { resolveMatrixThreadSessionKeys } from "./threads.js";
 

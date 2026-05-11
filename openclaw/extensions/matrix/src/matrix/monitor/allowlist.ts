@@ -2,8 +2,8 @@ import {
   resolveAllowlistMatchByCandidates,
   type AllowlistMatch,
 } from "openclaw/plugin-sdk/allow-from";
-import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { normalizeStringEntries } from "openclaw/plugin-sdk/string-normalization-runtime";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 
 function normalizeAllowList(list?: Array<string | number>) {
   return normalizeStringEntries(list);
@@ -67,7 +67,9 @@ export function normalizeMatrixAllowList(list?: Array<string | number>) {
   return normalizeAllowList(list).map((entry) => normalizeMatrixAllowListEntry(entry));
 }
 
-type MatrixAllowListMatch = AllowlistMatch<"wildcard" | "id" | "prefixed-id" | "prefixed-user">;
+export type MatrixAllowListMatch = AllowlistMatch<
+  "wildcard" | "id" | "prefixed-id" | "prefixed-user"
+>;
 
 type MatrixAllowListMatchSource = NonNullable<MatrixAllowListMatch["matchSource"]>;
 

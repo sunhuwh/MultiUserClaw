@@ -1,14 +1,63 @@
-import { describe, expect, it } from "vitest";
-import "./runtime-discord.test-support.ts";
-import {
-  asConfig,
-  loadAuthStoreWithProfiles,
-  setupSecretsRuntimeSnapshotTestHooks,
-} from "./runtime.test-support.ts";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import type { AuthProfileStore } from "../agents/auth-profiles.js";
+import type { OpenClawConfig } from "../config/config.js";
+import { createEmptyPluginRegistry } from "../plugins/registry.js";
+import { setActivePluginRegistry } from "../plugins/runtime.js";
+import { loadBundledChannelSecretContractApi } from "./channel-contract-api.js";
 
-const { prepareSecretsRuntimeSnapshot } = setupSecretsRuntimeSnapshotTestHooks();
+const discordSecrets = loadBundledChannelSecretContractApi("discord");
+if (!discordSecrets?.collectRuntimeConfigAssignments) {
+  throw new Error("Missing Discord secret contract api");
+}
+
+vi.mock("../channels/plugins/bootstrap-registry.js", () => {
+  return {
+    getBootstrapChannelPlugin: (id: string) =>
+      id === "discord"
+        ? {
+            secrets: {
+              collectRuntimeConfigAssignments: discordSecrets.collectRuntimeConfigAssignments,
+            },
+          }
+        : undefined,
+    getBootstrapChannelSecrets: (id: string) =>
+      id === "discord"
+        ? {
+            collectRuntimeConfigAssignments: discordSecrets.collectRuntimeConfigAssignments,
+          }
+        : undefined,
+  };
+});
+
+function asConfig(value: unknown): OpenClawConfig {
+  return value as OpenClawConfig;
+}
+
+let clearConfigCache: typeof import("../config/config.js").clearConfigCache;
+let clearRuntimeConfigSnapshot: typeof import("../config/config.js").clearRuntimeConfigSnapshot;
+let clearSecretsRuntimeSnapshot: typeof import("./runtime.js").clearSecretsRuntimeSnapshot;
+let prepareSecretsRuntimeSnapshot: typeof import("./runtime.js").prepareSecretsRuntimeSnapshot;
+
+function loadAuthStoreWithProfiles(profiles: AuthProfileStore["profiles"]): AuthProfileStore {
+  return {
+    version: 1,
+    profiles,
+  };
+}
 
 describe("secrets runtime snapshot discord surface", () => {
+  beforeAll(async () => {
+    ({ clearConfigCache, clearRuntimeConfigSnapshot } = await import("../config/config.js"));
+    ({ clearSecretsRuntimeSnapshot, prepareSecretsRuntimeSnapshot } = await import("./runtime.js"));
+  });
+
+  afterEach(() => {
+    setActivePluginRegistry(createEmptyPluginRegistry());
+    clearSecretsRuntimeSnapshot();
+    clearRuntimeConfigSnapshot();
+    clearConfigCache();
+  });
+
   it("fails when non-default Discord account inherits an unresolved top-level token ref", async () => {
     await expect(
       prepareSecretsRuntimeSnapshot({
@@ -156,10 +205,11 @@ describe("secrets runtime snapshot discord surface", () => {
       provider: "default",
       id: "MISSING_DISCORD_WORK_VOICE_TTS_OPENAI",
     });
-    const warningPaths = snapshot.warnings.map((warning) => warning.path);
-    expect(warningPaths).toContain("channels.discord.voice.tts.providers.openai.apiKey");
-    expect(warningPaths).toContain(
-      "channels.discord.accounts.work.voice.tts.providers.openai.apiKey",
+    expect(snapshot.warnings.map((warning) => warning.path)).toEqual(
+      expect.arrayContaining([
+        "channels.discord.voice.tts.providers.openai.apiKey",
+        "channels.discord.accounts.work.voice.tts.providers.openai.apiKey",
+      ]),
     );
   });
 
@@ -259,11 +309,12 @@ describe("secrets runtime snapshot discord surface", () => {
         id: "DISCORD_DISABLED_OVERRIDE_PK_TOKEN",
       },
     );
-    const warningPaths = snapshot.warnings.map((warning) => warning.path);
-    expect(warningPaths).toContain(
-      "channels.discord.accounts.disabledOverride.voice.tts.providers.openai.apiKey",
+    expect(snapshot.warnings.map((warning) => warning.path)).toEqual(
+      expect.arrayContaining([
+        "channels.discord.accounts.disabledOverride.voice.tts.providers.openai.apiKey",
+        "channels.discord.accounts.disabledOverride.pluralkit.token",
+      ]),
     );
-    expect(warningPaths).toContain("channels.discord.accounts.disabledOverride.pluralkit.token");
   });
 
   it("skips top-level Discord voice refs when all enabled accounts override nested voice config", async () => {

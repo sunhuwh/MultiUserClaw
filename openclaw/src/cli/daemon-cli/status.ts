@@ -7,9 +7,7 @@ import type { DaemonStatusOptions } from "./types.js";
 export async function runDaemonStatus(opts: DaemonStatusOptions) {
   try {
     if (opts.requireRpc && !opts.probe) {
-      defaultRuntime.error(
-        "Gateway status failed: --require-rpc needs probing enabled. Remove --no-probe or drop --require-rpc.",
-      );
+      defaultRuntime.error("Gateway status failed: --require-rpc cannot be used with --no-probe.");
       defaultRuntime.exit(1);
       return;
     }

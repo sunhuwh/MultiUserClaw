@@ -1,17 +1,27 @@
 import { describe, expect, it, vi } from "vitest";
-import type { OpenClawConfig } from "../config/types.js";
+import type { OpenClawConfig } from "../config/config.js";
 import { buildProviderRegistry, runCapability } from "./runner.js";
 import { withAudioFixture } from "./runner.test-utils.js";
 
-vi.mock("../agents/model-auth.js", async () => {
-  const { createAvailableModelAuthMockModule } = await import("./runner.test-mocks.js");
-  return createAvailableModelAuthMockModule();
-});
+const modelAuthMocks = vi.hoisted(() => ({
+  hasAvailableAuthForProvider: vi.fn(() => true),
+  resolveApiKeyForProvider: vi.fn(async () => ({
+    apiKey: "test-key",
+    source: "test",
+    mode: "api-key",
+  })),
+  requireApiKey: vi.fn((auth: { apiKey?: string }) => auth.apiKey ?? "test-key"),
+}));
 
-vi.mock("../plugins/capability-provider-runtime.js", async () => {
-  const { createEmptyCapabilityProviderMockModule } = await import("./runner.test-mocks.js");
-  return createEmptyCapabilityProviderMockModule();
-});
+vi.mock("../agents/model-auth.js", () => ({
+  hasAvailableAuthForProvider: modelAuthMocks.hasAvailableAuthForProvider,
+  resolveApiKeyForProvider: modelAuthMocks.resolveApiKeyForProvider,
+  requireApiKey: modelAuthMocks.requireApiKey,
+}));
+
+vi.mock("../plugins/capability-provider-runtime.js", () => ({
+  resolvePluginCapabilityProviders: () => [],
+}));
 
 describe("runCapability deepgram provider options", () => {
   it("merges provider options, headers, and baseUrl overrides", async () => {
@@ -116,14 +126,9 @@ describe("runCapability deepgram provider options", () => {
         media,
         providerRegistry,
       });
-      expect(result.outputs).toHaveLength(1);
-      const [output] = result.outputs;
-      if (!output) {
-        throw new Error("Expected Deepgram media output");
-      }
-      expect(output.text).toBe("ok");
+      expect(result.outputs[0]?.text).toBe("ok");
       expect(seenBaseUrl).toBe("https://entry.example");
-      expect(seenHeaders).toStrictEqual({
+      expect(seenHeaders).toMatchObject({
         "X-Provider": "1",
         "X-Provider-Managed": "secretref-managed",
         "X-Config": "2",
@@ -131,7 +136,7 @@ describe("runCapability deepgram provider options", () => {
         "X-Entry": "3",
         "X-Entry-Managed": "secretref-managed",
       });
-      expect(seenQuery).toStrictEqual({
+      expect(seenQuery).toMatchObject({
         detect_language: false,
         punctuate: false,
         smart_format: true,

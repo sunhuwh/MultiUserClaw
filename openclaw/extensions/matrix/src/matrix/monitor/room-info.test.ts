@@ -46,13 +46,7 @@ function createMissingMetadataError() {
 }
 
 function getRoomStateCallCount(client: RoomInfoClientStub, eventType: string) {
-  let count = 0;
-  for (const [, type] of client.getRoomStateEvent.mock.calls) {
-    if (type === eventType) {
-      count++;
-    }
-  }
-  return count;
+  return client.getRoomStateEvent.mock.calls.filter(([, type]) => type === eventType).length;
 }
 
 describe("createMatrixRoomInfoResolver", () => {

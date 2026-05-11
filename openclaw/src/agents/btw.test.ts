@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionEntry } from "../config/sessions.js";
 
 const streamSimpleMock = vi.fn();
-const readFileMock = vi.fn();
-const parseSessionEntriesMock = vi.fn();
-const migrateSessionEntriesMock = vi.fn();
 const buildSessionContextMock = vi.fn();
+const getLeafEntryMock = vi.fn();
+const branchMock = vi.fn();
+const resetLeafMock = vi.fn();
 const ensureOpenClawModelsJsonMock = vi.fn();
 const discoverAuthStorageMock = vi.fn();
 const discoverModelsMock = vi.fn();
@@ -15,11 +15,8 @@ const requireApiKeyMock = vi.fn();
 const resolveSessionAuthProfileOverrideMock = vi.fn();
 const getActiveEmbeddedRunSnapshotMock = vi.fn();
 const resolveSessionAgentIdMock = vi.fn();
-const resolveSessionAgentIdsMock = vi.fn();
 const resolveAgentWorkspaceDirMock = vi.fn();
-const listAgentEntriesMock = vi.fn();
 const prepareProviderRuntimeAuthMock = vi.fn();
-const registerProviderStreamForModelMock = vi.fn();
 const diagDebugMock = vi.fn();
 
 vi.mock("@mariozechner/pi-ai", async () => {
@@ -31,18 +28,16 @@ vi.mock("@mariozechner/pi-ai", async () => {
   };
 });
 
-vi.mock("node:fs/promises", () => ({
-  default: {
-    readFile: (...args: unknown[]) => readFileMock(...args),
-  },
-  readFile: (...args: unknown[]) => readFileMock(...args),
-}));
-
 vi.mock("@mariozechner/pi-coding-agent", () => ({
-  buildSessionContext: (...args: unknown[]) => buildSessionContextMock(...args),
   generateSummary: vi.fn(async () => "summary"),
-  migrateSessionEntries: (...args: unknown[]) => migrateSessionEntriesMock(...args),
-  parseSessionEntries: (...args: unknown[]) => parseSessionEntriesMock(...args),
+  SessionManager: {
+    open: () => ({
+      getLeafEntry: getLeafEntryMock,
+      branch: branchMock,
+      resetLeaf: resetLeafMock,
+      buildSessionContext: buildSessionContextMock,
+    }),
+  },
 }));
 
 vi.mock("./models-config.js", () => ({
@@ -68,19 +63,12 @@ vi.mock("./pi-embedded-runner/runs.js", () => ({
 }));
 
 vi.mock("./agent-scope.js", () => ({
-  listAgentEntries: (...args: unknown[]) => listAgentEntriesMock(...args),
-  resolveSessionAgentIds: (...args: unknown[]) => resolveSessionAgentIdsMock(...args),
   resolveSessionAgentId: (...args: unknown[]) => resolveSessionAgentIdMock(...args),
   resolveAgentWorkspaceDir: (...args: unknown[]) => resolveAgentWorkspaceDirMock(...args),
 }));
 
 vi.mock("../plugins/provider-runtime.js", () => ({
   prepareProviderRuntimeAuth: (...args: unknown[]) => prepareProviderRuntimeAuthMock(...args),
-}));
-
-vi.mock("./provider-stream.js", () => ({
-  registerProviderStreamForModel: (...args: unknown[]) =>
-    registerProviderStreamForModelMock(...args),
 }));
 
 vi.mock("./auth-profiles/session-override.js", () => ({
@@ -107,15 +95,6 @@ const DEFAULT_QUESTION = "What changed?";
 const MATH_QUESTION = "What is 17 * 19?";
 const MATH_ANSWER = "323";
 
-const DEFAULT_USAGE = {
-  input: 1,
-  output: 2,
-  cacheRead: 0,
-  cacheWrite: 0,
-  totalTokens: 3,
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-};
-
 function makeAsyncEvents(events: unknown[]) {
   return {
     async *[Symbol.asyncIterator]() {
@@ -135,29 +114,52 @@ function createSessionEntry(overrides: Partial<SessionEntry> = {}): SessionEntry
   };
 }
 
-function createAssistantDoneEvent(content: unknown[]) {
+function createDoneEvent(text: string) {
   return {
     type: "done",
     reason: "stop",
     message: {
       role: "assistant",
-      content,
+      content: [{ type: "text", text }],
       provider: DEFAULT_PROVIDER,
       api: "anthropic-messages",
       model: DEFAULT_MODEL,
       stopReason: "stop",
-      usage: DEFAULT_USAGE,
+      usage: {
+        input: 1,
+        output: 2,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 3,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
       timestamp: Date.now(),
     },
   };
 }
 
-function createDoneEvent(text: string) {
-  return createAssistantDoneEvent([{ type: "text", text }]);
-}
-
 function createThinkingOnlyDoneEvent(thinking: string) {
-  return createAssistantDoneEvent([{ type: "thinking", thinking }]);
+  return {
+    type: "done",
+    reason: "stop",
+    message: {
+      role: "assistant",
+      content: [{ type: "thinking", thinking }],
+      provider: DEFAULT_PROVIDER,
+      api: "anthropic-messages",
+      model: DEFAULT_MODEL,
+      stopReason: "stop",
+      usage: {
+        input: 1,
+        output: 2,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 3,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      timestamp: Date.now(),
+    },
+  };
 }
 
 function mockDoneAnswer(text: string) {
@@ -190,146 +192,13 @@ function clearBuiltSessionMessages() {
   buildSessionContextMock.mockReturnValue({ messages: [] });
 }
 
-function createUserTranscriptMessage(content: unknown[] = [{ type: "text", text: "seed" }]) {
-  return {
-    role: "user",
-    content,
-    timestamp: 1,
-  };
-}
-
-function createAssistantTranscriptMessage(
-  content: unknown,
-  overrides: {
-    stopReason?: string;
-    output?: number;
-    timestamp?: number;
-  } = {},
-) {
-  return {
-    role: "assistant",
-    content,
-    provider: DEFAULT_PROVIDER,
-    api: "anthropic-messages",
-    model: DEFAULT_MODEL,
-    stopReason: overrides.stopReason ?? "stop",
-    usage: {
-      ...DEFAULT_USAGE,
-      output: overrides.output ?? DEFAULT_USAGE.output,
-      totalTokens: 1 + (overrides.output ?? DEFAULT_USAGE.output),
-    },
-    timestamp: overrides.timestamp ?? 2,
-  };
-}
-
-function createTranscriptEntry(params: { id: string; parentId?: string | null; message: unknown }) {
-  return {
-    type: "message",
-    id: params.id,
-    parentId: params.parentId ?? null,
-    message: params.message,
-  };
-}
-
-function mockTranscriptEntries(entries: unknown[]) {
-  parseSessionEntriesMock.mockReturnValue(entries);
-}
-
-function mockActiveTranscript(messages: unknown[]) {
-  getActiveEmbeddedRunSnapshotMock.mockReturnValue({
-    transcriptLeafId: "assistant-1",
-    messages,
-  });
-}
-
-async function runMathSideQuestionAndCaptureContext() {
-  mockDoneAnswer(MATH_ANSWER);
-  await runMathSideQuestion();
-  const [, context] = streamSimpleMock.mock.calls[0] ?? [];
-  return context;
-}
-
-function expectRecordFields(
-  record: unknown,
-  expected: Record<string, unknown>,
-): Record<string, unknown> {
-  expect(record).toBeDefined();
-  const actual = record as Record<string, unknown>;
-  for (const [key, value] of Object.entries(expected)) {
-    expect(actual[key]).toEqual(value);
-  }
-  return actual;
-}
-
-function streamContext(callIndex = 0): {
-  messages?: Array<Record<string, unknown>>;
-  systemPrompt?: unknown;
-} {
-  const call = streamSimpleMock.mock.calls[callIndex];
-  expect(call).toBeDefined();
-  return (call?.[1] ?? {}) as {
-    messages?: Array<Record<string, unknown>>;
-    systemPrompt?: unknown;
-  };
-}
-
-function contextMessages(context: unknown): Array<Record<string, unknown>> {
-  const messages = (context as { messages?: Array<Record<string, unknown>> }).messages;
-  expect(messages).toBeDefined();
-  return messages ?? [];
-}
-
-function expectTextBlockContains(block: unknown, text: string): void {
-  const record = expectRecordFields(block, { type: "text" });
-  expect(typeof record.text).toBe("string");
-  expect(record.text).toContain(text);
-}
-
-function firstTextBlockIncludes(message: Record<string, unknown>, text: string): boolean {
-  if (!Array.isArray(message.content)) {
-    return false;
-  }
-  const [block] = message.content;
-  const blockText = (block as { text?: unknown } | undefined)?.text;
-  return typeof blockText === "string" && blockText.includes(text);
-}
-
-function expectNoAssistantMessages(context: unknown) {
-  expect(
-    (context as { messages?: Array<{ role?: string }> }).messages?.filter(
-      (message) => message.role === "assistant",
-    ),
-  ).toHaveLength(0);
-}
-
-function expectSanitizedAssistantContext(context: unknown, text: string) {
-  const messages = contextMessages(context);
-  expect(messages).toHaveLength(3);
-  expectRecordFields(messages[0], { role: "user" });
-  expectRecordFields(messages[1], {
-    role: "assistant",
-    content: [{ type: "text", text }],
-  });
-  expectRecordFields(messages[2], { role: "user" });
-}
-
-function expectSeedOnlyUserContext(context: unknown) {
-  const messages = contextMessages(context);
-  expect(messages).toHaveLength(2);
-  expectRecordFields(messages[0], {
-    role: "user",
-    content: [{ type: "text", text: "seed" }],
-  });
-  expectRecordFields(messages[1], { role: "user" });
-}
-
 describe("runBtwSideQuestion", () => {
   beforeEach(() => {
     streamSimpleMock.mockReset();
-    readFileMock.mockReset();
-    parseSessionEntriesMock.mockReset();
-    migrateSessionEntriesMock.mockReset();
     buildSessionContextMock.mockReset();
+    getLeafEntryMock.mockReset();
+    branchMock.mockReset();
+    resetLeafMock.mockReset();
     ensureOpenClawModelsJsonMock.mockReset();
     discoverAuthStorageMock.mockReset();
     discoverModelsMock.mockReset();
@@ -339,32 +208,14 @@ describe("runBtwSideQuestion", () => {
     resolveSessionAuthProfileOverrideMock.mockReset();
     getActiveEmbeddedRunSnapshotMock.mockReset();
     resolveSessionAgentIdMock.mockReset();
-    resolveSessionAgentIdsMock.mockReset();
     resolveAgentWorkspaceDirMock.mockReset();
-    listAgentEntriesMock.mockReset();
     prepareProviderRuntimeAuthMock.mockReset();
-    registerProviderStreamForModelMock.mockReset();
     diagDebugMock.mockReset();
 
-    readFileMock.mockResolvedValue("mock transcript");
-    parseSessionEntriesMock.mockReturnValue([
-      createTranscriptEntry({
-        id: "user-1",
-        message: { role: "user", content: [{ type: "text", text: "hi" }], timestamp: 1 },
-      }),
-      createTranscriptEntry({
-        id: "assistant-1",
-        parentId: "user-1",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: "hello" }],
-          timestamp: 2,
-        },
-      }),
-    ]);
-    buildSessionContextMock.mockImplementation((entries: Array<{ message?: unknown }> = []) => {
-      return { messages: entries.flatMap((entry) => (entry.message ? [entry.message] : [])) };
+    buildSessionContextMock.mockReturnValue({
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }], timestamp: 1 }],
     });
+    getLeafEntryMock.mockReturnValue(null);
     resolveModelWithRegistryMock.mockReturnValue({
       provider: "anthropic",
       id: "claude-sonnet-4-6",
@@ -375,11 +226,8 @@ describe("runBtwSideQuestion", () => {
     resolveSessionAuthProfileOverrideMock.mockResolvedValue("profile-1");
     getActiveEmbeddedRunSnapshotMock.mockReturnValue(undefined);
     resolveSessionAgentIdMock.mockReturnValue("main");
-    resolveSessionAgentIdsMock.mockReturnValue({ defaultAgentId: "main", sessionAgentId: "main" });
     resolveAgentWorkspaceDirMock.mockReturnValue("/tmp/workspace");
-    listAgentEntriesMock.mockReturnValue([]);
     prepareProviderRuntimeAuthMock.mockResolvedValue(undefined);
-    registerProviderStreamForModelMock.mockReturnValue(undefined);
   });
 
   it("streams blocks without persisting BTW data to disk", async () => {
@@ -466,9 +314,6 @@ describe("runBtwSideQuestion", () => {
     const result = await runSideQuestion();
 
     expect(result).toEqual({ text: "Final answer." });
-    const ensureArgs = ensureOpenClawModelsJsonMock.mock.calls[0];
-    expect(ensureArgs?.[1]).toBe(DEFAULT_AGENT_DIR);
-    expect(ensureArgs?.[2]).toEqual({ workspaceDir: "/tmp/workspace" });
   });
 
   it("applies provider runtime auth before streaming github-copilot BTW questions", async () => {
@@ -497,72 +342,29 @@ describe("runBtwSideQuestion", () => {
     });
 
     expect(result).toEqual({ text: "Copilot answer." });
-    const runtimeAuthParams = expectRecordFields(
-      prepareProviderRuntimeAuthMock.mock.calls[0]?.[0],
-      {
+    expect(prepareProviderRuntimeAuthMock).toHaveBeenCalledWith(
+      expect.objectContaining({
         provider: "github-copilot",
         workspaceDir: "/tmp/workspace",
-      },
+        context: expect.objectContaining({
+          provider: "github-copilot",
+          modelId: "gpt-5.4",
+          workspaceDir: "/tmp/workspace",
+          apiKey: "github-token",
+          authMode: "token",
+          profileId: "profile-1",
+        }),
+      }),
     );
-    expectRecordFields(runtimeAuthParams.context, {
-      provider: "github-copilot",
-      modelId: "gpt-5.4",
-      workspaceDir: "/tmp/workspace",
-      apiKey: "github-token",
-      authMode: "token",
-      profileId: "profile-1",
-    });
-    const [streamModel, , streamOptions] = streamSimpleMock.mock.calls[0] ?? [];
-    expectRecordFields(streamModel, {
-      provider: "github-copilot",
-      id: "gpt-5.4",
-      baseUrl: "https://api.enterprise.githubcopilot.com",
-    });
-    expectRecordFields(streamOptions, { apiKey: "copilot-runtime-token" });
-  });
-
-  it("uses the provider's stream fn when registered so provider URL construction runs (#68336)", async () => {
-    // Regression: before this fix, /btw called streamSimple directly and
-    // bypassed the provider's createStreamFn/wrapStreamFn hooks. That caused
-    // Ollama Cloud (api: "openai-completions", baseUrl: "https://ollama.com/")
-    // to hit the marketing site instead of /v1/chat/completions.
-    resolveModelWithRegistryMock.mockReturnValue({
-      provider: "ollama",
-      id: "glm-5.1",
-      api: "openai-completions",
-      baseUrl: "https://ollama.com/",
-    });
-    const providerStreamFn = vi
-      .fn()
-      .mockReturnValue(makeAsyncEvents([createDoneEvent("Ollama Cloud answer.")]));
-    registerProviderStreamForModelMock.mockReturnValue(providerStreamFn);
-
-    const result = await runSideQuestion({ provider: "ollama", model: "glm-5.1" });
-
-    expect(result).toEqual({ text: "Ollama Cloud answer." });
-    const registerParams = expectRecordFields(
-      registerProviderStreamForModelMock.mock.calls[0]?.[0],
-      {
-        workspaceDir: "/tmp/workspace",
-      },
+    expect(streamSimpleMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "github-copilot",
+        id: "gpt-5.4",
+        baseUrl: "https://api.enterprise.githubcopilot.com",
+      }),
+      expect.anything(),
+      expect.objectContaining({ apiKey: "copilot-runtime-token" }),
     );
-    expectRecordFields(registerParams.model, {
-      provider: "ollama",
-      api: "openai-completions",
-      baseUrl: "https://ollama.com/",
-    });
-    expect(providerStreamFn).toHaveBeenCalledTimes(1);
-    expect(streamSimpleMock).not.toHaveBeenCalled();
-  });
-
-  it("falls back to streamSimple when no provider stream fn is registered", async () => {
-    registerProviderStreamForModelMock.mockReturnValue(undefined);
-    mockDoneAnswer("Fallback answer.");
-
-    const result = await runSideQuestion();
-
-    expect(result).toEqual({ text: "Fallback answer." });
-    expect(streamSimpleMock).toHaveBeenCalledTimes(1);
   });
 
   it("strips injected empty tools arrays from BTW payloads before sending", async () => {
@@ -621,8 +423,16 @@ describe("runBtwSideQuestion", () => {
     const result = await runSideQuestion({ resolvedThinkLevel: "adaptive" });
 
     expect(result).toEqual({ text: "Final answer." });
-    const [, , options] = streamSimpleMock.mock.calls[0] ?? [];
-    expect((options as { reasoning?: unknown } | undefined)?.reasoning).toBeUndefined();
+    expect(streamSimpleMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ reasoning: undefined }),
+    );
+    expect(streamSimpleMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.not.objectContaining({ reasoning: expect.anything() }),
+    );
   });
 
   it("fails when the current branch has no messages", async () => {
@@ -651,19 +461,27 @@ describe("runBtwSideQuestion", () => {
     const result = await runMathSideQuestion();
 
     expect(result).toEqual({ text: MATH_ANSWER });
-    const context = streamContext();
-    expect(String(context.systemPrompt)).toContain("ephemeral /btw side question");
-    const messages = contextMessages(context);
-    expect(messages.some((message) => message.role === "user")).toBe(true);
-    const sideQuestionMessage = messages.find(
-      (message) =>
-        message.role === "user" &&
-        firstTextBlockIncludes(
-          message,
-          `<btw_side_question>\n${MATH_QUESTION}\n</btw_side_question>`,
-        ),
+    expect(streamSimpleMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        systemPrompt: expect.stringContaining("ephemeral /btw side question"),
+        messages: expect.arrayContaining([
+          expect.objectContaining({ role: "user" }),
+          expect.objectContaining({
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: expect.stringContaining(
+                  `<btw_side_question>\n${MATH_QUESTION}\n</btw_side_question>`,
+                ),
+              },
+            ],
+          }),
+        ]),
+      }),
+      expect.anything(),
     );
-    expect(sideQuestionMessage).toBeDefined();
   });
 
   it("uses the in-flight prompt as background only when there is no prior transcript context", async () => {
@@ -678,11 +496,24 @@ describe("runBtwSideQuestion", () => {
     const result = await runSideQuestion({ question: "what are we doing?" });
 
     expect(result).toEqual({ text: "You're building a tic-tac-toe game in Brainfuck." });
-    const [message] = contextMessages(streamContext());
-    expectRecordFields(message, { role: "user" });
-    expectTextBlockContains(
-      (message.content as Array<unknown>)[0],
-      "<in_flight_main_task>\nbuild me a tic-tac-toe game in brainfuck\n</in_flight_main_task>",
+    expect(streamSimpleMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        messages: [
+          expect.objectContaining({
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: expect.stringContaining(
+                  "<in_flight_main_task>\nbuild me a tic-tac-toe game in brainfuck\n</in_flight_main_task>",
+                ),
+              },
+            ],
+          }),
+        ],
+      }),
+      expect.anything(),
     );
   });
 
@@ -691,56 +522,46 @@ describe("runBtwSideQuestion", () => {
 
     await runSideQuestion({ question: "what is the distance to the sun?" });
 
-    const context = streamContext();
-    expect(String(context.systemPrompt)).toContain(
-      "Do not continue, resume, or complete any unfinished task",
-    );
-    const sideQuestionMessage = contextMessages(context).find(
-      (message) =>
-        message.role === "user" &&
-        firstTextBlockIncludes(
-          message,
-          "Ignore any unfinished task in the conversation while answering it.",
-        ),
-    );
-    expect(sideQuestionMessage).toBeDefined();
+    const [, context] = streamSimpleMock.mock.calls[0] ?? [];
+    expect(context).toMatchObject({
+      systemPrompt: expect.stringContaining(
+        "Do not continue, resume, or complete any unfinished task",
+      ),
+    });
+    expect(context).toMatchObject({
+      messages: expect.arrayContaining([
+        expect.objectContaining({
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: expect.stringContaining(
+                "Ignore any unfinished task in the conversation while answering it.",
+              ),
+            },
+          ],
+        }),
+      ]),
+    });
   });
 
   it("branches away from an unresolved trailing user turn before building BTW context", async () => {
-    const assistantEntry = createTranscriptEntry({
-      id: "assistant-1",
-      message: createAssistantTranscriptMessage([{ type: "text", text: "seed answer" }]),
-    });
-    const trailingUserEntry = createTranscriptEntry({
-      id: "user-2",
+    getLeafEntryMock.mockReturnValue({
+      type: "message",
       parentId: "assistant-1",
-      message: createUserTranscriptMessage([{ type: "text", text: "unfinished task" }]),
+      message: { role: "user" },
     });
-    mockTranscriptEntries([assistantEntry, trailingUserEntry]);
     mockDoneAnswer(MATH_ANSWER);
 
     const result = await runMathSideQuestion();
 
-    expect(buildSessionContextMock).toHaveBeenCalledWith([assistantEntry]);
+    expect(branchMock).toHaveBeenCalledWith("assistant-1");
+    expect(resetLeafMock).not.toHaveBeenCalled();
+    expect(buildSessionContextMock).toHaveBeenCalledTimes(1);
     expect(result).toEqual({ text: MATH_ANSWER });
   });
 
   it("branches to the active run snapshot leaf when the session is busy", async () => {
-    const userEntry = createTranscriptEntry({
-      id: "user-seed",
-      message: createUserTranscriptMessage(),
-    });
-    const assistantEntry = createTranscriptEntry({
-      id: "assistant-seed",
-      parentId: "user-seed",
-      message: createAssistantTranscriptMessage([{ type: "text", text: "seed answer" }]),
-    });
-    const newerEntry = createTranscriptEntry({
-      id: "newer-user",
-      parentId: "assistant-seed",
-      message: createUserTranscriptMessage([{ type: "text", text: "newer unfinished task" }]),
-    });
-    mockTranscriptEntries([userEntry, assistantEntry, newerEntry]);
     getActiveEmbeddedRunSnapshotMock.mockReturnValue({
       transcriptLeafId: "assistant-seed",
     });
@@ -748,32 +569,27 @@ describe("runBtwSideQuestion", () => {
 
     const result = await runMathSideQuestion();
 
-    expect(buildSessionContextMock).toHaveBeenCalledWith([userEntry, assistantEntry]);
+    expect(branchMock).toHaveBeenCalledWith("assistant-seed");
+    expect(getLeafEntryMock).not.toHaveBeenCalled();
     expect(result).toEqual({ text: MATH_ANSWER });
   });
 
   it("falls back when the active run snapshot leaf no longer exists", async () => {
-    const userEntry = createTranscriptEntry({
-      id: "user-seed",
-      message: createUserTranscriptMessage(),
-    });
-    const assistantEntry = createTranscriptEntry({
-      id: "assistant-seed",
-      parentId: "user-seed",
-      message: createAssistantTranscriptMessage([{ type: "text", text: "seed answer" }]),
-    });
-    mockTranscriptEntries([userEntry, assistantEntry]);
     getActiveEmbeddedRunSnapshotMock.mockReturnValue({
       transcriptLeafId: "assistant-gone",
+    });
+    branchMock.mockImplementationOnce(() => {
+      throw new Error("Entry 3235c7c4 not found");
     });
     mockDoneAnswer(MATH_ANSWER);
 
     const result = await runMathSideQuestion();
 
-    expect(buildSessionContextMock).toHaveBeenCalledWith([userEntry, assistantEntry]);
+    expect(branchMock).toHaveBeenCalledWith("assistant-gone");
+    expect(resetLeafMock).toHaveBeenCalled();
     expect(result).toEqual({ text: MATH_ANSWER });
     expect(diagDebugMock).toHaveBeenCalledWith(
-      "btw snapshot leaf unavailable: sessionId=session-1 leaf=assistant-gone",
+      expect.stringContaining("btw snapshot leaf unavailable: sessionId=session-1"),
     );
   });
 
@@ -792,165 +608,360 @@ describe("runBtwSideQuestion", () => {
     const result = await runMathSideQuestion();
 
     expect(result).toEqual({ text: MATH_ANSWER });
-    expect(diagDebugMock).not.toHaveBeenCalled();
+    expect(diagDebugMock).not.toHaveBeenCalledWith(
+      expect.stringContaining("btw transcript persistence skipped"),
+    );
   });
 
   it("excludes tool results from BTW context to avoid replaying raw tool output", async () => {
-    mockActiveTranscript([
-      createUserTranscriptMessage(),
-      {
-        role: "toolResult",
-        content: [{ type: "text", text: "sensitive tool output" }],
-        details: { raw: "secret" },
-        timestamp: 2,
-      },
-      {
-        role: "assistant",
-        content: [{ type: "text", text: "done" }],
-        timestamp: 3,
-      },
-    ]);
+    getActiveEmbeddedRunSnapshotMock.mockReturnValue({
+      transcriptLeafId: "assistant-1",
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "seed" }],
+          timestamp: 1,
+        },
+        {
+          role: "toolResult",
+          content: [{ type: "text", text: "sensitive tool output" }],
+          details: { raw: "secret" },
+          timestamp: 2,
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "done" }],
+          timestamp: 3,
+        },
+      ],
+    });
     mockDoneAnswer(MATH_ANSWER);
 
     await runMathSideQuestion();
 
-    const messages = contextMessages(streamContext());
-    expect(messages).toHaveLength(3);
-    expectRecordFields(messages[0], { role: "user" });
-    expectRecordFields(messages[1], { role: "assistant" });
-    expectRecordFields(messages[2], { role: "user" });
-    expect(messages.some((message) => message.role === "toolResult")).toBe(false);
+    const [, context] = streamSimpleMock.mock.calls[0] ?? [];
+    expect(context).toMatchObject({
+      messages: [
+        expect.objectContaining({ role: "user" }),
+        expect.objectContaining({ role: "assistant" }),
+        expect.objectContaining({ role: "user" }),
+      ],
+    });
+    expect((context as { messages?: Array<{ role?: string }> }).messages).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ role: "toolResult" })]),
+    );
   });
 
   it("strips assistant tool calls from BTW context so no-tool side questions stay tool-free", async () => {
-    mockActiveTranscript([
-      createUserTranscriptMessage(),
-      createAssistantTranscriptMessage(
-        [
-          { type: "text", text: "Let me check." },
-          { type: "toolCall", id: "call_1", name: "read", arguments: { path: "README.md" } },
-          { type: "toolUse", id: "call_legacy", name: "read", input: { path: "README.md" } },
-          { type: "tool_call", id: "call_snake", name: "read", arguments: { path: "README.md" } },
-        ],
-        { stopReason: "toolUse" },
-      ),
-    ]);
+    getActiveEmbeddedRunSnapshotMock.mockReturnValue({
+      transcriptLeafId: "assistant-1",
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "seed" }],
+          timestamp: 1,
+        },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Let me check." },
+            { type: "toolCall", id: "call_1", name: "read", arguments: { path: "README.md" } },
+            { type: "toolUse", id: "call_legacy", name: "read", input: { path: "README.md" } },
+            { type: "tool_call", id: "call_snake", name: "read", arguments: { path: "README.md" } },
+          ],
+          provider: DEFAULT_PROVIDER,
+          api: "anthropic-messages",
+          model: DEFAULT_MODEL,
+          stopReason: "toolUse",
+          usage: {
+            input: 1,
+            output: 2,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 3,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          timestamp: 2,
+        },
+      ],
+    });
     mockDoneAnswer(MATH_ANSWER);
 
     await runMathSideQuestion();
 
-    const context = streamContext();
-    expectSanitizedAssistantContext(context, "Let me check.");
-    const assistantMessages = contextMessages(context).filter(
-      (message) => message.role === "assistant",
+    const [, context] = streamSimpleMock.mock.calls[0] ?? [];
+    expect(context).toMatchObject({
+      messages: [
+        expect.objectContaining({ role: "user" }),
+        expect.objectContaining({
+          role: "assistant",
+          content: [{ type: "text", text: "Let me check." }],
+        }),
+        expect.objectContaining({ role: "user" }),
+      ],
+    });
+    expect(
+      (context as { messages?: Array<{ role?: string; content?: Array<{ type?: string }> }> })
+        .messages,
+    ).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "assistant",
+          content: expect.arrayContaining([
+            expect.objectContaining({ type: "toolCall" }),
+            expect.objectContaining({ type: "toolUse" }),
+            expect.objectContaining({ type: "tool_call" }),
+          ]),
+        }),
+      ]),
     );
-    const assistantContentTypes = assistantMessages.flatMap((message) =>
-      Array.isArray(message.content)
-        ? message.content.map((block) => (block as { type?: unknown }).type)
-        : [],
-    );
-    expect(assistantContentTypes).not.toContain("toolCall");
-    expect(assistantContentTypes).not.toContain("toolUse");
-    expect(assistantContentTypes).not.toContain("tool_call");
   });
 
   it("drops assistant messages that contain only tool calls", async () => {
-    mockActiveTranscript([
-      createUserTranscriptMessage(),
-      createAssistantTranscriptMessage(
-        [{ type: "toolCall", id: "call_1", name: "read", arguments: {} }],
-        { stopReason: "toolUse", output: 0 },
+    getActiveEmbeddedRunSnapshotMock.mockReturnValue({
+      transcriptLeafId: "assistant-1",
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "seed" }],
+          timestamp: 1,
+        },
+        {
+          role: "assistant",
+          content: [{ type: "toolCall", id: "call_1", name: "read", arguments: {} }],
+          provider: DEFAULT_PROVIDER,
+          api: "anthropic-messages",
+          model: DEFAULT_MODEL,
+          stopReason: "toolUse",
+          usage: {
+            input: 1,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 1,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          timestamp: 2,
+        },
+      ],
+    });
+    mockDoneAnswer(MATH_ANSWER);
+
+    await runMathSideQuestion();
+
+    const [, context] = streamSimpleMock.mock.calls[0] ?? [];
+    expect(
+      (context as { messages?: Array<{ role?: string }> }).messages?.filter(
+        (message) => message.role === "assistant",
       ),
-    ]);
-
-    const context = await runMathSideQuestionAndCaptureContext();
-
-    expectNoAssistantMessages(context);
+    ).toHaveLength(0);
   });
 
   it("strips embedded user tool results from BTW context", async () => {
-    mockActiveTranscript([
-      createUserTranscriptMessage([
-        { type: "text", text: "seed" },
+    getActiveEmbeddedRunSnapshotMock.mockReturnValue({
+      transcriptLeafId: "assistant-1",
+      messages: [
         {
-          type: "toolResult",
-          toolUseId: "call_1",
-          content: [{ type: "text", text: "secret" }],
+          role: "user",
+          content: [
+            { type: "text", text: "seed" },
+            {
+              type: "toolResult",
+              toolUseId: "call_1",
+              content: [{ type: "text", text: "secret" }],
+            },
+            {
+              type: "tool_result",
+              toolUseId: "call_2",
+              content: [{ type: "text", text: "secret-2" }],
+            },
+          ],
+          timestamp: 1,
         },
-        {
-          type: "tool_result",
-          toolUseId: "call_2",
-          content: [{ type: "text", text: "secret-2" }],
-        },
-      ]),
-    ]);
+      ],
+    });
+    mockDoneAnswer(MATH_ANSWER);
 
-    const context = await runMathSideQuestionAndCaptureContext();
-    expectSeedOnlyUserContext(context);
+    await runMathSideQuestion();
+
+    const [, context] = streamSimpleMock.mock.calls[0] ?? [];
+    expect(context).toMatchObject({
+      messages: [
+        expect.objectContaining({
+          role: "user",
+          content: [{ type: "text", text: "seed" }],
+        }),
+        expect.objectContaining({ role: "user" }),
+      ],
+    });
   });
 
   it("drops assistant thinking blocks from BTW context", async () => {
-    mockActiveTranscript([
-      createUserTranscriptMessage(),
-      createAssistantTranscriptMessage(
-        [
-          { type: "text", text: "Visible answer" },
-          { type: "thinking", thinking: "Hidden chain of thought" },
-        ],
-        { output: 1 },
-      ),
-    ]);
+    getActiveEmbeddedRunSnapshotMock.mockReturnValue({
+      transcriptLeafId: "assistant-1",
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "seed" }],
+          timestamp: 1,
+        },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Visible answer" },
+            { type: "thinking", thinking: "Hidden chain of thought" },
+          ],
+          provider: DEFAULT_PROVIDER,
+          api: "anthropic-messages",
+          model: DEFAULT_MODEL,
+          stopReason: "stop",
+          usage: {
+            input: 1,
+            output: 1,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 2,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          timestamp: 2,
+        },
+      ],
+    });
+    mockDoneAnswer(MATH_ANSWER);
 
-    const context = await runMathSideQuestionAndCaptureContext();
+    await runMathSideQuestion();
 
-    expectSanitizedAssistantContext(context, "Visible answer");
-    const assistantContentTypes = contextMessages(context)
-      .filter((message) => message.role === "assistant")
-      .flatMap((message) =>
-        Array.isArray(message.content)
-          ? message.content.map((block) => (block as { type?: unknown }).type)
-          : [],
-      );
-    expect(assistantContentTypes).not.toContain("thinking");
+    const [, context] = streamSimpleMock.mock.calls[0] ?? [];
+    expect(context).toMatchObject({
+      messages: [
+        expect.objectContaining({ role: "user" }),
+        expect.objectContaining({
+          role: "assistant",
+          content: [{ type: "text", text: "Visible answer" }],
+        }),
+        expect.objectContaining({ role: "user" }),
+      ],
+    });
+    expect(
+      (context as { messages?: Array<{ role?: string; content?: Array<{ type?: string }> }> })
+        .messages,
+    ).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "assistant",
+          content: expect.arrayContaining([expect.objectContaining({ type: "thinking" })]),
+        }),
+      ]),
+    );
   });
 
   it("drops thinking-only assistant messages from BTW context", async () => {
-    mockActiveTranscript([
-      createUserTranscriptMessage(),
-      createAssistantTranscriptMessage(
-        [{ type: "thinking", thinking: "Hidden chain of thought" }],
-        { output: 1 },
+    getActiveEmbeddedRunSnapshotMock.mockReturnValue({
+      transcriptLeafId: "assistant-1",
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "seed" }],
+          timestamp: 1,
+        },
+        {
+          role: "assistant",
+          content: [{ type: "thinking", thinking: "Hidden chain of thought" }],
+          provider: DEFAULT_PROVIDER,
+          api: "anthropic-messages",
+          model: DEFAULT_MODEL,
+          stopReason: "stop",
+          usage: {
+            input: 1,
+            output: 1,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 2,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          timestamp: 2,
+        },
+      ],
+    });
+    mockDoneAnswer(MATH_ANSWER);
+
+    await runMathSideQuestion();
+
+    const [, context] = streamSimpleMock.mock.calls[0] ?? [];
+    expect(
+      (context as { messages?: Array<{ role?: string }> }).messages?.filter(
+        (message) => message.role === "assistant",
       ),
-    ]);
-
-    const context = await runMathSideQuestionAndCaptureContext();
-
-    expectNoAssistantMessages(context);
+    ).toHaveLength(0);
   });
 
   it("drops malformed user image blocks from BTW context", async () => {
-    mockActiveTranscript([
-      createUserTranscriptMessage([
-        { type: "text", text: "seed" },
-        { type: "image", mimeType: "image/png" },
-      ]),
-    ]);
+    getActiveEmbeddedRunSnapshotMock.mockReturnValue({
+      transcriptLeafId: "assistant-1",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "seed" },
+            { type: "image", mimeType: "image/png" },
+          ],
+          timestamp: 1,
+        },
+      ],
+    });
+    mockDoneAnswer(MATH_ANSWER);
 
-    const context = await runMathSideQuestionAndCaptureContext();
-    expectSeedOnlyUserContext(context);
+    await runMathSideQuestion();
+
+    const [, context] = streamSimpleMock.mock.calls[0] ?? [];
+    expect(context).toMatchObject({
+      messages: [
+        expect.objectContaining({
+          role: "user",
+          content: [{ type: "text", text: "seed" }],
+        }),
+        expect.objectContaining({ role: "user" }),
+      ],
+    });
   });
 
   it("normalizes malformed assistant content before stripping tool blocks", async () => {
-    mockActiveTranscript([
-      createUserTranscriptMessage(),
-      createAssistantTranscriptMessage(
-        { type: "toolCall", id: "call_1", name: "read", arguments: {} },
-        { stopReason: "toolUse", output: 0 },
+    getActiveEmbeddedRunSnapshotMock.mockReturnValue({
+      transcriptLeafId: "assistant-1",
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "seed" }],
+          timestamp: 1,
+        },
+        {
+          role: "assistant",
+          content: { type: "toolCall", id: "call_1", name: "read", arguments: {} },
+          provider: DEFAULT_PROVIDER,
+          api: "anthropic-messages",
+          model: DEFAULT_MODEL,
+          stopReason: "toolUse",
+          usage: {
+            input: 1,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 1,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          timestamp: 2,
+        },
+      ],
+    });
+    mockDoneAnswer(MATH_ANSWER);
+
+    await runMathSideQuestion();
+
+    const [, context] = streamSimpleMock.mock.calls[0] ?? [];
+    expect(
+      (context as { messages?: Array<{ role?: string }> }).messages?.filter(
+        (message) => message.role === "assistant",
       ),
-    ]);
-
-    const context = await runMathSideQuestionAndCaptureContext();
-
-    expectNoAssistantMessages(context);
+    ).toHaveLength(0);
   });
 });

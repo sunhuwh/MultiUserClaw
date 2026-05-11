@@ -1,10 +1,9 @@
-import { resolveChannelConfigWrites } from "openclaw/plugin-sdk/channel-config-writes";
 import { createChannelPairingController } from "openclaw/plugin-sdk/channel-pairing";
 import {
   ensureConfiguredBindingRouteReady,
   resolveConfiguredBindingRoute,
-  resolveRuntimeConversationBindingRoute,
 } from "openclaw/plugin-sdk/conversation-runtime";
+import { getSessionBindingService } from "openclaw/plugin-sdk/conversation-runtime";
 import { resolveAgentOutboundIdentity } from "openclaw/plugin-sdk/outbound-runtime";
 import {
   buildPendingHistoryContextFromMap,
@@ -13,12 +12,14 @@ import {
   recordPendingHistoryEntryIfEnabled,
   type HistoryEntry,
 } from "openclaw/plugin-sdk/reply-history";
+import { deriveLastRoutePolicy } from "openclaw/plugin-sdk/routing";
+import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 import {
   resolveDefaultGroupPolicy,
   resolveOpenProviderRuntimeGroupPolicy,
   warnMissingProviderGroupPolicyFallbackOnce,
 } from "openclaw/plugin-sdk/runtime-group-policy";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import { resolveFeishuRuntimeAccount } from "./accounts.js";
 import {
   checkBotMentioned,
@@ -28,28 +29,26 @@ import {
   parseMessageContent,
   resolveFeishuGroupSession,
   resolveFeishuMediaList,
+  toMessageResourceType,
 } from "./bot-content.js";
 import {
   buildAgentMediaPayload,
   evaluateSupplementalContextVisibility,
+  filterSupplementalContextItems,
   normalizeAgentId,
   resolveChannelContextVisibilityMode,
 } from "./bot-runtime-api.js";
 import type { ClawdbotConfig, RuntimeEnv } from "./bot-runtime-api.js";
 import { type FeishuPermissionError, resolveFeishuSenderName } from "./bot-sender-name.js";
-import { getChatInfo } from "./chat.js";
 import { createFeishuClient } from "./client.js";
 import { finalizeFeishuMessageProcessing, tryRecordMessagePersistent } from "./dedup.js";
-import { resolveFeishuMessageDedupeKey } from "./dedupe-key.js";
 import { maybeCreateDynamicAgent } from "./dynamic-agent.js";
 import { extractMentionTargets, isMentionForwardRequest } from "./mention.js";
 import {
-  hasExplicitFeishuGroupConfig,
-  resolveFeishuDmIngressAccess,
   resolveFeishuGroupConfig,
-  resolveFeishuGroupConversationIngressAccess,
-  resolveFeishuGroupSenderActivationIngressAccess,
   resolveFeishuReplyPolicy,
+  resolveFeishuAllowlistMatch,
+  isFeishuGroupAllowed,
 } from "./policy.js";
 import { resolveFeishuReasoningPreviewEnabled } from "./reasoning-preview.js";
 import { createFeishuReplyDispatcher } from "./reply-dispatcher.js";
@@ -57,13 +56,7 @@ import { getFeishuRuntime } from "./runtime.js";
 import { getMessageFeishu, listFeishuThreadMessages, sendMessageFeishu } from "./send.js";
 export type { FeishuBotAddedEvent, FeishuMessageEvent } from "./event-types.js";
 import type { FeishuMessageEvent } from "./event-types.js";
-import {
-  isFeishuGroupChatType,
-  type FeishuMessageContext,
-  type FeishuMediaInfo,
-  type FeishuMessageInfo,
-  type ResolvedFeishuAccount,
-} from "./types.js";
+import type { FeishuMessageContext, FeishuMessageInfo } from "./types.js";
 import type { DynamicAgentCreationConfig } from "./types.js";
 
 export { toMessageResourceType } from "./bot-content.js";
@@ -72,142 +65,6 @@ export { toMessageResourceType } from "./bot-content.js";
 // Key: appId or "default", Value: timestamp of last notification
 const permissionErrorNotifiedAt = new Map<string, number>();
 const PERMISSION_ERROR_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
-
-const groupNameCache = new Map<string, { name: string; expiresAt: number }>();
-const GROUP_NAME_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
-const GROUP_NAME_CACHE_MAX_SIZE = 500; // hard cap
-
-type FeishuGroupSessionScope = "group" | "group_sender" | "group_topic" | "group_topic_sender";
-
-function resolveConfiguredFeishuGroupSessionScope(params: {
-  groupConfig?: {
-    groupSessionScope?: FeishuGroupSessionScope;
-    topicSessionMode?: "enabled" | "disabled";
-  };
-  feishuCfg?: {
-    groupSessionScope?: FeishuGroupSessionScope;
-    topicSessionMode?: "enabled" | "disabled";
-  };
-}): FeishuGroupSessionScope {
-  const legacyTopicSessionMode =
-    params.groupConfig?.topicSessionMode ?? params.feishuCfg?.topicSessionMode ?? "disabled";
-  return (
-    params.groupConfig?.groupSessionScope ??
-    params.feishuCfg?.groupSessionScope ??
-    (legacyTopicSessionMode === "enabled" ? "group_topic" : "group")
-  );
-}
-
-function isFeishuTopicSessionScope(scope: FeishuGroupSessionScope): boolean {
-  return scope === "group_topic" || scope === "group_topic_sender";
-}
-
-function evictGroupNameCache(): void {
-  const now = Date.now();
-  for (const [key, val] of groupNameCache) {
-    if (val.expiresAt <= now) {
-      groupNameCache.delete(key);
-    }
-  }
-
-  if (groupNameCache.size > GROUP_NAME_CACHE_MAX_SIZE) {
-    const excess = groupNameCache.size - GROUP_NAME_CACHE_MAX_SIZE;
-    let removed = 0;
-    for (const key of groupNameCache.keys()) {
-      if (removed >= excess) {
-        break;
-      }
-      groupNameCache.delete(key);
-      removed++;
-    }
-  }
-}
-
-function setCacheEntry(key: string, value: { name: string; expiresAt: number }): void {
-  groupNameCache.delete(key);
-  groupNameCache.set(key, value);
-}
-
-export function clearGroupNameCache(): void {
-  groupNameCache.clear();
-}
-
-export async function resolveGroupName(params: {
-  account: ResolvedFeishuAccount;
-  chatId: string;
-  log: (...args: unknown[]) => void;
-}): Promise<string | undefined> {
-  const { account, chatId, log } = params;
-  if (!account.configured) {
-    return undefined;
-  }
-
-  const cacheKey = `${account.accountId}:${chatId}`;
-
-  const cached = groupNameCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.name || undefined;
-  }
-
-  try {
-    const client = createFeishuClient(account);
-    const chatInfo = await getChatInfo(client, chatId);
-    const name = chatInfo?.name?.trim();
-    if (name) {
-      setCacheEntry(cacheKey, {
-        name,
-        expiresAt: Date.now() + GROUP_NAME_CACHE_TTL_MS,
-      });
-    } else {
-      setCacheEntry(cacheKey, {
-        name: "",
-        expiresAt: Date.now() + GROUP_NAME_CACHE_TTL_MS,
-      });
-    }
-  } catch (err) {
-    log(`feishu[${account.accountId}]: getChatInfo failed for ${chatId}: ${String(err)}`);
-    setCacheEntry(cacheKey, {
-      name: "",
-      expiresAt: Date.now() + GROUP_NAME_CACHE_TTL_MS,
-    });
-  }
-
-  const result = groupNameCache.get(cacheKey)?.name || undefined;
-  evictGroupNameCache();
-
-  return result;
-}
-
-async function resolveFeishuAudioPreflightTranscript(params: {
-  cfg: ClawdbotConfig;
-  mediaList: FeishuMediaInfo[];
-  content: string;
-  chatType: "direct" | "group";
-  log: (msg: string) => void;
-}): Promise<string | undefined> {
-  if (params.content.trim() !== "<media:audio>") {
-    return undefined;
-  }
-  const audioMedia = params.mediaList.filter((media) => media.contentType?.startsWith("audio/"));
-  if (audioMedia.length === 0) {
-    return undefined;
-  }
-
-  try {
-    const { transcribeFirstAudio } = await import("./audio-preflight.runtime.js");
-    return await transcribeFirstAudio({
-      ctx: {
-        MediaPaths: audioMedia.map((media) => media.path),
-        MediaTypes: audioMedia.map((media) => media.contentType).filter(Boolean) as string[],
-        ChatType: params.chatType,
-      },
-      cfg: params.cfg,
-    });
-  } catch (err) {
-    params.log(`feishu: audio preflight transcription failed: ${String(err)}`);
-    return undefined;
-  }
-}
 
 // --- Broadcast support ---
 // Resolve broadcast agent list for a given peer (group) ID.
@@ -263,8 +120,6 @@ export function parseFeishuMessageEvent(
   const ctx: FeishuMessageContext = {
     chatId: event.message.chat_id,
     messageId: event.message.message_id,
-    replyTargetMessageId: event.message.reply_target_message_id?.trim() || undefined,
-    suppressReplyTarget: event.message.suppress_reply_target === true,
     senderId: senderUserId || senderOpenId || "",
     // Keep the historical field name, but fall back to user_id when open_id is unavailable
     // (common in some mobile app deliveries).
@@ -288,21 +143,6 @@ export function parseFeishuMessageEvent(
   }
 
   return ctx;
-}
-
-const MAX_MENTION_CONTEXT_NAME_LENGTH = 80;
-
-function formatMentionNameForAgentContext(name: string): string {
-  const stripped = Array.from(name, (char) => {
-    const code = char.charCodeAt(0);
-    return code < 0x20 || char === "[" || char === "]" ? " " : char;
-  }).join("");
-  const normalized = stripped.replace(/\s+/g, " ").trim();
-  const bounded =
-    normalized.length > MAX_MENTION_CONTEXT_NAME_LENGTH
-      ? `${normalized.slice(0, MAX_MENTION_CONTEXT_NAME_LENGTH - 3)}...`
-      : normalized;
-  return JSON.stringify(bounded || "unknown");
 }
 
 export function buildFeishuAgentBody(params: {
@@ -335,10 +175,8 @@ export function buildFeishuAgentBody(params: {
   }
 
   if (ctx.mentionTargets && ctx.mentionTargets.length > 0) {
-    const targetNames = ctx.mentionTargets
-      .map((t) => formatMentionNameForAgentContext(t.name))
-      .join(", ");
-    messageBody += `\n\n[System: Feishu users mentioned in the incoming message, for context only: ${targetNames}. Do not notify or mention these users solely because they are listed here.]`;
+    const targetNames = ctx.mentionTargets.map((t) => t.name).join(", ");
+    messageBody += `\n\n[System: Your reply will automatically @mention: ${targetNames}. Do not write @xxx yourself.]`;
   }
 
   // Keep message_id on its own line so shared message-id hint stripping can parse it reliably.
@@ -352,33 +190,44 @@ export function buildFeishuAgentBody(params: {
   return messageBody;
 }
 
-async function shouldIncludeFetchedGroupContextMessage(params: {
-  cfg: ClawdbotConfig;
-  accountId: string;
-  chatId: string;
+function isFetchedGroupContextSenderAllowed(params: {
+  isGroup: boolean;
+  allowFrom: Array<string | number>;
+  senderId?: string;
+  senderType?: string;
+}): boolean {
+  if (!params.isGroup || params.allowFrom.length === 0) {
+    return true;
+  }
+  if (params.senderType === "app") {
+    return true;
+  }
+  const senderId = params.senderId?.trim();
+  const senderAllowed =
+    !!senderId &&
+    isFeishuGroupAllowed({
+      groupPolicy: "allowlist",
+      allowFrom: params.allowFrom,
+      senderId,
+      senderName: undefined,
+    });
+  return senderAllowed;
+}
+
+function shouldIncludeFetchedGroupContextMessage(params: {
   isGroup: boolean;
   allowFrom: Array<string | number>;
   mode: "all" | "allowlist" | "allowlist_quote";
   kind: "quote" | "thread" | "history";
   senderId?: string;
   senderType?: string;
-}): Promise<boolean> {
-  let senderAllowed =
-    !params.isGroup || params.allowFrom.length === 0 || params.senderType === "app";
-  const senderId = params.senderId?.trim();
-  if (!senderAllowed && senderId) {
-    const access = await resolveFeishuGroupSenderActivationIngressAccess({
-      cfg: params.cfg,
-      accountId: params.accountId,
-      chatId: params.chatId,
-      allowFrom: params.allowFrom,
-      senderOpenId: senderId,
-      senderUserId: senderId,
-      requireMention: false,
-      mentionedBot: true,
-    });
-    senderAllowed = access.senderAccess.decision === "allow";
-  }
+}): boolean {
+  const senderAllowed = isFetchedGroupContextSenderAllowed({
+    isGroup: params.isGroup,
+    allowFrom: params.allowFrom,
+    senderId: params.senderId,
+    senderType: params.senderType,
+  });
   return evaluateSupplementalContextVisibility({
     mode: params.mode,
     kind: params.kind,
@@ -386,38 +235,29 @@ async function shouldIncludeFetchedGroupContextMessage(params: {
   }).include;
 }
 
-async function filterFetchedGroupContextMessages<
+function filterFetchedGroupContextMessages<
   T extends Pick<FeishuMessageInfo, "senderId" | "senderType">,
 >(
   messages: readonly T[],
   params: {
-    cfg: ClawdbotConfig;
-    accountId: string;
-    chatId: string;
     isGroup: boolean;
     allowFrom: Array<string | number>;
     mode: "all" | "allowlist" | "allowlist_quote";
     kind: "quote" | "thread" | "history";
   },
-): Promise<T[]> {
-  const results: Array<T | undefined> = await Promise.all(
-    messages.map(async (message) =>
-      (await shouldIncludeFetchedGroupContextMessage({
-        cfg: params.cfg,
-        accountId: params.accountId,
-        chatId: params.chatId,
+): T[] {
+  return filterSupplementalContextItems({
+    items: messages,
+    mode: params.mode,
+    kind: params.kind,
+    isSenderAllowed: (message) =>
+      isFetchedGroupContextSenderAllowed({
         isGroup: params.isGroup,
         allowFrom: params.allowFrom,
-        mode: params.mode,
-        kind: params.kind,
         senderId: message.senderId,
         senderType: message.senderType,
-      }))
-        ? message
-        : undefined,
-    ),
-  );
-  return results.filter((message): message is T => message !== undefined);
+      }),
+  }).items;
 }
 
 export async function handleFeishuMessage(params: {
@@ -449,10 +289,9 @@ export async function handleFeishuMessage(params: {
   const error = runtime?.error ?? console.error;
 
   const messageId = event.message.message_id;
-  const messageDedupeKey = resolveFeishuMessageDedupeKey(event);
   if (
     !(await finalizeFeishuMessageProcessing({
-      messageId: messageDedupeKey,
+      messageId,
       namespace: account.accountId,
       log,
       claimHeld: processingClaimHeld,
@@ -463,7 +302,7 @@ export async function handleFeishuMessage(params: {
   }
 
   let ctx = parseFeishuMessageEvent(event, botOpenId, botName);
-  const isGroup = isFeishuGroupChatType(ctx.chatType);
+  const isGroup = ctx.chatType === "group";
   const isDirect = !isGroup;
   const senderUserId = normalizeOptionalString(event.sender.sender_id.user_id);
 
@@ -542,36 +381,6 @@ export async function handleFeishuMessage(params: {
   const groupConfig = isGroup
     ? resolveFeishuGroupConfig({ cfg: feishuCfg, groupId: ctx.chatId })
     : undefined;
-  const groupSessionScope = isGroup
-    ? resolveConfiguredFeishuGroupSessionScope({ groupConfig, feishuCfg })
-    : null;
-  let effectiveThreadId = ctx.threadId;
-  if (
-    isGroup &&
-    ctx.chatType === "topic_group" &&
-    !effectiveThreadId &&
-    isFeishuTopicSessionScope(groupSessionScope ?? "group")
-  ) {
-    try {
-      const messageInfo = await getMessageFeishu({
-        cfg,
-        accountId: account.accountId,
-        messageId: ctx.messageId,
-      });
-      const hydratedThreadId = messageInfo?.threadId?.trim();
-      if (hydratedThreadId) {
-        ctx = { ...ctx, threadId: hydratedThreadId };
-        effectiveThreadId = hydratedThreadId;
-        log(
-          `feishu[${account.accountId}]: hydrated topic thread_id=${hydratedThreadId} for message=${ctx.messageId}`,
-        );
-      }
-    } catch (err) {
-      log(
-        `feishu[${account.accountId}]: failed to hydrate topic thread_id for message=${ctx.messageId}: ${String(err)}`,
-      );
-    }
-  }
   const effectiveGroupSenderAllowFrom = isGroup
     ? (groupConfig?.allowFrom?.length ?? 0) > 0
       ? (groupConfig?.allowFrom ?? [])
@@ -583,8 +392,7 @@ export async function handleFeishuMessage(params: {
         senderOpenId: ctx.senderOpenId,
         messageId: ctx.messageId,
         rootId: ctx.rootId,
-        threadId: effectiveThreadId,
-        chatType: ctx.chatType,
+        threadId: ctx.threadId,
         groupConfig,
         feishuCfg,
       })
@@ -592,6 +400,7 @@ export async function handleFeishuMessage(params: {
   const groupHistoryKey = isGroup ? (groupSession?.peerId ?? ctx.chatId) : undefined;
   const dmPolicy = feishuCfg?.dmPolicy ?? "pairing";
   const configAllowFrom = feishuCfg?.allowFrom ?? [];
+  const useAccessGroups = cfg.commands?.useAccessGroups !== false;
   const rawBroadcastAgents = isGroup ? resolveBroadcastAgents(cfg, ctx.chatId) : null;
   const broadcastAgents = rawBroadcastAgents
     ? [...new Set(rawBroadcastAgents.map((id) => normalizeAgentId(id)))]
@@ -602,7 +411,7 @@ export async function handleFeishuMessage(params: {
   // instead of the delivery/processing time.  Feishu uses a millisecond
   // epoch string; fall back to Date.now() only when the field is absent.
   const messageCreateTimeMs = event.message.create_time
-    ? Number.parseInt(event.message.create_time, 10)
+    ? parseInt(event.message.create_time, 10)
     : Date.now();
 
   let requireMention = false; // DMs never require mention; groups may override below
@@ -626,29 +435,34 @@ export async function handleFeishuMessage(params: {
     const groupAllowFrom = feishuCfg?.groupAllowFrom ?? [];
     // DEBUG: log(`feishu[${account.accountId}]: groupPolicy=${groupPolicy}`);
 
-    // A group explicitly configured under `channels.feishu.groups.<chat_id>` is
-    // treated as admitted in allowlist mode even when `groupAllowFrom` is empty.
-    // Wildcard defaults still configure matching groups, but they are not an
-    // admission signal by themselves.
-    const groupExplicitlyConfigured = hasExplicitFeishuGroupConfig({
-      cfg: feishuCfg,
-      groupId: ctx.chatId,
-    });
-
-    const groupIngress = await resolveFeishuGroupConversationIngressAccess({
-      cfg,
-      accountId: account.accountId,
-      chatId: ctx.chatId,
+    // Check if this GROUP is allowed (groupAllowFrom contains group IDs like oc_xxx, not user IDs)
+    const groupAllowed = isFeishuGroupAllowed({
       groupPolicy,
-      groupAllowFrom,
-      groupExplicitlyConfigured,
+      allowFrom: groupAllowFrom,
+      senderId: ctx.chatId, // Check group ID, not sender ID
+      senderName: undefined,
     });
 
-    if (groupIngress.ingress.admission !== "dispatch") {
+    if (!groupAllowed) {
       log(
         `feishu[${account.accountId}]: group ${ctx.chatId} not in groupAllowFrom (groupPolicy=${groupPolicy})`,
       );
       return;
+    }
+
+    // Sender-level allowlist: per-group allowFrom takes precedence, then global groupSenderAllowFrom
+    if (effectiveGroupSenderAllowFrom.length > 0) {
+      const senderAllowed = isFeishuGroupAllowed({
+        groupPolicy: "allowlist",
+        allowFrom: effectiveGroupSenderAllowFrom,
+        senderId: ctx.senderOpenId,
+        senderIds: [senderUserId],
+        senderName: ctx.senderName,
+      });
+      if (!senderAllowed) {
+        log(`feishu: sender ${ctx.senderOpenId} not in group ${ctx.chatId} sender allowlist`);
+        return;
+      }
     }
 
     ({ requireMention } = resolveFeishuReplyPolicy({
@@ -659,21 +473,7 @@ export async function handleFeishuMessage(params: {
       groupPolicy,
     }));
 
-    const groupSenderActivationIngress = await resolveFeishuGroupSenderActivationIngressAccess({
-      cfg,
-      accountId: account.accountId,
-      chatId: ctx.chatId,
-      allowFrom: effectiveGroupSenderAllowFrom,
-      senderOpenId: ctx.senderOpenId,
-      senderUserId,
-      requireMention,
-      mentionedBot: ctx.mentionedBot,
-    });
-    if (groupSenderActivationIngress.senderAccess.decision !== "allow") {
-      log(`feishu: sender ${ctx.senderOpenId} not in group ${ctx.chatId} sender allowlist`);
-      return;
-    }
-    if (groupSenderActivationIngress.ingress.admission !== "dispatch") {
+    if (requireMention && !ctx.mentionedBot) {
       log(`feishu[${account.accountId}]: message in group ${ctx.chatId} did not mention bot`);
       // Record to pending history for non-broadcast groups only. For broadcast groups,
       // the mentioned handler's broadcast dispatch writes the turn directly into all
@@ -694,6 +494,7 @@ export async function handleFeishuMessage(params: {
       }
       return;
     }
+  } else {
   }
 
   try {
@@ -708,22 +509,22 @@ export async function handleFeishuMessage(params: {
       commandProbeBody,
       cfg,
     );
-    const dmIngress = isDirect
-      ? await resolveFeishuDmIngressAccess({
-          cfg,
-          accountId: account.accountId,
-          dmPolicy,
-          allowFrom: configAllowFrom,
-          readAllowFromStore: pairing.readAllowFromStore,
-          senderOpenId: ctx.senderOpenId,
-          senderUserId,
-          conversationId: ctx.senderOpenId,
-          mayPair: true,
-          ...(shouldComputeCommandAuthorized ? { command: { hasControlCommand: true } } : {}),
-        })
-      : null;
-    if (isDirect && dmIngress?.ingress.admission !== "dispatch") {
-      if (dmIngress?.ingress.admission === "pairing-required") {
+    const storeAllowFrom =
+      !isGroup &&
+      dmPolicy !== "allowlist" &&
+      (dmPolicy !== "open" || shouldComputeCommandAuthorized)
+        ? await pairing.readAllowFromStore().catch(() => [])
+        : [];
+    const effectiveDmAllowFrom = [...configAllowFrom, ...storeAllowFrom];
+    const dmAllowed = resolveFeishuAllowlistMatch({
+      allowFrom: effectiveDmAllowFrom,
+      senderId: ctx.senderOpenId,
+      senderIds: [senderUserId],
+      senderName: ctx.senderName,
+    }).allowed;
+
+    if (isDirect && dmPolicy !== "open" && !dmAllowed) {
+      if (dmPolicy === "pairing") {
         await pairing.issueChallenge({
           senderId: ctx.senderOpenId,
           senderIdLine: `Your Feishu user id: ${ctx.senderOpenId}`,
@@ -755,7 +556,21 @@ export async function handleFeishuMessage(params: {
 
     const commandAllowFrom = isGroup
       ? (groupConfig?.allowFrom ?? configAllowFrom)
-      : (dmIngress?.senderAccess.effectiveAllowFrom ?? configAllowFrom);
+      : effectiveDmAllowFrom;
+    const senderAllowedForCommands = resolveFeishuAllowlistMatch({
+      allowFrom: commandAllowFrom,
+      senderId: ctx.senderOpenId,
+      senderIds: [senderUserId],
+      senderName: ctx.senderName,
+    }).allowed;
+    const commandAuthorized = shouldComputeCommandAuthorized
+      ? core.channel.commands.resolveCommandAuthorizedFromAuthorizers({
+          useAccessGroups,
+          authorizers: [
+            { configured: commandAllowFrom.length > 0, allowed: senderAllowedForCommands },
+          ],
+        })
+      : undefined;
 
     // In group chats, the session is scoped to the group, but the *speaker* is the sender.
     // Using a group-scoped From causes the agent to treat different users as the same person.
@@ -798,11 +613,6 @@ export async function handleFeishuMessage(params: {
           runtime,
           senderOpenId: ctx.senderOpenId,
           dynamicCfg,
-          configWritesAllowed: resolveChannelConfigWrites({
-            cfg,
-            channelId: "feishu",
-            accountId: account.accountId,
-          }),
           log: (msg) => log(msg),
         });
         if (result.created) {
@@ -841,22 +651,28 @@ export async function handleFeishuMessage(params: {
       // Bound Feishu conversations intentionally require an exact live conversation-id match.
       // Sender-scoped topic sessions therefore bind on `chat:topic:root:sender:user`, while
       // configured ACP bindings may still inherit the shared `chat:topic:root` topic session.
-      const runtimeRoute = resolveRuntimeConversationBindingRoute({
-        route,
-        conversation: {
-          channel: "feishu",
-          accountId: account.accountId,
-          conversationId: currentConversationId,
-          ...(parentConversationId ? { parentConversationId } : {}),
-        },
+      const threadBinding = getSessionBindingService().resolveByConversation({
+        channel: "feishu",
+        accountId: account.accountId,
+        conversationId: currentConversationId,
+        ...(parentConversationId ? { parentConversationId } : {}),
       });
-      route = runtimeRoute.route;
-      if (runtimeRoute.bindingRecord) {
+      const boundSessionKey = threadBinding?.targetSessionKey?.trim();
+      if (threadBinding && boundSessionKey) {
+        route = {
+          ...route,
+          sessionKey: boundSessionKey,
+          agentId: resolveAgentIdFromSessionKey(boundSessionKey) || route.agentId,
+          lastRoutePolicy: deriveLastRoutePolicy({
+            sessionKey: boundSessionKey,
+            mainSessionKey: route.mainSessionKey,
+          }),
+          matchedBy: "binding.channel",
+        };
         configuredBinding = null;
+        getSessionBindingService().touch(threadBinding.bindingId);
         log(
-          runtimeRoute.boundSessionKey
-            ? `feishu[${account.accountId}]: routed via bound conversation ${currentConversationId} -> ${runtimeRoute.boundSessionKey}`
-            : `feishu[${account.accountId}]: plugin-bound conversation ${currentConversationId}`,
+          `feishu[${account.accountId}]: routed via bound conversation ${currentConversationId} -> ${boundSessionKey}`,
         );
       }
     }
@@ -913,81 +729,7 @@ export async function handleFeishuMessage(params: {
       log,
       accountId: account.accountId,
     });
-    // Skip messages with no text content and no media attachments. Feishu can
-    // deliver empty-text events (e.g. `{"text":""}`) when a user sends a blank
-    // message or when media parsing produces an empty string. Writing a blank
-    // user turn to the session causes downstream LLM providers (e.g. MiniMax)
-    // to reject the request with "messages must not be empty" errors. Logging
-    // the skip avoids silent loss without polluting the agent session.
-    if (!ctx.content.trim() && mediaList.length === 0) {
-      log(
-        `feishu[${account.accountId}]: skipping empty message (no text, no media) from ${ctx.senderOpenId}`,
-      );
-      return;
-    }
-
     const mediaPayload = buildAgentMediaPayload(mediaList);
-    const audioTranscript = await resolveFeishuAudioPreflightTranscript({
-      cfg: effectiveCfg,
-      mediaList,
-      content: ctx.content,
-      chatType: isGroup ? "group" : "direct",
-      log,
-    });
-    const preflightAudioIndex =
-      audioTranscript === undefined
-        ? -1
-        : mediaList.findIndex((media) => media.contentType?.startsWith("audio/"));
-    const agentFacingContent = audioTranscript ?? ctx.content;
-    const agentFacingCtx =
-      audioTranscript === undefined
-        ? ctx
-        : {
-            ...ctx,
-            content: audioTranscript,
-          };
-    const effectiveCommandProbeBody =
-      audioTranscript === undefined
-        ? commandProbeBody
-        : isGroup
-          ? normalizeFeishuCommandProbeBody(audioTranscript)
-          : audioTranscript;
-    const shouldComputeEffectiveCommandAuthorized =
-      audioTranscript === undefined
-        ? shouldComputeCommandAuthorized
-        : core.channel.commands.shouldComputeCommandAuthorized(effectiveCommandProbeBody, cfg);
-    const commandAuthorized = shouldComputeEffectiveCommandAuthorized
-      ? isDirect && audioTranscript === undefined && dmIngress
-        ? dmIngress.commandAccess.authorized
-        : isGroup
-          ? (
-              await resolveFeishuGroupSenderActivationIngressAccess({
-                cfg,
-                accountId: account.accountId,
-                chatId: ctx.chatId,
-                allowFrom: commandAllowFrom,
-                senderOpenId: ctx.senderOpenId,
-                senderUserId,
-                requireMention: false,
-                mentionedBot: true,
-                command: { hasControlCommand: true },
-              })
-            ).commandAccess.authorized
-          : (
-              await resolveFeishuDmIngressAccess({
-                cfg,
-                accountId: account.accountId,
-                dmPolicy,
-                allowFrom: configAllowFrom,
-                readAllowFromStore: pairing.readAllowFromStore,
-                senderOpenId: ctx.senderOpenId,
-                senderUserId,
-                conversationId: ctx.senderOpenId,
-                mayPair: false,
-                command: { hasControlCommand: true },
-              })
-            ).commandAccess.authorized
-      : undefined;
 
     // Fetch quoted/replied message content if parentId exists
     let quotedMessageInfo: Awaited<ReturnType<typeof getMessageFeishu>> = null;
@@ -1001,17 +743,14 @@ export async function handleFeishuMessage(params: {
         });
         if (
           quotedMessageInfo &&
-          (await shouldIncludeFetchedGroupContextMessage({
-            cfg,
-            accountId: account.accountId,
-            chatId: ctx.chatId,
+          shouldIncludeFetchedGroupContextMessage({
             isGroup,
             allowFrom: effectiveGroupSenderAllowFrom,
             mode: contextVisibilityMode,
             kind: "quote",
             senderId: quotedMessageInfo.senderId,
             senderType: quotedMessageInfo.senderType,
-          }))
+          })
         ) {
           quotedContent = quotedMessageInfo.content;
           log(
@@ -1034,7 +773,7 @@ export async function handleFeishuMessage(params: {
 
     const envelopeOptions = core.channel.reply.resolveEnvelopeFormatOptions(cfg);
     const messageBody = buildFeishuAgentBody({
-      ctx: agentFacingCtx,
+      ctx,
       quotedContent,
       permissionErrorForAgent,
       botOpenId,
@@ -1117,17 +856,14 @@ export async function handleFeishuMessage(params: {
         rootMessageThreadId = rootMessageInfo?.threadId;
         if (
           rootMessageInfo &&
-          !(await shouldIncludeFetchedGroupContextMessage({
-            cfg,
-            accountId: account.accountId,
-            chatId: ctx.chatId,
+          !shouldIncludeFetchedGroupContextMessage({
             isGroup,
             allowFrom: effectiveGroupSenderAllowFrom,
             mode: contextVisibilityMode,
             kind: "thread",
             senderId: rootMessageInfo.senderId,
             senderType: rootMessageInfo.senderType,
-          }))
+          })
         ) {
           log(
             `feishu[${account.accountId}]: skipped thread starter from sender ${rootMessageInfo.senderId ?? "unknown"} (mode=${contextVisibilityMode})`,
@@ -1137,20 +873,7 @@ export async function handleFeishuMessage(params: {
       }
       return rootMessageInfo ?? null;
     };
-    let groupNamePromise: Promise<string | undefined> | undefined;
-    const resolveGroupNameForLabel = (): Promise<string | undefined> => {
-      if (!isGroup) {
-        return Promise.resolve(undefined);
-      }
-      groupNamePromise ??= resolveGroupName({ account, chatId: ctx.chatId, log });
-      return groupNamePromise;
-    };
-
-    const resolveThreadContextForAgent = async (
-      agentId: string,
-      agentSessionKey: string,
-      groupName: string | undefined,
-    ) => {
+    const resolveThreadContextForAgent = async (agentId: string, agentSessionKey: string) => {
       const cached = threadContextBySessionKey.get(agentSessionKey);
       if (cached) {
         return cached;
@@ -1163,7 +886,7 @@ export async function handleFeishuMessage(params: {
       } = {
         threadLabel:
           (ctx.rootId || ctx.threadId) && isTopicSessionForThread
-            ? `Feishu thread in ${groupName ?? ctx.chatId}`
+            ? `Feishu thread in ${ctx.chatId}`
             : undefined,
       };
 
@@ -1213,10 +936,7 @@ export async function handleFeishuMessage(params: {
             .map((id) => id?.trim())
             .filter((id): id is string => id !== undefined && id.length > 0),
         );
-        const allowlistedMessages = await filterFetchedGroupContextMessages(threadMessages, {
-          cfg,
-          accountId: account.accountId,
-          chatId: ctx.chatId,
+        const allowlistedMessages = filterFetchedGroupContextMessages(threadMessages, {
           isGroup,
           allowFrom: effectiveGroupSenderAllowFrom,
           mode: contextVisibilityMode,
@@ -1268,24 +988,21 @@ export async function handleFeishuMessage(params: {
       agentAccountId: string,
       wasMentioned: boolean,
     ) => {
-      const groupName = await resolveGroupNameForLabel();
-      const threadContext = await resolveThreadContextForAgent(agentId, agentSessionKey, groupName);
+      const threadContext = await resolveThreadContextForAgent(agentId, agentSessionKey);
       return core.channel.reply.finalizeInboundContext({
         Body: combinedBody,
         BodyForAgent: messageBody,
         InboundHistory: inboundHistory,
         ReplyToId: ctx.parentId,
         RootMessageId: ctx.rootId,
-        RawBody: agentFacingContent,
-        CommandBody: agentFacingContent,
-        Transcript: audioTranscript,
+        RawBody: ctx.content,
+        CommandBody: ctx.content,
         From: feishuFrom,
         To: feishuTo,
         SessionKey: agentSessionKey,
         AccountId: agentAccountId,
         ChatType: isGroup ? "group" : "direct",
-        GroupSubject: isGroup ? groupName || ctx.chatId : undefined,
-        ConversationLabel: isGroup && groupName && !isTopicSessionForThread ? groupName : undefined,
+        GroupSubject: isGroup ? ctx.chatId : undefined,
         SenderName: ctx.senderName ?? ctx.senderOpenId,
         SenderId: ctx.senderOpenId,
         Provider: "feishu" as const,
@@ -1305,7 +1022,6 @@ export async function handleFeishuMessage(params: {
         OriginatingTo: feishuTo,
         GroupSystemPrompt: isGroup ? normalizeOptionalString(groupConfig?.systemPrompt) : undefined,
         ...mediaPayload,
-        ...(preflightAudioIndex >= 0 ? { MediaTranscribedIndexes: [preflightAudioIndex] } : {}),
       });
     };
 
@@ -1325,11 +1041,7 @@ export async function handleFeishuMessage(params: {
       isGroup &&
       (groupConfig?.replyInThread ?? feishuCfg?.replyInThread ?? "disabled") === "enabled";
     const replyTargetMessageId =
-      isTopicSession || configReplyInThread
-        ? (ctx.rootId ??
-          ctx.replyTargetMessageId ??
-          (ctx.suppressReplyTarget ? undefined : ctx.messageId))
-        : (ctx.replyTargetMessageId ?? (ctx.suppressReplyTarget ? undefined : ctx.messageId));
+      isTopicSession || configReplyInThread ? (ctx.rootId ?? ctx.messageId) : ctx.messageId;
     const threadReply = isGroup ? (groupSession?.threadReply ?? false) : false;
 
     if (broadcastAgents) {
@@ -1338,9 +1050,7 @@ export async function handleFeishuMessage(params: {
       // broadcast dispatch to avoid duplicate agent sessions and race conditions.
       // Uses a shared "broadcast" namespace (not per-account) so the first handler
       // to reach this point claims the message; subsequent accounts skip.
-      if (
-        !(await tryRecordMessagePersistent(messageDedupeKey ?? ctx.messageId, "broadcast", log))
-      ) {
+      if (!(await tryRecordMessagePersistent(ctx.messageId, "broadcast", log))) {
         log(
           `feishu[${account.accountId}]: broadcast already claimed by another account for message ${ctx.messageId}; skipping`,
         );
@@ -1370,20 +1080,8 @@ export async function handleFeishuMessage(params: {
         }
 
         const agentSessionKey = buildBroadcastSessionKey(route.sessionKey, route.agentId, agentId);
-        const agentStorePath = core.channel.session.resolveStorePath(cfg.session?.store, {
-          agentId,
-        });
-        const agentRecord = {
-          onRecordError: (err: unknown) => {
-            log(
-              `feishu[${account.accountId}]: failed to record broadcast inbound session ${agentSessionKey}: ${String(err)}`,
-            );
-          },
-        };
         const allowReasoningPreview = resolveFeishuReasoningPreviewEnabled({
-          cfg,
-          agentId,
-          storePath: agentStorePath,
+          storePath: core.channel.session.resolveStorePath(cfg.session?.store, { agentId }),
           sessionKey: agentSessionKey,
         });
         const agentCtx = await buildCtxPayloadForAgent(
@@ -1407,6 +1105,7 @@ export async function handleFeishuMessage(params: {
             replyInThread,
             rootId: ctx.rootId,
             threadReply,
+            mentionTargets: ctx.mentionTargets,
             accountId: account.accountId,
             identity,
             messageCreateTimeMs,
@@ -1415,46 +1114,16 @@ export async function handleFeishuMessage(params: {
           log(
             `feishu[${account.accountId}]: broadcast active dispatch agent=${agentId} (session=${agentSessionKey})`,
           );
-          await core.channel.turn.run({
-            channel: "feishu",
-            accountId: route.accountId,
-            raw: ctx,
-            adapter: {
-              ingest: () => ({
-                id: ctx.messageId,
-                timestamp: messageCreateTimeMs,
-                rawText: ctx.content,
-                textForAgent: agentCtx.BodyForAgent,
-                textForCommands: agentCtx.CommandBody,
-                raw: ctx,
+          await core.channel.reply.withReplyDispatcher({
+            dispatcher,
+            onSettled: () => markDispatchIdle(),
+            run: () =>
+              core.channel.reply.dispatchReplyFromConfig({
+                ctx: agentCtx,
+                cfg,
+                dispatcher,
+                replyOptions,
               }),
-              resolveTurn: () => ({
-                channel: "feishu",
-                accountId: route.accountId,
-                routeSessionKey: agentSessionKey,
-                storePath: agentStorePath,
-                ctxPayload: agentCtx,
-                recordInboundSession: core.channel.session.recordInboundSession,
-                record: agentRecord,
-                onPreDispatchFailure: () =>
-                  core.channel.reply.settleReplyDispatcher({
-                    dispatcher,
-                    onSettled: () => markDispatchIdle(),
-                  }),
-                runDispatch: () =>
-                  core.channel.reply.withReplyDispatcher({
-                    dispatcher,
-                    onSettled: () => markDispatchIdle(),
-                    run: () =>
-                      core.channel.reply.dispatchReplyFromConfig({
-                        ctx: agentCtx,
-                        cfg,
-                        dispatcher,
-                        replyOptions,
-                      }),
-                  }),
-              }),
-            },
           });
         } else {
           // Observer agent: no-op dispatcher (session entry + inference, no Feishu reply).
@@ -1474,39 +1143,14 @@ export async function handleFeishuMessage(params: {
           log(
             `feishu[${account.accountId}]: broadcast observer dispatch agent=${agentId} (session=${agentSessionKey})`,
           );
-          await core.channel.turn.run({
-            channel: "feishu",
-            accountId: route.accountId,
-            raw: ctx,
-            adapter: {
-              ingest: () => ({
-                id: ctx.messageId,
-                timestamp: messageCreateTimeMs,
-                rawText: ctx.content,
-                textForAgent: agentCtx.BodyForAgent,
-                textForCommands: agentCtx.CommandBody,
-                raw: ctx,
+          await core.channel.reply.withReplyDispatcher({
+            dispatcher: noopDispatcher,
+            run: () =>
+              core.channel.reply.dispatchReplyFromConfig({
+                ctx: agentCtx,
+                cfg,
+                dispatcher: noopDispatcher,
               }),
-              resolveTurn: () => ({
-                channel: "feishu",
-                accountId: route.accountId,
-                routeSessionKey: agentSessionKey,
-                storePath: agentStorePath,
-                ctxPayload: agentCtx,
-                recordInboundSession: core.channel.session.recordInboundSession,
-                record: agentRecord,
-                runDispatch: () =>
-                  core.channel.reply.withReplyDispatcher({
-                    dispatcher: noopDispatcher,
-                    run: () =>
-                      core.channel.reply.dispatchReplyFromConfig({
-                        ctx: agentCtx,
-                        cfg,
-                        dispatcher: noopDispatcher,
-                      }),
-                  }),
-              }),
-            },
           });
         }
       };
@@ -1553,13 +1197,10 @@ export async function handleFeishuMessage(params: {
       );
 
       const identity = resolveAgentOutboundIdentity(cfg, route.agentId);
-      const storePath = core.channel.session.resolveStorePath(cfg.session?.store, {
-        agentId: route.agentId,
-      });
       const allowReasoningPreview = resolveFeishuReasoningPreviewEnabled({
-        cfg,
-        agentId: route.agentId,
-        storePath,
+        storePath: core.channel.session.resolveStorePath(cfg.session?.store, {
+          agentId: route.agentId,
+        }),
         sessionKey: route.sessionKey,
       });
       const { dispatcher, replyOptions, markDispatchIdle } = createFeishuReplyDispatcher({
@@ -1573,72 +1214,34 @@ export async function handleFeishuMessage(params: {
         replyInThread,
         rootId: ctx.rootId,
         threadReply,
+        mentionTargets: ctx.mentionTargets,
         accountId: account.accountId,
         identity,
         messageCreateTimeMs,
       });
 
       log(`feishu[${account.accountId}]: dispatching to agent (session=${route.sessionKey})`);
-      const turnResult = await core.channel.turn.run({
-        channel: "feishu",
-        accountId: route.accountId,
-        raw: ctx,
-        adapter: {
-          ingest: () => ({
-            id: ctx.messageId,
-            timestamp: messageCreateTimeMs,
-            rawText: ctx.content,
-            textForAgent: ctxPayload.BodyForAgent,
-            textForCommands: ctxPayload.CommandBody,
-            raw: ctx,
-          }),
-          resolveTurn: () => ({
-            channel: "feishu",
-            accountId: route.accountId,
-            routeSessionKey: route.sessionKey,
-            storePath,
-            ctxPayload,
-            recordInboundSession: core.channel.session.recordInboundSession,
-            record: {
-              onRecordError: (err) => {
-                log(
-                  `feishu[${account.accountId}]: failed to record inbound session ${route.sessionKey}: ${String(err)}`,
-                );
-              },
-            },
-            history: {
-              isGroup,
-              historyKey,
-              historyMap: chatHistories,
-              limit: historyLimit,
-            },
-            onPreDispatchFailure: () =>
-              core.channel.reply.settleReplyDispatcher({
-                dispatcher,
-                onSettled: () => markDispatchIdle(),
-              }),
-            runDispatch: () =>
-              core.channel.reply.withReplyDispatcher({
-                dispatcher,
-                onSettled: () => {
-                  markDispatchIdle();
-                },
-                run: () =>
-                  core.channel.reply.dispatchReplyFromConfig({
-                    ctx: ctxPayload,
-                    cfg,
-                    dispatcher,
-                    replyOptions,
-                  }),
-              }),
-          }),
+      const { queuedFinal, counts } = await core.channel.reply.withReplyDispatcher({
+        dispatcher,
+        onSettled: () => {
+          markDispatchIdle();
         },
+        run: () =>
+          core.channel.reply.dispatchReplyFromConfig({
+            ctx: ctxPayload,
+            cfg,
+            dispatcher,
+            replyOptions,
+          }),
       });
-      if (!turnResult.dispatched) {
-        return;
+
+      if (isGroup && historyKey && chatHistories) {
+        clearHistoryEntriesIfEnabled({
+          historyMap: chatHistories,
+          historyKey,
+          limit: historyLimit,
+        });
       }
-      const { dispatchResult } = turnResult;
-      const { queuedFinal, counts } = dispatchResult;
 
       log(
         `feishu[${account.accountId}]: dispatch complete (queuedFinal=${queuedFinal}, replies=${counts.final})`,

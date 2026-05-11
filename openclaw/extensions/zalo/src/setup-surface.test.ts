@@ -1,11 +1,11 @@
 import { adaptScopedAccountAccessor } from "openclaw/plugin-sdk/channel-config-helpers";
+import { describe, expect, it, vi } from "vitest";
 import {
   createPluginSetupWizardConfigure,
   createTestWizardPrompter,
   runSetupWizardConfigure,
-} from "openclaw/plugin-sdk/plugin-test-runtime";
-import type { WizardPrompter } from "openclaw/plugin-sdk/plugin-test-runtime";
-import { describe, expect, it, vi } from "vitest";
+  type WizardPrompter,
+} from "../../../test/helpers/plugins/setup-wizard.js";
 import type { OpenClawConfig } from "../runtime-api.js";
 import { listZaloAccountIds, resolveDefaultZaloAccountId, resolveZaloAccount } from "./accounts.js";
 import { zaloDmPolicy } from "./setup-core.js";
@@ -60,13 +60,9 @@ describe("zalo setup wizard", () => {
     });
 
     expect(result.accountId).toBe("default");
-    const zaloConfig = result.cfg.channels?.zalo;
-    if (!zaloConfig) {
-      throw new Error("expected Zalo config");
-    }
-    expect(zaloConfig.enabled).toBe(true);
-    expect(zaloConfig.botToken).toBe("12345689:abc-xyz");
-    expect(zaloConfig.webhookUrl).toBeUndefined();
+    expect(result.cfg.channels?.zalo?.enabled).toBe(true);
+    expect(result.cfg.channels?.zalo?.botToken).toBe("12345689:abc-xyz");
+    expect(result.cfg.channels?.zalo?.webhookUrl).toBeUndefined();
   });
 
   it("reads the named-account DM policy instead of the channel root", () => {
@@ -121,18 +117,11 @@ describe("zalo setup wizard", () => {
     });
 
     const next = zaloDmPolicy.setPolicy(cfg, "open");
-    const zaloConfig = next.channels?.zalo;
-    if (!zaloConfig) {
-      throw new Error("expected Zalo config");
-    }
-    expect(zaloConfig.dmPolicy).toBe("disabled");
+    expect(next.channels?.zalo?.dmPolicy).toBe("disabled");
     const workAccount = next.channels?.zalo?.accounts?.work as
       | { dmPolicy?: string; allowFrom?: Array<string | number> }
       | undefined;
-    if (!workAccount) {
-      throw new Error("expected Zalo work account");
-    }
-    expect(workAccount.dmPolicy).toBe("open");
+    expect(workAccount?.dmPolicy).toBe("open");
   });
 
   it('writes open policy state to the named account and preserves inherited allowFrom with "*"', () => {
@@ -153,19 +142,12 @@ describe("zalo setup wizard", () => {
       "work",
     );
 
-    const zaloConfig = next.channels?.zalo;
-    if (!zaloConfig) {
-      throw new Error("expected Zalo config");
-    }
-    expect(zaloConfig.dmPolicy).toBeUndefined();
+    expect(next.channels?.zalo?.dmPolicy).toBeUndefined();
     const workAccount = next.channels?.zalo?.accounts?.work as
       | { dmPolicy?: string; allowFrom?: Array<string | number> }
       | undefined;
-    if (!workAccount) {
-      throw new Error("expected Zalo work account");
-    }
-    expect(workAccount.dmPolicy).toBe("open");
-    expect(workAccount.allowFrom).toEqual(["123456789", "*"]);
+    expect(workAccount?.dmPolicy).toBe("open");
+    expect(workAccount?.allowFrom).toEqual(["123456789", "*"]);
   });
 
   it("uses configured defaultAccount for omitted setup configured state", async () => {

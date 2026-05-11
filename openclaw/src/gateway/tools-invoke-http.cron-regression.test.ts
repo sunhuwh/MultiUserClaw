@@ -16,11 +16,7 @@ const noPluginToolMeta = () => undefined;
 const noWarnLog = () => {};
 
 vi.mock("../config/config.js", () => ({
-  getRuntimeConfig: () => cfg,
-}));
-
-vi.mock("../config/io.js", () => ({
-  getRuntimeConfig: () => cfg,
+  loadConfig: () => cfg,
 }));
 
 vi.mock("../config/sessions.js", () => ({
@@ -80,18 +76,14 @@ let server: ReturnType<typeof createServer> | undefined;
 
 beforeAll(async () => {
   server = createServer((req, res) => {
-    void (async () => {
-      const handled = await handleToolsInvokeHttpRequest(req, res, {
-        auth: { mode: "token", token: TEST_GATEWAY_TOKEN, allowTailscale: false },
-      });
+    void handleToolsInvokeHttpRequest(req, res, {
+      auth: { mode: "token", token: TEST_GATEWAY_TOKEN, allowTailscale: false },
+    }).then((handled) => {
       if (handled) {
         return;
       }
       res.statusCode = 404;
       res.end("not found");
-    })().catch((err) => {
-      res.statusCode = 500;
-      res.end(String(err));
     });
   });
   await new Promise<void>((resolve, reject) => {

@@ -46,20 +46,12 @@ describe("openshell plugin config", () => {
         remoteWorkspaceDir: "/sandbox/../sandbox/project",
         remoteAgentWorkspaceDir: "/agent/./session",
       }),
-    ).toEqual({
-      mode: "mirror",
-      command: "openshell",
-      gateway: undefined,
-      gatewayEndpoint: undefined,
-      from: "openclaw",
-      policy: undefined,
-      providers: [],
-      gpu: false,
-      autoProviders: true,
-      remoteWorkspaceDir: "/sandbox/project",
-      remoteAgentWorkspaceDir: "/agent/session",
-      timeoutMs: 120_000,
-    });
+    ).toEqual(
+      expect.objectContaining({
+        remoteWorkspaceDir: "/sandbox/project",
+        remoteAgentWorkspaceDir: "/agent/session",
+      }),
+    );
   });
 
   it("rejects unknown mode", () => {

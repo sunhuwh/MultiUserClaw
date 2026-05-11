@@ -1,14 +1,13 @@
+import { beforeAll, describe, expect, it } from "vitest";
+import {
+  expectDashscopeVideoTaskPoll,
+  expectSuccessfulDashscopeVideoResult,
+  mockSuccessfulDashscopeVideoTask,
+} from "../../test/helpers/media-generation/dashscope-video-provider.js";
 import {
   getProviderHttpMocks,
   installProviderHttpMockCleanup,
-} from "openclaw/plugin-sdk/provider-http-test-mocks";
-import {
-  expectDashscopeVideoTaskPoll,
-  expectExplicitVideoGenerationCapabilities,
-  expectSuccessfulDashscopeVideoResult,
-  mockSuccessfulDashscopeVideoTask,
-} from "openclaw/plugin-sdk/provider-test-contracts";
-import { beforeAll, describe, expect, it } from "vitest";
+} from "../../test/helpers/media-generation/provider-http-mocks.js";
 
 const { postJsonRequestMock, fetchWithTimeoutMock } = getProviderHttpMocks();
 
@@ -20,44 +19,7 @@ beforeAll(async () => {
 
 installProviderHttpMockCleanup();
 
-function expectPostJsonRequest(
-  call: unknown,
-  expected: {
-    url: string;
-    body: Record<string, unknown>;
-  },
-) {
-  if (!call || typeof call !== "object") {
-    throw new Error("expected postJsonRequest call object");
-  }
-  const request = call as {
-    url?: unknown;
-    headers?: unknown;
-    body?: unknown;
-    timeoutMs?: unknown;
-    fetchFn?: unknown;
-    allowPrivateNetwork?: unknown;
-    dispatcherPolicy?: unknown;
-  };
-  expect(request.url).toBe(expected.url);
-  expect(request.body).toEqual(expected.body);
-  expect(request.timeoutMs).toBe(120_000);
-  expect(request.fetchFn).toBe(globalThis.fetch);
-  expect(request.allowPrivateNetwork).toBe(false);
-  expect(request.dispatcherPolicy).toBeUndefined();
-  expect(request.headers).toBeInstanceOf(Headers);
-  expect(Array.from((request.headers as Headers).entries())).toEqual([
-    ["authorization", "Bearer provider-key"],
-    ["content-type", "application/json"],
-    ["x-dashscope-async", "enable"],
-  ]);
-}
-
 describe("qwen video generation provider", () => {
-  it("declares explicit mode capabilities", () => {
-    expectExplicitVideoGenerationCapabilities(buildQwenVideoGenerationProvider());
-  });
-
   it("submits async Wan generation, polls task status, and downloads the resulting video", async () => {
     mockSuccessfulDashscopeVideoTask({ postJsonRequestMock, fetchWithTimeoutMock });
 
@@ -72,21 +34,18 @@ describe("qwen video generation provider", () => {
       audio: true,
     });
 
-    expect(postJsonRequestMock).toHaveBeenCalledTimes(1);
-    expectPostJsonRequest(postJsonRequestMock.mock.calls[0]?.[0], {
-      url: "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis",
-      body: {
-        model: "wan2.6-r2v-flash",
-        input: {
-          prompt: "animate this shot",
-          img_url: "https://example.com/ref.png",
-        },
-        parameters: {
-          duration: 6,
-          enable_audio: true,
-        },
-      },
-    });
+    expect(postJsonRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis",
+        body: expect.objectContaining({
+          model: "wan2.6-r2v-flash",
+          input: expect.objectContaining({
+            prompt: "animate this shot",
+            img_url: "https://example.com/ref.png",
+          }),
+        }),
+      }),
+    );
     expectDashscopeVideoTaskPoll(fetchWithTimeoutMock);
     expectSuccessfulDashscopeVideoResult(result);
   });
@@ -134,19 +93,11 @@ describe("qwen video generation provider", () => {
       },
     });
 
-    expect(postJsonRequestMock).toHaveBeenCalledTimes(1);
-    expectPostJsonRequest(postJsonRequestMock.mock.calls[0]?.[0], {
-      url: "https://coding-intl.dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis",
-      body: {
-        model: "wan2.6-t2v",
-        input: {
-          prompt: "animate this shot",
-        },
-        parameters: {
-          duration: 5,
-        },
-      },
-    });
+    expect(postJsonRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://coding-intl.dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis",
+      }),
+    );
     expectDashscopeVideoTaskPoll(fetchWithTimeoutMock, {
       baseUrl: "https://coding-intl.dashscope.aliyuncs.com",
       taskId: "task-2",

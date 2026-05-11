@@ -1,15 +1,16 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createPluginSetupWizardConfigure,
   createTestWizardPrompter,
   runSetupWizardConfigure,
-} from "openclaw/plugin-sdk/plugin-test-runtime";
-import type { WizardPrompter } from "openclaw/plugin-sdk/plugin-test-runtime";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+  type WizardPrompter,
+} from "../../../test/helpers/plugins/setup-wizard.js";
 import { listAccountIds, resolveAccount } from "./accounts.js";
 import { SynologyChatChannelConfigSchema } from "./config-schema.js";
 import {
-  authorizeUserForDmWithIngress,
+  authorizeUserForDm,
+  checkUserAllowed,
   RateLimiter,
   sanitizeInput,
   validateToken,
@@ -32,32 +33,7 @@ const synologyChatSetupPlugin = {
 const synologyChatConfigure = createPluginSetupWizardConfigure(synologyChatSetupPlugin);
 const originalEnv = { ...process.env };
 
-function createSynologySetupPrompter(params: { allowedUserIds?: string } = {}) {
-  return createTestWizardPrompter({
-    text: vi.fn(async ({ message }: { message: string }) => {
-      if (message === "Enter Synology Chat outgoing webhook token") {
-        return "synology-token";
-      }
-      if (message === "Incoming webhook URL") {
-        return "https://nas.example.com/webapi/entry.cgi?token=incoming";
-      }
-      if (message === "Outgoing webhook path (optional)") {
-        return "";
-      }
-      if (params.allowedUserIds && message === "Allowed Synology Chat user ids") {
-        return params.allowedUserIds;
-      }
-      throw new Error(`Unexpected prompt: ${message}`);
-    }) as WizardPrompter["text"],
-  });
-}
-
 describe("synology-chat core", () => {
-  afterAll(() => {
-    vi.unstubAllEnvs();
-    process.env = { ...originalEnv };
-  });
-
   beforeEach(() => {
     vi.unstubAllEnvs();
     process.env = { ...originalEnv };
@@ -107,7 +83,20 @@ describe("synology-chat core", () => {
   });
 
   it("configures token and incoming webhook for the default account", async () => {
-    const prompter = createSynologySetupPrompter();
+    const prompter = createTestWizardPrompter({
+      text: vi.fn(async ({ message }: { message: string }) => {
+        if (message === "Enter Synology Chat outgoing webhook token") {
+          return "synology-token";
+        }
+        if (message === "Incoming webhook URL") {
+          return "https://nas.example.com/webapi/entry.cgi?token=incoming";
+        }
+        if (message === "Outgoing webhook path (optional)") {
+          return "";
+        }
+        throw new Error(`Unexpected prompt: ${message}`);
+      }) as WizardPrompter["text"],
+    });
 
     const result = await runSetupWizardConfigure({
       configure: synologyChatConfigure,
@@ -125,8 +114,22 @@ describe("synology-chat core", () => {
   });
 
   it("records allowed user ids when setup forces allowFrom", async () => {
-    const prompter = createSynologySetupPrompter({
-      allowedUserIds: "123456, synology-chat:789012",
+    const prompter = createTestWizardPrompter({
+      text: vi.fn(async ({ message }: { message: string }) => {
+        if (message === "Enter Synology Chat outgoing webhook token") {
+          return "synology-token";
+        }
+        if (message === "Incoming webhook URL") {
+          return "https://nas.example.com/webapi/entry.cgi?token=incoming";
+        }
+        if (message === "Outgoing webhook path (optional)") {
+          return "";
+        }
+        if (message === "Allowed Synology Chat user ids") {
+          return "123456, synology-chat:789012";
+        }
+        throw new Error(`Unexpected prompt: ${message}`);
+      }) as WizardPrompter["text"],
     });
 
     const result = await runSetupWizardConfigure({
@@ -144,8 +147,8 @@ describe("synology-chat core", () => {
 
 describe("synology-chat account resolution", () => {
   it("lists no accounts when the channel is missing", () => {
-    expect(listAccountIds({})).toStrictEqual([]);
-    expect(listAccountIds({ channels: {} })).toStrictEqual([]);
+    expect(listAccountIds({})).toEqual([]);
+    expect(listAccountIds({ channels: {} })).toEqual([]);
   });
 
   it("lists the default account when base config has a token", () => {
@@ -316,90 +319,27 @@ describe("synology-chat security helpers", () => {
     expect(validateToken("short", "muchlongertoken")).toBe(false);
   });
 
-  it("matches DM policy decisions through channel ingress", async () => {
-    await expect(
-      authorizeUserForDmWithIngress({
-        accountId: "default",
-        userId: "user1",
-        dmPolicy: "open",
-        allowedUserIds: [],
-      }),
-    ).resolves.toMatchObject({
-      senderAccess: {
-        allowed: false,
-        reasonCode: "dm_policy_not_allowlisted",
-      },
-    });
-    await expect(
-      authorizeUserForDmWithIngress({
-        accountId: "default",
-        userId: "user1",
-        dmPolicy: "open",
-        allowedUserIds: ["*"],
-      }),
-    ).resolves.toMatchObject({ senderAccess: { allowed: true } });
-    await expect(
-      authorizeUserForDmWithIngress({
-        accountId: "default",
-        userId: "user1",
-        dmPolicy: "disabled",
-        allowedUserIds: ["user1"],
-      }),
-    ).resolves.toMatchObject({
-      senderAccess: {
-        allowed: false,
-        reasonCode: "dm_policy_disabled",
-      },
-    });
-    await expect(
-      authorizeUserForDmWithIngress({
-        accountId: "default",
-        userId: "user1",
-        dmPolicy: "allowlist",
-        allowedUserIds: [],
-      }),
-    ).resolves.toMatchObject({
-      senderAccess: {
-        allowed: false,
-        reasonCode: "dm_policy_not_allowlisted",
-      },
-    });
-    await expect(
-      authorizeUserForDmWithIngress({
-        accountId: "default",
-        userId: "user9",
-        dmPolicy: "allowlist",
-        allowedUserIds: ["user1"],
-      }),
-    ).resolves.toMatchObject({
-      senderAccess: {
-        allowed: false,
-        reasonCode: "dm_policy_not_allowlisted",
-      },
-    });
-    await expect(
-      authorizeUserForDmWithIngress({
-        accountId: "default",
-        userId: "user1",
-        dmPolicy: "allowlist",
-        allowedUserIds: ["user1", "user2"],
-      }),
-    ).resolves.toMatchObject({ senderAccess: { allowed: true } });
-  });
+  it("enforces allowlists and DM policy decisions", () => {
+    expect(checkUserAllowed("user1", [])).toBe(false);
+    expect(checkUserAllowed("user1", ["user1", "user2"])).toBe(true);
+    expect(checkUserAllowed("user3", ["user1", "user2"])).toBe(false);
 
-  it("redacts Synology user IDs and allowlist entries from ingress state/decision", async () => {
-    const auth = await authorizeUserForDmWithIngress({
-      accountId: "default",
-      userId: "raw-sensitive-user-id",
-      dmPolicy: "allowlist",
-      allowedUserIds: ["raw-sensitive-user-id"],
+    expect(authorizeUserForDm("user1", "open", [])).toEqual({ allowed: true });
+    expect(authorizeUserForDm("user1", "disabled", ["user1"])).toEqual({
+      allowed: false,
+      reason: "disabled",
     });
-
-    const serialized = JSON.stringify({
-      state: auth.state,
-      decision: auth.ingress,
+    expect(authorizeUserForDm("user1", "allowlist", [])).toEqual({
+      allowed: false,
+      reason: "allowlist-empty",
     });
-    expect(serialized).not.toContain("raw-sensitive-user-id");
+    expect(authorizeUserForDm("user9", "allowlist", ["user1"])).toEqual({
+      allowed: false,
+      reason: "not-allowlisted",
+    });
+    expect(authorizeUserForDm("user1", "allowlist", ["user1", "user2"])).toEqual({
+      allowed: true,
+    });
   });
 
   it("sanitizes prompt injection markers and long inputs", () => {

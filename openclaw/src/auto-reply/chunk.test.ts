@@ -17,18 +17,10 @@ function expectFencesBalanced(chunks: string[]) {
   }
 }
 
-function requireChunk(chunks: string[], index: number): string {
-  const chunk = chunks[index];
-  if (chunk === undefined) {
-    throw new Error(`expected chunk ${index}`);
-  }
-  return chunk;
-}
-
 function expectChunkLengths(chunks: string[], expectedLengths: number[]) {
   expect(chunks).toHaveLength(expectedLengths.length);
   expectedLengths.forEach((length, index) => {
-    expect(requireChunk(chunks, index).length).toBe(length);
+    expect(chunks[index]?.length).toBe(length);
   });
 }
 
@@ -199,8 +191,8 @@ describe("chunkText", () => {
       text: "This is a message that should break nicely near a word boundary.",
       limit: 30,
       assert: (chunks: string[], text: string) => {
-        expect(requireChunk(chunks, 0).length).toBeLessThanOrEqual(30);
-        expect(requireChunk(chunks, 1).length).toBeLessThanOrEqual(30);
+        expect(chunks[0]?.length).toBeLessThanOrEqual(30);
+        expect(chunks[1]?.length).toBeLessThanOrEqual(30);
         expectNormalizedChunkJoin(chunks, text);
       },
     },
@@ -346,8 +338,7 @@ describe("chunkMarkdownText", () => {
         const text = `${prefix}\n\n${fence}\n\n${suffix}`;
 
         const chunks = chunkMarkdownText(text, 40);
-        const intactFenceChunks = chunks.filter((chunk) => chunk.trimEnd() === fence);
-        expect(intactFenceChunks.length).toBeGreaterThan(0);
+        expect(chunks.some((chunk) => chunk.trimEnd() === fence)).toBe(true);
         expectFencesBalanced(chunks);
       },
     },
@@ -403,7 +394,7 @@ describe("chunkMarkdownText", () => {
       run: () => {
         const text = `(${"a".repeat(80)})`;
         const chunks = chunkMarkdownText(text, 20);
-        expect(requireChunk(chunks, 0).length).toBe(20);
+        expect(chunks[0]?.length).toBe(20);
         expect(chunks.join("")).toBe(text);
       },
     },
@@ -484,7 +475,7 @@ describe("chunkByNewline", () => {
   });
 
   it.each(["", "   \n\n   "] as const)("returns empty array for input %j", (text) => {
-    expect(chunkByNewline(text, 100)).toStrictEqual([]);
+    expect(chunkByNewline(text, 100)).toEqual([]);
   });
 });
 
@@ -578,7 +569,7 @@ describe("resolveChunkMode", () => {
   it.each([
     { cfg: undefined, provider: "telegram", accountId: undefined, expected: "length" },
     { cfg: {}, provider: "discord", accountId: undefined, expected: "length" },
-    { cfg: undefined, provider: "imessage", accountId: undefined, expected: "length" },
+    { cfg: undefined, provider: "bluebubbles", accountId: undefined, expected: "length" },
     { cfg: providerCfg, provider: "__internal__", accountId: undefined, expected: "length" },
     { cfg: providerCfg, provider: "slack", accountId: undefined, expected: "newline" },
     { cfg: providerCfg, provider: "discord", accountId: undefined, expected: "length" },

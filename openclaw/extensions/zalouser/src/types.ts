@@ -1,4 +1,3 @@
-import type { MessageReceipt } from "openclaw/plugin-sdk/channel-message";
 import type { Style } from "./zca-constants.js";
 
 export type ZcaFriend = {
@@ -72,7 +71,6 @@ export type ZaloSendOptions = {
 export type ZaloSendResult = {
   ok: boolean;
   messageId?: string;
-  receipt: MessageReceipt;
   error?: string;
 };
 
@@ -87,7 +85,7 @@ export type ZaloAuthStatus = {
   message: string;
 };
 
-type ZalouserToolConfig = { allow?: string[]; deny?: string[] };
+export type ZalouserToolConfig = { allow?: string[]; deny?: string[] };
 
 export type ZalouserGroupConfig = {
   enabled?: boolean;

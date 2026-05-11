@@ -1,8 +1,6 @@
-import { resolveCommandAnalysisSummaryForDisplay } from "../../infra/command-analysis/explain.js";
 import {
   resolveExecApprovalCommandDisplay,
   sanitizeExecApprovalDisplayText,
-  sanitizeExecApprovalWarningText,
 } from "../../infra/exec-approval-command-display.js";
 import type { ExecApprovalForwarder } from "../../infra/exec-approval-forwarder.js";
 import {
@@ -48,35 +46,6 @@ type ExecApprovalIosPushDelivery = {
   handleResolved?: (resolved: ExecApprovalResolved) => Promise<void>;
   handleExpired?: (request: ExecApprovalRequest) => Promise<void>;
 };
-
-function normalizeCommandSpans(
-  spans: { startIndex: number; endIndex: number }[] | undefined,
-  commandLength: number,
-): { startIndex: number; endIndex: number }[] | undefined {
-  if (!spans) {
-    return undefined;
-  }
-  const candidates = spans
-    .filter(
-      (span) =>
-        Number.isSafeInteger(span.startIndex) &&
-        Number.isSafeInteger(span.endIndex) &&
-        span.startIndex >= 0 &&
-        span.endIndex > span.startIndex &&
-        span.endIndex <= commandLength,
-    )
-    .toSorted((a, b) => a.startIndex - b.startIndex || b.endIndex - a.endIndex);
-  const accepted: { startIndex: number; endIndex: number }[] = [];
-  let cursor = 0;
-  for (const span of candidates) {
-    if (span.startIndex < cursor) {
-      continue;
-    }
-    accepted.push({ startIndex: span.startIndex, endIndex: span.endIndex });
-    cursor = span.endIndex;
-  }
-  return accepted.length > 0 ? accepted : undefined;
-}
 
 export function createExecApprovalHandlers(
   manager: ExecApprovalManager,
@@ -162,11 +131,6 @@ export function createExecApprovalHandlers(
         host?: string;
         security?: string;
         ask?: string;
-        warningText?: string | null;
-        commandSpans?: {
-          startIndex: number;
-          endIndex: number;
-        }[];
         agentId?: string;
         resolvedPath?: string;
         sessionKey?: string;
@@ -213,7 +177,7 @@ export function createExecApprovalHandlers(
         );
         return;
       }
-      if (effectiveCommandText.trim().length === 0) {
+      if (!effectiveCommandText) {
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "command is required"));
         return;
       }
@@ -240,19 +204,6 @@ export function createExecApprovalHandlers(
         return;
       }
       const envBinding = buildSystemRunApprovalEnvBinding(p.env);
-      const warningText = normalizeOptionalString(p.warningText);
-      const commandAnalysis = resolveCommandAnalysisSummaryForDisplay({
-        host,
-        commandText: effectiveCommandText,
-        commandArgv: effectiveCommandArgv,
-        cwd: effectiveCwd,
-        sanitizeText: sanitizeExecApprovalWarningText,
-      });
-      const sanitizedCommandText = sanitizeExecApprovalDisplayText(effectiveCommandText);
-      const commandSpans =
-        sanitizedCommandText === effectiveCommandText
-          ? normalizeCommandSpans(p.commandSpans, sanitizedCommandText.length)
-          : undefined;
       const systemRunBinding =
         host === "node"
           ? buildSystemRunApprovalBinding({
@@ -272,7 +223,7 @@ export function createExecApprovalHandlers(
         return;
       }
       const request = {
-        command: sanitizedCommandText,
+        command: sanitizeExecApprovalDisplayText(effectiveCommandText),
         commandPreview:
           host === "node" || !approvalContext.commandPreview
             ? undefined
@@ -286,9 +237,6 @@ export function createExecApprovalHandlers(
         host: host || null,
         security: p.security ?? null,
         ask: p.ask ?? null,
-        warningText: warningText ? sanitizeExecApprovalWarningText(warningText) : null,
-        commandAnalysis,
-        commandSpans,
         allowedDecisions: resolveExecApprovalAllowedDecisions({ ask: p.ask ?? null }),
         agentId: effectiveAgentId ?? null,
         resolvedPath: p.resolvedPath ?? null,
@@ -302,7 +250,6 @@ export function createExecApprovalHandlers(
       record.requestedByConnId = client?.connId ?? null;
       record.requestedByDeviceId = client?.connect?.device?.id ?? null;
       record.requestedByClientId = client?.connect?.client?.id ?? null;
-      record.requestedByDeviceTokenAuth = client?.isDeviceTokenAuth === true;
       // Use register() to synchronously add to pending map before sending any response.
       // This ensures the approval ID is valid immediately after the "accepted" response.
       let decisionPromise: Promise<

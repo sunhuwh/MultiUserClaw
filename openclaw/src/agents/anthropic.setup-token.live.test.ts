@@ -8,8 +8,8 @@ import {
   ANTHROPIC_SETUP_TOKEN_PREFIX,
   validateAnthropicSetupToken,
 } from "../commands/auth-token.js";
-import { getRuntimeConfig } from "../config/config.js";
-import { resolveDefaultAgentDir } from "./agent-scope.js";
+import { loadConfig } from "../config/config.js";
+import { resolveOpenClawAgentDir } from "./agent-paths.js";
 import {
   type AuthProfileCredential,
   ensureAuthProfileStore,
@@ -95,7 +95,7 @@ async function resolveTokenSource(): Promise<TokenSource> {
     };
   }
 
-  const agentDir = resolveDefaultAgentDir(getRuntimeConfig());
+  const agentDir = resolveOpenClawAgentDir();
   const store = ensureAuthProfileStore(agentDir, {
     allowKeychainPrompt: false,
   });
@@ -184,7 +184,7 @@ describeLive("live anthropic setup-token", () => {
     async () => {
       const tokenSource = await resolveTokenSource();
       try {
-        const cfg = getRuntimeConfig();
+        const cfg = loadConfig();
         await ensureOpenClawModelsJson(cfg, tokenSource.agentDir);
 
         const authStorage = discoverAuthStorage(tokenSource.agentDir);

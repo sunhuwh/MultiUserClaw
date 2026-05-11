@@ -1,12 +1,13 @@
-import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "openclaw/plugin-sdk/account-id";
 import type { ChannelSetupAdapter } from "openclaw/plugin-sdk/channel-setup";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import { createSetupInputPresenceValidator } from "openclaw/plugin-sdk/setup-runtime";
 import {
   applyAccountNameToChannelSection,
   applySetupAccountConfigPatch,
+  DEFAULT_ACCOUNT_ID,
   migrateBaseNameToDefaultAccount,
-} from "openclaw/plugin-sdk/setup";
-import { createSetupInputPresenceValidator } from "openclaw/plugin-sdk/setup-runtime";
+  normalizeAccountId,
+  type OpenClawConfig,
+} from "./runtime-api.js";
 import {
   resolveMattermostAccount,
   type ResolvedMattermostAccount,
@@ -27,33 +28,6 @@ export function resolveMattermostAccountWithSecrets(cfg: OpenClawConfig, account
     cfg,
     accountId,
     allowUnresolvedSecretRef: true,
-  });
-}
-
-export function applyMattermostSetupConfigPatch(params: {
-  cfg: OpenClawConfig;
-  accountId: string;
-  name?: string;
-  patch: Record<string, unknown>;
-}): OpenClawConfig {
-  const namedConfig = applyAccountNameToChannelSection({
-    cfg: params.cfg,
-    channelKey: channel,
-    accountId: params.accountId,
-    name: params.name,
-  });
-  const next =
-    params.accountId !== DEFAULT_ACCOUNT_ID
-      ? migrateBaseNameToDefaultAccount({
-          cfg: namedConfig,
-          channelKey: channel,
-        })
-      : namedConfig;
-  return applySetupAccountConfigPatch({
-    cfg: next,
-    channelKey: channel,
-    accountId: params.accountId,
-    patch: params.patch,
   });
 }
 
@@ -93,10 +67,23 @@ export const mattermostSetupAdapter: ChannelSetupAdapter = {
   applyAccountConfig: ({ cfg, accountId, input }) => {
     const token = input.botToken ?? input.token;
     const baseUrl = normalizeMattermostBaseUrl(input.httpUrl);
-    return applyMattermostSetupConfigPatch({
+    const namedConfig = applyAccountNameToChannelSection({
       cfg,
+      channelKey: channel,
       accountId,
       name: input.name,
+    });
+    const next =
+      accountId !== DEFAULT_ACCOUNT_ID
+        ? migrateBaseNameToDefaultAccount({
+            cfg: namedConfig,
+            channelKey: channel,
+          })
+        : namedConfig;
+    return applySetupAccountConfigPatch({
+      cfg: next,
+      channelKey: channel,
+      accountId,
       patch: input.useEnv
         ? {}
         : {

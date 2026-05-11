@@ -1,10 +1,10 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   expectLifecyclePatch,
   expectPendingUntilAbort,
   startAccountAndTrackLifecycle,
   waitForStartedMocks,
-} from "openclaw/plugin-sdk/channel-test-helpers";
-import { afterEach, describe, expect, it, vi } from "vitest";
+} from "../../../test/helpers/plugins/start-account-lifecycle.js";
 import type { ResolvedZaloAccount } from "./accounts.js";
 
 const hoisted = vi.hoisted(() => ({
@@ -48,17 +48,6 @@ vi.mock("./channel.runtime.js", () => ({
 
 import { zaloPlugin } from "./channel.js";
 
-type ZaloGateway = NonNullable<typeof zaloPlugin.gateway>;
-type ZaloStartAccount = NonNullable<ZaloGateway["startAccount"]>;
-
-function requireStartAccount(): ZaloStartAccount {
-  const startAccount = zaloPlugin.gateway?.startAccount;
-  if (!startAccount) {
-    throw new Error("Expected Zalo gateway startAccount");
-  }
-  return startAccount;
-}
-
 function buildAccount(): ResolvedZaloAccount {
   return {
     accountId: "default",
@@ -87,7 +76,7 @@ describe("zaloPlugin gateway.startAccount", () => {
     );
 
     const { abort, patches, task, isSettled } = startAccountAndTrackLifecycle({
-      startAccount: requireStartAccount(),
+      startAccount: zaloPlugin.gateway!.startAccount!,
       account: buildAccount(),
     });
 
@@ -100,13 +89,13 @@ describe("zaloPlugin gateway.startAccount", () => {
 
     expectLifecyclePatch(patches, { accountId: "default" });
     expect(isSettled()).toBe(true);
-    expect(hoisted.monitorZaloProvider).toHaveBeenCalledTimes(1);
-    const [monitorArgs] = hoisted.monitorZaloProvider.mock.calls[0] ?? [];
-    expect(monitorArgs).toStrictEqual({
-      token: "test-token",
-      account: buildAccount(),
-      abortSignal: abort.signal,
-      useWebhook: false,
-    });
+    expect(hoisted.monitorZaloProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        token: "test-token",
+        account: expect.objectContaining({ accountId: "default" }),
+        abortSignal: abort.signal,
+        useWebhook: false,
+      }),
+    );
   });
 });

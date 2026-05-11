@@ -1,4 +1,3 @@
-import type { AuthConfig } from "openclaw/plugin-sdk/config-contracts";
 import {
   applyAuthProfileConfig,
   buildApiKeyCredential,
@@ -9,7 +8,7 @@ import type { ModelApi, ModelProviderConfig } from "openclaw/plugin-sdk/provider
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
+} from "openclaw/plugin-sdk/text-runtime";
 
 export const PROVIDER_ID = "microsoft-foundry";
 export const DEFAULT_API = "openai-completions";
@@ -74,13 +73,13 @@ export type CachedTokenEntry = {
 
 export type FoundryProviderApi = typeof DEFAULT_API | typeof DEFAULT_GPT5_API;
 
-type FoundryDeploymentConfigInput = {
+export type FoundryDeploymentConfigInput = {
   name: string;
   modelName?: string;
   api?: FoundryProviderApi;
 };
 
-type FoundryModelCapabilities = {
+export type FoundryModelCapabilities = {
   modelName: string;
   api: FoundryProviderApi;
   input: Array<"text" | "image">;
@@ -99,14 +98,23 @@ type FoundryModelCompat = {
   maxTokensField: "max_completion_tokens" | "max_tokens";
 };
 
+type FoundryAuthProfileConfig = {
+  provider: string;
+  mode: "api_key" | "oauth" | "token";
+  email?: string;
+};
+
 type FoundryConfigShape = {
-  auth?: AuthConfig;
+  auth?: {
+    profiles?: Record<string, FoundryAuthProfileConfig>;
+    order?: Record<string, string[]>;
+  };
   models?: {
     providers?: Record<string, ModelProviderConfig>;
   };
 };
 
-function normalizeFoundryModelName(value?: string | null): string | undefined {
+export function normalizeFoundryModelName(value?: string | null): string | undefined {
   const trimmed = normalizeLowercaseStringOrEmpty(value);
   return trimmed || undefined;
 }
@@ -173,7 +181,7 @@ export function normalizeFoundryEndpoint(endpoint: string): string {
   }
 }
 
-function buildFoundryV1BaseUrl(endpoint: string): string {
+export function buildFoundryV1BaseUrl(endpoint: string): string {
   const base = normalizeFoundryEndpoint(endpoint);
   return base.endsWith("/openai/v1") ? base : `${base}/openai/v1`;
 }
@@ -210,7 +218,7 @@ export function extractFoundryEndpoint(baseUrl: string | null | undefined): stri
   }
 }
 
-function buildFoundryModelCompat(
+export function buildFoundryModelCompat(
   modelId: string,
   modelNameHint?: string | null,
   configuredApi?: ModelApi | null,
@@ -259,7 +267,7 @@ export function resolveConfiguredModelNameHint(
   return trimmedId ? trimmedId : undefined;
 }
 
-function buildFoundryProviderConfig(
+export function buildFoundryProviderConfig(
   endpoint: string,
   modelId: string,
   modelNameHint?: string | null,
@@ -293,19 +301,17 @@ function buildFoundryProviderConfig(
         deployment.modelName,
         deployment.api,
       );
-      return Object.assign(
-        {
-          id: deployment.name,
-          name: capabilities.modelName,
-          api: capabilities.api,
-          reasoning: false,
-          input: capabilities.input,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-          contextWindow: 128e3,
-          maxTokens: 16384,
-        },
-        capabilities.compat ? { compat: capabilities.compat } : {},
-      );
+      return {
+        id: deployment.name,
+        name: capabilities.modelName,
+        api: capabilities.api,
+        reasoning: false,
+        input: capabilities.input,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 128_000,
+        maxTokens: 16_384,
+        ...(capabilities.compat ? { compat: capabilities.compat } : {}),
+      };
     }),
   };
 }

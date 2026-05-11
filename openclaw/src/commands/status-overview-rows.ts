@@ -1,5 +1,6 @@
 import { formatCliCommand } from "../cli/command-format.js";
 import type { HeartbeatEventPayload } from "../infra/heartbeat-events.js";
+import type { Tone } from "../memory-host-sdk/status.js";
 import type { PluginCompatibilityNotice } from "../plugins/status.js";
 import { VERSION } from "../version.js";
 import type { HealthSummary } from "./health.js";
@@ -22,77 +23,47 @@ import {
   buildStatusLastHeartbeatValue,
   buildStatusMemoryValue,
   buildStatusTasksValue,
-  type StatusMemoryStateResolvers,
 } from "./status.command-sections.js";
 import type { MemoryPluginStatus, MemoryStatusSnapshot } from "./status.scan.shared.js";
 import type { StatusSummary } from "./status.types.js";
 
-function readModelPricingHealth(params: {
-  health?: HealthSummary;
+export function buildStatusCommandOverviewRows(params: {
+  opts: {
+    deep?: boolean;
+  };
   surface: StatusOverviewSurface;
-}): HealthSummary["modelPricing"] | undefined {
-  if (params.health?.modelPricing) {
-    return params.health.modelPricing;
-  }
-  const probeHealth = params.surface.gatewayProbe?.health;
-  if (!probeHealth || typeof probeHealth !== "object") {
-    return undefined;
-  }
-  const modelPricing = (probeHealth as { modelPricing?: unknown }).modelPricing;
-  if (!modelPricing || typeof modelPricing !== "object") {
-    return undefined;
-  }
-  const state = (modelPricing as { state?: unknown }).state;
-  if (state !== "ok" && state !== "degraded" && state !== "disabled") {
-    return undefined;
-  }
-  return modelPricing as HealthSummary["modelPricing"];
-}
-
-function buildModelPricingOverviewValue(params: {
-  health?: HealthSummary["modelPricing"];
+  osLabel: string;
+  summary: StatusSummary;
+  health?: HealthSummary;
+  lastHeartbeat: HeartbeatEventPayload | null;
+  agentStatus: {
+    defaultId?: string | null;
+    bootstrapPendingCount: number;
+    totalSessions: number;
+    agents: AgentLocalStatus[];
+  };
+  memory: MemoryStatusSnapshot | null;
+  memoryPlugin: MemoryPluginStatus;
+  pluginCompatibility: PluginCompatibilityNotice[];
   ok: (value: string) => string;
   warn: (value: string) => string;
   muted: (value: string) => string;
-}): string | null {
-  const health = params.health;
-  if (!health) {
-    return null;
-  }
-  if (health.state !== "degraded") {
-    return null;
-  }
-  const detail = health.detail ? ` · ${health.detail}` : "";
-  return params.warn(`degraded${detail}`);
-}
-
-export function buildStatusCommandOverviewRows(
-  params: {
-    opts: {
-      deep?: boolean;
-    };
-    surface: StatusOverviewSurface;
-    osLabel: string;
-    summary: StatusSummary;
-    health?: HealthSummary;
-    lastHeartbeat: HeartbeatEventPayload | null;
-    agentStatus: {
-      defaultId?: string | null;
-      bootstrapPendingCount: number;
-      totalSessions: number;
-      agents: AgentLocalStatus[];
-    };
-    memory: MemoryStatusSnapshot | null;
-    memoryPlugin: MemoryPluginStatus;
-    pluginCompatibility: PluginCompatibilityNotice[];
-    ok: (value: string) => string;
-    warn: (value: string) => string;
-    muted: (value: string) => string;
-    formatTimeAgo: (ageMs: number) => string;
-    formatKTokens: (value: number) => string;
-    updateValue?: string;
-  } & StatusMemoryStateResolvers,
-) {
+  formatTimeAgo: (ageMs: number) => string;
+  formatKTokens: (value: number) => string;
+  resolveMemoryVectorState: (value: NonNullable<MemoryStatusSnapshot["vector"]>) => {
+    state: string;
+    tone: Tone;
+  };
+  resolveMemoryFtsState: (value: NonNullable<MemoryStatusSnapshot["fts"]>) => {
+    state: string;
+    tone: Tone;
+  };
+  resolveMemoryCacheSummary: (value: NonNullable<MemoryStatusSnapshot["cache"]>) => {
+    text: string;
+    tone: Tone;
+  };
+  updateValue?: string;
+}) {
   const agentsValue = buildStatusAgentsValue({
     agentStatus: params.agentStatus,
     formatTimeAgo: params.formatTimeAgo,
@@ -128,21 +99,11 @@ export function buildStatusCommandOverviewRows(
     resolveMemoryVectorState: params.resolveMemoryVectorState,
     resolveMemoryFtsState: params.resolveMemoryFtsState,
     resolveMemoryCacheSummary: params.resolveMemoryCacheSummary,
-    memoryUnavailableLabel: "not checked",
   });
   const pluginCompatibilityValue = buildStatusPluginCompatibilityValue({
     notices: params.pluginCompatibility,
     ok: params.ok,
     warn: params.warn,
-  });
-  const modelPricingValue = buildModelPricingOverviewValue({
-    health: readModelPricingHealth({
-      health: params.health,
-      surface: params.surface,
-    }),
-    ok: params.ok,
-    warn: params.warn,
-    muted: params.muted,
   });
 
   return buildStatusOverviewRowsFromSurface({
@@ -155,7 +116,6 @@ export function buildStatusCommandOverviewRows(
     updateValue: params.updateValue,
     agentsValue,
     suffixRows: [
-      ...(modelPricingValue ? [{ Item: "Model pricing", Value: modelPricingValue }] : []),
       { Item: "Memory", Value: memoryValue },
       { Item: "Plugin compatibility", Value: pluginCompatibilityValue },
       { Item: "Probes", Value: probesValue },

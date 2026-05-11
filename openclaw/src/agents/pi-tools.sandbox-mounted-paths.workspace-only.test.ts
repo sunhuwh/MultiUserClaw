@@ -103,10 +103,9 @@ describe("tools.fs.workspaceOnly", () => {
       await expect(
         writeTool?.execute("t2", { path: "/agent/owned.txt", content: "x" }),
       ).rejects.toThrow(/Path escapes sandbox root/i);
-      const missingOwnedFile = await fs
-        .stat(path.join(agentRoot, "owned.txt"))
-        .catch((error: unknown) => error);
-      expect((missingOwnedFile as NodeJS.ErrnoException).code).toBe("ENOENT");
+      await expect(fs.stat(path.join(agentRoot, "owned.txt"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
 
       await expect(
         editTool?.execute("t3", { path: "/agent/secret.txt", oldText: "shh", newText: "nope" }),
@@ -130,10 +129,9 @@ describe("tools.fs.workspaceOnly", () => {
       await expect(applyPatchTool.execute("t1", { input: APPLY_PATCH_PAYLOAD })).rejects.toThrow(
         /Path escapes sandbox root/i,
       );
-      const missingPatchedFile = await fs
-        .stat(path.join(agentRoot, "pwned.txt"))
-        .catch((error: unknown) => error);
-      expect((missingPatchedFile as NodeJS.ErrnoException).code).toBe("ENOENT");
+      await expect(fs.stat(path.join(agentRoot, "pwned.txt"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
     });
   });
 

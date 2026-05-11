@@ -1,48 +1,32 @@
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import {
-  providerSupportsNativePdfDocument,
-  resolveAutoMediaKeyProviders,
-  resolveDefaultMediaModel,
-} from "../../media-understanding/defaults.js";
-import type { AuthProfileStore } from "../auth-profiles/types.js";
+  bundledProviderSupportsNativePdfDocument,
+  resolveBundledAutoMediaKeyProviders,
+  resolveBundledDefaultMediaModel,
+} from "../../media-understanding/bundled-defaults.js";
 import {
   coerceImageModelConfig,
   type ImageModelConfig,
-  resolveConfiguredImageModelRefs,
   resolveProviderVisionModelFromConfig,
 } from "./image-tool.helpers.js";
 import { hasAuthForProvider, resolveDefaultModelRef } from "./model-config.helpers.js";
 import { coercePdfModelConfig } from "./pdf-tool.helpers.js";
 
-function resolveImageCandidateRefs(params: {
+function resolveBundledImageCandidateRefs(params: {
   cfg?: OpenClawConfig;
   agentDir: string;
-  workspaceDir?: string;
-  authStore?: AuthProfileStore;
   filter?: (providerId: string) => boolean;
 }): string[] {
-  return resolveAutoMediaKeyProviders({
-    capability: "image",
-    cfg: params.cfg,
-    workspaceDir: params.workspaceDir,
-  })
+  return resolveBundledAutoMediaKeyProviders("image")
     .filter((providerId) => !params.filter || params.filter(providerId))
-    .filter((providerId) =>
-      hasAuthForProvider({
-        provider: providerId,
-        agentDir: params.agentDir,
-        authStore: params.authStore,
-      }),
-    )
+    .filter((providerId) => hasAuthForProvider({ provider: providerId, agentDir: params.agentDir }))
     .map((providerId) => {
       const modelId =
         resolveProviderVisionModelFromConfig({
           cfg: params.cfg,
           provider: providerId,
         })?.split("/")[1] ??
-        resolveDefaultMediaModel({
-          cfg: params.cfg,
-          workspaceDir: params.workspaceDir,
+        resolveBundledDefaultMediaModel({
           providerId,
           capability: "image",
         });
@@ -54,31 +38,19 @@ function resolveImageCandidateRefs(params: {
 export function resolvePdfModelConfigForTool(params: {
   cfg?: OpenClawConfig;
   agentDir: string;
-  workspaceDir?: string;
-  authStore?: AuthProfileStore;
 }): ImageModelConfig | null {
   const explicitPdf = coercePdfModelConfig(params.cfg);
   if (explicitPdf.primary?.trim() || (explicitPdf.fallbacks?.length ?? 0) > 0) {
-    return resolveConfiguredImageModelRefs({
-      cfg: params.cfg,
-      imageModelConfig: explicitPdf,
-    });
+    return explicitPdf;
   }
 
   const explicitImage = coerceImageModelConfig(params.cfg);
   if (explicitImage.primary?.trim() || (explicitImage.fallbacks?.length ?? 0) > 0) {
-    return resolveConfiguredImageModelRefs({
-      cfg: params.cfg,
-      imageModelConfig: explicitImage,
-    });
+    return explicitImage;
   }
 
   const primary = resolveDefaultModelRef(params.cfg);
-  const googleOk = hasAuthForProvider({
-    provider: "google",
-    agentDir: params.agentDir,
-    authStore: params.authStore,
-  });
+  const googleOk = hasAuthForProvider({ provider: "google", agentDir: params.agentDir });
 
   const fallbacks: string[] = [];
   const addFallback = (ref: string) => {
@@ -90,58 +62,32 @@ export function resolvePdfModelConfigForTool(params: {
 
   let preferred: string | null = null;
 
-  const providerOk = hasAuthForProvider({
-    provider: primary.provider,
-    agentDir: params.agentDir,
-    authStore: params.authStore,
-  });
+  const providerOk = hasAuthForProvider({ provider: primary.provider, agentDir: params.agentDir });
   const providerVision = resolveProviderVisionModelFromConfig({
     cfg: params.cfg,
     provider: primary.provider,
   });
   const providerDefault =
     providerVision?.split("/")[1] ??
-    resolveDefaultMediaModel({
-      cfg: params.cfg,
-      workspaceDir: params.workspaceDir,
+    resolveBundledDefaultMediaModel({
       providerId: primary.provider,
       capability: "image",
     });
-  const primarySupportsNativePdf = providerSupportsNativePdfDocument({
-    cfg: params.cfg,
-    workspaceDir: params.workspaceDir,
-    providerId: primary.provider,
-  });
-  const nativePdfCandidates = resolveImageCandidateRefs({
+  const primarySupportsNativePdf = bundledProviderSupportsNativePdfDocument(primary.provider);
+  const nativePdfCandidates = resolveBundledImageCandidateRefs({
     cfg: params.cfg,
     agentDir: params.agentDir,
-    workspaceDir: params.workspaceDir,
-    authStore: params.authStore,
-    filter: (providerId) =>
-      providerSupportsNativePdfDocument({
-        cfg: params.cfg,
-        workspaceDir: params.workspaceDir,
-        providerId,
-      }),
+    filter: bundledProviderSupportsNativePdfDocument,
   });
-  const genericImageCandidates = resolveImageCandidateRefs({
+  const genericImageCandidates = resolveBundledImageCandidateRefs({
     cfg: params.cfg,
     agentDir: params.agentDir,
-    workspaceDir: params.workspaceDir,
-    authStore: params.authStore,
   });
 
   if (params.cfg?.models?.providers && typeof params.cfg.models.providers === "object") {
     for (const [providerKey, providerCfg] of Object.entries(params.cfg.models.providers)) {
       const providerId = providerKey.trim();
-      if (
-        !providerId ||
-        !hasAuthForProvider({
-          provider: providerId,
-          agentDir: params.agentDir,
-          authStore: params.authStore,
-        })
-      ) {
+      if (!providerId || !hasAuthForProvider({ provider: providerId, agentDir: params.agentDir })) {
         continue;
       }
       const models = providerCfg?.models ?? [];

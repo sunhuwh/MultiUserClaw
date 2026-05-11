@@ -55,7 +55,9 @@ function createStubChildAdapter(options?: {
   );
   const killMock = vi.fn();
   const disposeMock = vi.fn();
-  const adapter: StubChildAdapter = {
+  let adapter!: StubChildAdapter;
+
+  adapter = {
     pid: options?.pid ?? 1234,
     stdin: undefined,
     onStdout: (listener) => {
@@ -198,7 +200,7 @@ describe("process supervisor", () => {
     const firstExit = await firstRun.wait();
     const secondExit = await secondRun.wait();
     expect(first.killMock).toHaveBeenCalledWith("SIGKILL");
-    expect(["manual-cancel", "signal"]).toContain(firstExit.reason);
+    expect(firstExit.reason === "manual-cancel" || firstExit.reason === "signal").toBe(true);
     expect(secondExit.reason).toBe("exit");
     expect(secondExit.stdout).toBe("new");
   });

@@ -1,6 +1,8 @@
 import MarkdownIt from "markdown-it";
-import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { isAutoLinkedFileRef } from "openclaw/plugin-sdk/text-autolink-runtime";
+import {
+  isAutoLinkedFileRef,
+  normalizeLowercaseStringOrEmpty,
+} from "openclaw/plugin-sdk/text-runtime";
 import type { MatrixClient } from "./sdk.js";
 import { isMatrixQualifiedUserId } from "./target-ids.js";
 

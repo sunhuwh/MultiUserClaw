@@ -8,7 +8,7 @@ import { normalizeToken } from "./utils/twitch.js";
 /**
  * Result of probing a Twitch account
  */
-type ProbeTwitchResult = BaseProbeResult<string> & {
+export type ProbeTwitchResult = BaseProbeResult<string> & {
   username?: string;
   elapsedMs: number;
   connected?: boolean;
@@ -83,22 +83,12 @@ export async function probeTwitch(
       });
     });
 
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(
-        () => reject(new Error(`timeout after ${timeoutMs}ms`)),
-        timeoutMs,
-      );
+      setTimeout(() => reject(new Error(`timeout after ${timeoutMs}ms`)), timeoutMs);
     });
 
     client.connect();
-    try {
-      await Promise.race([connectionPromise, timeout]);
-    } finally {
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-      }
-    }
+    await Promise.race([connectionPromise, timeout]);
 
     client.quit();
     client = undefined;

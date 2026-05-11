@@ -10,27 +10,23 @@ const mocks = vi.hoisted(() => ({
     resolvedConfig: config,
     diagnostics: [] as string[],
   })),
-  renderTerminal: vi.fn(async () => "ASCII-QR"),
+  qrGenerate: vi.fn((_input: unknown, _opts: unknown, cb: (output: string) => void) => {
+    cb("ASCII-QR");
+  }),
 }));
 const { defaultRuntime: runtime, resetRuntimeCapture } = createCliRuntimeCapture();
 const runtimeLog = runtime.log;
 const runtimeError = runtime.error;
 const runtimeExit = runtime.exit;
 
-vi.doMock("../runtime.js", async () => {
+vi.mock("../runtime.js", async () => {
   return mockRuntimeModule(
     () => vi.importActual<typeof import("../runtime.js")>("../runtime.js"),
     runtime,
   );
 });
-vi.mock("../config/config.js", () => ({
-  getRuntimeConfig: mocks.loadConfig,
-  loadConfig: mocks.loadConfig,
-}));
+vi.mock("../config/config.js", () => ({ loadConfig: mocks.loadConfig }));
 vi.mock("../process/exec.js", () => ({ runCommandWithTimeout: mocks.runCommandWithTimeout }));
-vi.mock("../media/qr-terminal.ts", () => ({
-  renderQrTerminal: mocks.renderTerminal,
-}));
 vi.mock("./command-secret-gateway.js", () => ({
   resolveCommandSecretRefsViaGateway: mocks.resolveCommandSecretRefsViaGateway,
 }));
@@ -40,10 +36,16 @@ vi.mock("../infra/device-bootstrap.js", () => ({
     expiresAtMs: 123,
   })),
 }));
+vi.mock("qrcode-terminal", () => ({
+  default: {
+    generate: mocks.qrGenerate,
+  },
+}));
+
 const loadConfig = mocks.loadConfig;
 const runCommandWithTimeout = mocks.runCommandWithTimeout;
 const resolveCommandSecretRefsViaGateway = mocks.resolveCommandSecretRefsViaGateway;
-const renderTerminal = mocks.renderTerminal;
+const qrGenerate = mocks.qrGenerate;
 
 const { registerQrCli } = await import("./qr-cli.js");
 
@@ -194,7 +196,7 @@ describe("registerQrCli", () => {
       bootstrapToken: "bootstrap-123",
     });
     expect(runtime.log).toHaveBeenCalledWith(expected);
-    expect(renderTerminal).not.toHaveBeenCalled();
+    expect(qrGenerate).not.toHaveBeenCalled();
     expect(resolveCommandSecretRefsViaGateway).not.toHaveBeenCalled();
   });
 
@@ -209,7 +211,7 @@ describe("registerQrCli", () => {
 
     await runQr([]);
 
-    expect(renderTerminal).toHaveBeenCalledTimes(1);
+    expect(qrGenerate).toHaveBeenCalledTimes(1);
     const output = runtimeLog.mock.calls.map((call) => readRuntimeCallText(call)).join("\n");
     expect(output).toContain("Pairing QR");
     expect(output).toContain("ASCII-QR");
@@ -233,18 +235,18 @@ describe("registerQrCli", () => {
     expect(output).toContain("gateway.tailscale.mode=serve");
   });
 
-  it("allows private LAN IP cleartext setup urls", async () => {
+  it("allows lan mdns cleartext setup urls", async () => {
     loadConfig.mockReturnValue({
       gateway: {
         bind: "custom",
-        customBindHost: "192.168.1.8",
+        customBindHost: "gateway.local",
         auth: { mode: "token", token: "tok" },
       },
     });
 
     await runQr(["--setup-code-only"]);
 
-    expectLoggedSetupCode("ws://192.168.1.8:18789");
+    expectLoggedSetupCode("ws://gateway.local:18789");
   });
 
   it("allows android emulator cleartext override urls", async () => {
@@ -258,22 +260,6 @@ describe("registerQrCli", () => {
     await runQr(["--setup-code-only", "--url", "ws://10.0.2.2:18789"]);
 
     expectLoggedSetupCode("ws://10.0.2.2:18789");
-  });
-
-  it("rejects invalid override urls before printing setup codes", async () => {
-    loadConfig.mockReturnValue({
-      gateway: {
-        bind: "custom",
-        customBindHost: "127.0.0.1",
-        auth: { mode: "token", token: "tok" },
-      },
-    });
-
-    await expectQrExit(["--setup-code-only", "--url", "http://localhost:notaport"]);
-
-    const output = runtimeError.mock.calls.map((call) => readRuntimeCallText(call)).join("\n");
-    expect(output).toContain("Configured publicUrl is invalid.");
-    expect(runtime.log).not.toHaveBeenCalled();
   });
 
   it("accepts --token override when config has no auth", async () => {
@@ -411,23 +397,6 @@ describe("registerQrCli", () => {
         targetIds: new Set(["gateway.remote.token", "gateway.remote.password"]),
       }),
     );
-  });
-
-  it("rejects invalid gateway.remote.url before printing remote setup codes", async () => {
-    loadConfig.mockReturnValue({
-      gateway: {
-        bind: "custom",
-        customBindHost: "127.0.0.1",
-        remote: { url: "http://localhost:notaport", token: "remote-tok" },
-        auth: { mode: "token", token: "local-tok" },
-      },
-    });
-
-    await expectQrExit(["--setup-code-only", "--remote"]);
-
-    const output = runtimeError.mock.calls.map((call) => readRuntimeCallText(call)).join("\n");
-    expect(output).toContain("Configured gateway.remote.url is invalid.");
-    expect(runtime.log).not.toHaveBeenCalled();
   });
 
   it("logs remote secret diagnostics in non-json output mode", async () => {

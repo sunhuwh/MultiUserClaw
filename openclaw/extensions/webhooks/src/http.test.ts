@@ -1,28 +1,35 @@
 import { EventEmitter } from "node:events";
 import type { IncomingMessage } from "node:http";
-import { createRuntimeTaskFlow } from "openclaw/plugin-sdk/plugin-test-runtime";
-import { createMockServerResponse } from "openclaw/plugin-sdk/test-env";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createMockServerResponse } from "../../../test/helpers/plugins/mock-http-response.js";
+import { createRuntimeTaskFlow } from "../../../test/helpers/plugins/runtime-taskflow.js";
 import type { OpenClawConfig } from "../runtime-api.js";
 import { createTaskFlowWebhookRequestHandler, type TaskFlowWebhookTarget } from "./http.js";
 
 const hoisted = vi.hoisted(() => {
-  const resolveConfiguredSecretInputStringMock = vi.fn();
+  const sendMessageMock = vi.fn();
+  const cancelSessionMock = vi.fn();
+  const killSubagentRunAdminMock = vi.fn();
   return {
-    resolveConfiguredSecretInputStringMock,
+    sendMessageMock,
+    cancelSessionMock,
+    killSubagentRunAdminMock,
   };
 });
 
-vi.mock("../runtime-api.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../runtime-api.js")>();
-  hoisted.resolveConfiguredSecretInputStringMock.mockImplementation(
-    actual.resolveConfiguredSecretInputString,
-  );
-  return {
-    ...actual,
-    resolveConfiguredSecretInputString: hoisted.resolveConfiguredSecretInputStringMock,
-  };
-});
+vi.mock("../../../src/tasks/task-registry-delivery-runtime.js", () => ({
+  sendMessage: hoisted.sendMessageMock,
+}));
+
+vi.mock("../../../src/acp/control-plane/manager.js", () => ({
+  getAcpSessionManager: () => ({
+    cancelSession: hoisted.cancelSessionMock,
+  }),
+}));
+
+vi.mock("../../../src/agents/subagent-control.js", () => ({
+  killSubagentRunAdmin: (params: unknown) => hoisted.killSubagentRunAdminMock(params),
+}));
 
 type MockIncomingMessage = IncomingMessage & {
   destroyed?: boolean;
@@ -51,7 +58,7 @@ function createJsonRequest(params: {
     return req;
   }) as MockIncomingMessage["destroy"];
 
-  setImmediate(() => {
+  void Promise.resolve().then(() => {
     req.emit("data", Buffer.from(JSON.stringify(params.body), "utf8"));
     req.emit("end");
   });
@@ -62,16 +69,13 @@ function createJsonRequest(params: {
 function createHandler(): {
   handler: ReturnType<typeof createTaskFlowWebhookRequestHandler>;
   target: TaskFlowWebhookTarget;
-  secret: string;
 } {
   const runtime = createRuntimeTaskFlow();
   nextSessionId += 1;
-  const secret = "shared-secret";
   const target: TaskFlowWebhookTarget = {
     routeId: "zapier",
     path: "/plugins/webhooks/zapier",
-    secretInput: secret,
-    secretConfigPath: "plugins.entries.webhooks.routes.zapier.secret",
+    secret: "shared-secret",
     defaultControllerId: "webhooks/zapier",
     taskFlow: runtime.bindSession({
       sessionKey: `agent:main:webhook-test-${String(nextSessionId)}`,
@@ -84,19 +88,7 @@ function createHandler(): {
       targetsByPath,
     }),
     target,
-    secret,
   };
-}
-
-function createHandlerWithTarget(
-  target: TaskFlowWebhookTarget,
-  cfg: OpenClawConfig = {} as OpenClawConfig,
-): ReturnType<typeof createTaskFlowWebhookRequestHandler> {
-  const targetsByPath = new Map<string, TaskFlowWebhookTarget[]>([[target.path, [target]]]);
-  return createTaskFlowWebhookRequestHandler({
-    cfg,
-    targetsByPath,
-  });
 }
 
 async function dispatchJsonRequest(params: {
@@ -137,70 +129,15 @@ describe("createTaskFlowWebhookRequestHandler", () => {
 
     expect(res.statusCode).toBe(401);
     expect(res.body).toBe("unauthorized");
-    expect(target.taskFlow.list()).toStrictEqual([]);
-    expect(hoisted.resolveConfiguredSecretInputStringMock).not.toHaveBeenCalled();
-  });
-
-  it("re-resolves SecretRef-backed secrets across requests", async () => {
-    const runtime = createRuntimeTaskFlow();
-    const target: TaskFlowWebhookTarget = {
-      routeId: "cached",
-      path: "/plugins/webhooks/cached",
-      secretInput: {
-        source: "env",
-        provider: "default",
-        id: "OPENCLAW_WEBHOOK_SECRET",
-      },
-      secretConfigPath: "plugins.entries.webhooks.routes.cached.secret",
-      defaultControllerId: "webhooks/cached",
-      taskFlow: runtime.bindSession({
-        sessionKey: "agent:main:webhook-cached",
-      }),
-    };
-    hoisted.resolveConfiguredSecretInputStringMock
-      .mockResolvedValueOnce({ value: "shared-secret" })
-      .mockResolvedValueOnce({ value: "rotated-secret" })
-      .mockResolvedValueOnce({ value: "rotated-secret" });
-    const handler = createHandlerWithTarget(target);
-
-    const first = await dispatchJsonRequest({
-      handler,
-      path: target.path,
-      secret: "shared-secret",
-      body: {
-        action: "list_flows",
-      },
-    });
-    const second = await dispatchJsonRequest({
-      handler,
-      path: target.path,
-      secret: "shared-secret",
-      body: {
-        action: "list_flows",
-      },
-    });
-    const third = await dispatchJsonRequest({
-      handler,
-      path: target.path,
-      secret: "rotated-secret",
-      body: {
-        action: "list_flows",
-      },
-    });
-
-    expect(first.statusCode).toBe(200);
-    expect(second.statusCode).toBe(401);
-    expect(second.body).toBe("unauthorized");
-    expect(third.statusCode).toBe(200);
-    expect(hoisted.resolveConfiguredSecretInputStringMock).toHaveBeenCalledTimes(3);
+    expect(target.taskFlow.list()).toEqual([]);
   });
 
   it("creates flows through the bound session and scrubs owner metadata from responses", async () => {
-    const { handler, target, secret } = createHandler();
+    const { handler, target } = createHandler();
     const res = await dispatchJsonRequest({
       handler,
       path: target.path,
-      secret,
+      secret: target.secret,
       body: {
         action: "create_flow",
         goal: "Review inbound queue",
@@ -221,7 +158,7 @@ describe("createTaskFlowWebhookRequestHandler", () => {
   });
 
   it("runs child tasks and scrubs task ownership fields from responses", async () => {
-    const { handler, target, secret } = createHandler();
+    const { handler, target } = createHandler();
     const flow = target.taskFlow.createManaged({
       controllerId: "webhooks/zapier",
       goal: "Triage inbox",
@@ -229,7 +166,7 @@ describe("createTaskFlowWebhookRequestHandler", () => {
     const res = await dispatchJsonRequest({
       handler,
       path: target.path,
-      secret,
+      secret: target.secret,
       body: {
         action: "run_task",
         flowId: flow.flowId,
@@ -256,11 +193,11 @@ describe("createTaskFlowWebhookRequestHandler", () => {
   });
 
   it("returns 404 for missing flow mutations", async () => {
-    const { handler, target, secret } = createHandler();
+    const { handler, target } = createHandler();
     const res = await dispatchJsonRequest({
       handler,
       path: target.path,
-      secret,
+      secret: target.secret,
       body: {
         action: "set_waiting",
         flowId: "flow-missing",
@@ -282,7 +219,7 @@ describe("createTaskFlowWebhookRequestHandler", () => {
   });
 
   it("returns 409 for revision conflicts", async () => {
-    const { handler, target, secret } = createHandler();
+    const { handler, target } = createHandler();
     const flow = target.taskFlow.createManaged({
       controllerId: "webhooks/zapier",
       goal: "Review inbox",
@@ -290,7 +227,7 @@ describe("createTaskFlowWebhookRequestHandler", () => {
     const res = await dispatchJsonRequest({
       handler,
       path: target.path,
-      secret,
+      secret: target.secret,
       body: {
         action: "set_waiting",
         flowId: flow.flowId,
@@ -315,7 +252,7 @@ describe("createTaskFlowWebhookRequestHandler", () => {
   });
 
   it("rejects internal runtimes and running-only metadata from external callers", async () => {
-    const { handler, target, secret } = createHandler();
+    const { handler, target } = createHandler();
     const flow = target.taskFlow.createManaged({
       controllerId: "webhooks/zapier",
       goal: "Review inbox",
@@ -324,7 +261,7 @@ describe("createTaskFlowWebhookRequestHandler", () => {
     const runtimeRes = await dispatchJsonRequest({
       handler,
       path: target.path,
-      secret,
+      secret: target.secret,
       body: {
         action: "run_task",
         flowId: flow.flowId,
@@ -341,7 +278,7 @@ describe("createTaskFlowWebhookRequestHandler", () => {
     const queuedMetadataRes = await dispatchJsonRequest({
       handler,
       path: target.path,
-      secret,
+      secret: target.secret,
       body: {
         action: "run_task",
         flowId: flow.flowId,
@@ -360,7 +297,7 @@ describe("createTaskFlowWebhookRequestHandler", () => {
   });
 
   it("reuses the same task record when retried with the same runId", async () => {
-    const { handler, target, secret } = createHandler();
+    const { handler, target } = createHandler();
     const flow = target.taskFlow.createManaged({
       controllerId: "webhooks/zapier",
       goal: "Triage inbox",
@@ -369,7 +306,7 @@ describe("createTaskFlowWebhookRequestHandler", () => {
     const first = await dispatchJsonRequest({
       handler,
       path: target.path,
-      secret,
+      secret: target.secret,
       body: {
         action: "run_task",
         flowId: flow.flowId,
@@ -382,7 +319,7 @@ describe("createTaskFlowWebhookRequestHandler", () => {
     const second = await dispatchJsonRequest({
       handler,
       path: target.path,
-      secret,
+      secret: target.secret,
       body: {
         action: "run_task",
         flowId: flow.flowId,
@@ -402,7 +339,7 @@ describe("createTaskFlowWebhookRequestHandler", () => {
   });
 
   it("returns 409 when cancellation targets a terminal flow", async () => {
-    const { handler, target, secret } = createHandler();
+    const { handler, target } = createHandler();
     const flow = target.taskFlow.createManaged({
       controllerId: "webhooks/zapier",
       goal: "Review inbox",
@@ -416,7 +353,7 @@ describe("createTaskFlowWebhookRequestHandler", () => {
     const res = await dispatchJsonRequest({
       handler,
       path: target.path,
-      secret,
+      secret: target.secret,
       body: {
         action: "cancel_flow",
         flowId: flow.flowId,

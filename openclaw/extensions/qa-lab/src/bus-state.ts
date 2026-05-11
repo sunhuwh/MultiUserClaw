@@ -23,7 +23,6 @@ import type {
   QaBusReadMessageInput,
   QaBusReactToMessageInput,
   QaBusSearchMessagesInput,
-  QaBusStateSnapshot,
   QaBusThread,
   QaBusWaitForInput,
 } from "./runtime-api.js";
@@ -282,13 +281,6 @@ export function createQaBusState() {
     },
     async waitFor(input: QaBusWaitForInput) {
       return await waiters.waitFor(input);
-    },
-    async waitForCursorAdvance(
-      afterCursor: number,
-      timeoutMs: number,
-      shouldResolve?: (snapshot: QaBusStateSnapshot) => boolean,
-    ) {
-      return await waiters.waitForCursorAdvance(afterCursor, timeoutMs, shouldResolve);
     },
   };
 }

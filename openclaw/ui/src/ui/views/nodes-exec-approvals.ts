@@ -89,7 +89,7 @@ function resolveExecApprovalsDefaults(
     security: normalizeSecurity(defaults.security),
     ask: normalizeAsk(defaults.ask),
     askFallback: normalizeSecurity(defaults.askFallback ?? "deny"),
-    autoAllowSkills: defaults.autoAllowSkills ?? false,
+    autoAllowSkills: Boolean(defaults.autoAllowSkills ?? false),
   };
 }
 

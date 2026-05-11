@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveDefaultAgentDir } from "./agent-scope.js";
+import { resolveOpenClawAgentDir } from "./agent-paths.js";
 import {
   CUSTOM_PROXY_MODELS_CONFIG,
   installModelsConfigTestHooks,
@@ -13,7 +13,6 @@ import {
 import type { ProviderConfig as ModelsProviderConfig } from "./models-config.providers.secrets.js";
 
 vi.mock("./auth-profiles/external-cli-sync.js", () => ({
-  resolveExternalCliAuthProfiles: () => [],
   syncExternalCliCredentials: () => false,
 }));
 
@@ -107,10 +106,11 @@ async function runEnvProviderCase(params: {
   try {
     await ensureOpenClawModelsJson({});
 
-    const modelPath = path.join(resolveDefaultAgentDir({}), "models.json");
+    const modelPath = path.join(resolveOpenClawAgentDir(), "models.json");
     const raw = await fs.readFile(modelPath, "utf8");
     const parsed = JSON.parse(raw) as { providers: Record<string, ParsedProviderConfig> };
     const provider = parsed.providers[params.providerKey];
+    expect(provider).toBeDefined();
     expect(provider?.apiKey).toBe(params.expectedApiKeyRef);
   } finally {
     if (previousValue === undefined) {
@@ -176,7 +176,7 @@ describe("models-config", () => {
     await withTempHome(async () => {
       await ensureOpenClawModelsJson(CUSTOM_PROXY_MODELS_CONFIG);
 
-      const modelPath = path.join(resolveDefaultAgentDir({}), "models.json");
+      const modelPath = path.join(resolveOpenClawAgentDir(), "models.json");
       const raw = await fs.readFile(modelPath, "utf8");
       const parsed = JSON.parse(raw) as {
         providers: Record<
@@ -192,9 +192,10 @@ describe("models-config", () => {
       };
 
       expect(parsed.providers["custom-proxy"]?.baseUrl).toBe("http://localhost:4000/v1");
-      const model = parsed.providers["custom-proxy"]?.models?.[0];
-      expect(model?.id).toBe("llama-3.1-8b");
-      expect(model?.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+      expect(parsed.providers["custom-proxy"]?.models?.[0]).toMatchObject({
+        id: "llama-3.1-8b",
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      });
     });
   });
 

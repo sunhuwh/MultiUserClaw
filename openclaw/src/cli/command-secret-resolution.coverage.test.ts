@@ -1,11 +1,10 @@
-import { bundledPluginFile } from "openclaw/plugin-sdk/test-fixtures";
 import { describe, expect, it } from "vitest";
+import { bundledPluginFile } from "../../test/helpers/bundled-plugin-paths.js";
 import { readCommandSource } from "./command-source.test-helpers.js";
 
 const SECRET_TARGET_CALLSITES = [
   bundledPluginFile("memory-core", "src/cli.runtime.ts"),
   "src/cli/qr-cli.ts",
-  "src/agents/agent-runtime-config.ts",
   "src/commands/agent.ts",
   "src/commands/channels/resolve.ts",
   "src/commands/channels/shared.ts",
@@ -17,7 +16,6 @@ const SECRET_TARGET_CALLSITES = [
 
 function hasSupportedTargetIdsWiring(source: string): boolean {
   return (
-    source.includes("resolveAgentRuntimeConfig(") ||
     /targetIds:\s*get[A-Za-z0-9_]+\(\)/m.test(source) ||
     /targetIds:\s*getAgentRuntimeCommandSecretTargetIds\(/m.test(source) ||
     /targetIds:\s*scopedTargets\.targetIds/m.test(source) ||
@@ -27,15 +25,14 @@ function hasSupportedTargetIdsWiring(source: string): boolean {
 
 function hasSupportedSecretResolutionWiring(source: string): boolean {
   return (
-    source.includes("resolveAgentRuntimeConfig(") ||
-    source.includes("resolveCommandConfigWithSecrets(") ||
-    source.includes("resolveCommandSecretRefsViaGateway(") ||
-    source.includes("collectStatusScanOverview(")
+    /resolveCommandConfigWithSecrets\(/.test(source) ||
+    /resolveCommandSecretRefsViaGateway\(/.test(source) ||
+    /collectStatusScanOverview\(/.test(source)
   );
 }
 
 function usesDelegatedStatusOverviewFlow(source: string): boolean {
-  return source.includes("collectStatusScanOverview(");
+  return /collectStatusScanOverview\(/.test(source);
 }
 
 describe("command secret resolution coverage", () => {

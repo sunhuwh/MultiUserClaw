@@ -1,4 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+type NormalizeProviderSpecificConfig =
+  typeof import("./models-config.providers.policy.js").normalizeProviderSpecificConfig;
+type ResolveProviderConfigApiKeyResolver =
+  typeof import("./models-config.providers.policy.js").resolveProviderConfigApiKeyResolver;
+
+const GOOGLE_BASE_URL = "https://generativelanguage.googleapis.com";
+let normalizeProviderSpecificConfig: NormalizeProviderSpecificConfig;
+let resolveProviderConfigApiKeyResolver: ResolveProviderConfigApiKeyResolver;
 
 vi.mock("../plugins/provider-runtime.js", () => ({
   applyProviderNativeStreamingUsageCompatWithPlugin: () => undefined,
@@ -37,15 +46,14 @@ vi.mock("../plugins/provider-runtime.js", () => ({
   },
 }));
 
-import {
-  normalizeProviderSpecificConfig,
-  resolveProviderConfigApiKeyResolver,
-} from "./models-config.providers.policy.js";
-
-const GOOGLE_BASE_URL = "https://generativelanguage.googleapis.com";
+beforeEach(async () => {
+  vi.resetModules();
+  ({ normalizeProviderSpecificConfig, resolveProviderConfigApiKeyResolver } =
+    await import("./models-config.providers.policy.js"));
+});
 
 describe("models-config.providers.policy", () => {
-  it("resolves config apiKey markers through provider plugin hooks", () => {
+  it("resolves config apiKey markers through provider plugin hooks", async () => {
     const env = {
       AWS_PROFILE: "default",
     } as NodeJS.ProcessEnv;
@@ -55,7 +63,7 @@ describe("models-config.providers.policy", () => {
     expect(resolver?.(env)).toBe("AWS_PROFILE");
   });
 
-  it("resolves anthropic-vertex ADC markers through provider plugin hooks", () => {
+  it("resolves anthropic-vertex ADC markers through provider plugin hooks", async () => {
     const resolver = resolveProviderConfigApiKeyResolver("anthropic-vertex");
 
     expect(resolver).toBeTypeOf("function");
@@ -66,17 +74,16 @@ describe("models-config.providers.policy", () => {
     ).toBe("gcp-vertex-credentials");
   });
 
-  it("normalizes Google provider config through provider plugin hooks", () => {
+  it("normalizes Google provider config through provider plugin hooks", async () => {
     expect(
       normalizeProviderSpecificConfig("google", {
         api: "google-generative-ai",
         baseUrl: "https://generativelanguage.googleapis.com",
         models: [],
       }),
-    ).toEqual({
+    ).toMatchObject({
       api: "google-generative-ai",
       baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-      models: [],
     });
   });
 

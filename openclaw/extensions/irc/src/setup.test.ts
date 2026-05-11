@@ -1,17 +1,17 @@
-import {
-  expectStopPendingUntilAbort,
-  startAccountAndTrackLifecycle,
-  waitForStartedMocks,
-} from "openclaw/plugin-sdk/channel-test-helpers";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createPluginSetupWizardAdapter,
   createPluginSetupWizardStatus,
   createTestWizardPrompter,
   promptSetupWizardAllowFrom,
   runSetupWizardConfigure,
-} from "openclaw/plugin-sdk/plugin-test-runtime";
-import type { WizardPrompter } from "openclaw/plugin-sdk/plugin-test-runtime";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+  type WizardPrompter,
+} from "../../../test/helpers/plugins/setup-wizard.js";
+import {
+  expectStopPendingUntilAbort,
+  startAccountAndTrackLifecycle,
+  waitForStartedMocks,
+} from "../../../test/helpers/plugins/start-account-lifecycle.js";
 import {
   listIrcAccountIds,
   resolveDefaultIrcAccountId,
@@ -41,11 +41,6 @@ vi.mock("./channel-runtime.js", () => {
     monitorIrcProvider: hoisted.monitorIrcProvider,
     sendMessageIrc: hoisted.sendMessageIrc,
   };
-});
-
-afterAll(() => {
-  vi.doUnmock("./channel-runtime.js");
-  vi.resetModules();
 });
 
 const ircSetupPlugin = {
@@ -118,16 +113,15 @@ describe("irc setup", () => {
   it("updates top-level dm policy and allowlist", () => {
     const cfg: CoreConfig = { channels: { irc: {} } };
 
-    expect(setIrcDmPolicy(cfg, "open")).toStrictEqual({
+    expect(setIrcDmPolicy(cfg, "open")).toMatchObject({
       channels: {
         irc: {
           dmPolicy: "open",
-          allowFrom: ["*"],
         },
       },
     });
 
-    expect(setIrcAllowFrom(cfg, ["alice", "bob"])).toStrictEqual({
+    expect(setIrcAllowFrom(cfg, ["alice", "bob"])).toMatchObject({
       channels: {
         irc: {
           allowFrom: ["alice", "bob"],
@@ -196,7 +190,7 @@ describe("irc setup", () => {
         enabled: true,
         service: "NickServ",
       }),
-    ).toStrictEqual({
+    ).toMatchObject({
       channels: {
         irc: {
           accounts: {
@@ -216,7 +210,7 @@ describe("irc setup", () => {
         host: "irc.libera.chat",
         nick: "openclaw-work",
       }),
-    ).toStrictEqual({
+    ).toMatchObject({
       channels: {
         irc: {
           accounts: {
@@ -250,7 +244,7 @@ describe("irc setup", () => {
           return trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
         },
       ),
-    ).toStrictEqual({
+    ).toMatchObject({
       channels: {
         irc: {
           enabled: true,
@@ -264,7 +258,7 @@ describe("irc setup", () => {
       },
     });
 
-    expect(setIrcGroupAccess(cfg, "default", "disabled", [], () => null)).toStrictEqual({
+    expect(setIrcGroupAccess(cfg, "default", "disabled", [], () => null)).toMatchObject({
       channels: {
         irc: {
           enabled: true,
@@ -279,24 +273,21 @@ describe("irc setup", () => {
     const applyAccountConfig = ircSetupAdapter.applyAccountConfig;
     expect(validateInput).toBeTypeOf("function");
     expect(applyAccountConfig).toBeTypeOf("function");
-    if (!validateInput) {
-      throw new Error("Expected IRC setup validateInput");
-    }
 
     expect(
-      validateInput({
+      validateInput!({
         input: { host: "", nick: "openclaw" },
       } as never),
     ).toBe("IRC requires host.");
 
     expect(
-      validateInput({
+      validateInput!({
         input: { host: "irc.libera.chat", nick: "" },
       } as never),
     ).toBe("IRC requires nick.");
 
     expect(
-      validateInput({
+      validateInput!({
         input: { host: "irc.libera.chat", nick: "openclaw" },
       } as never),
     ).toBeNull();
@@ -418,15 +409,12 @@ describe("irc setup", () => {
       },
     };
 
-    const updated = await promptSetupWizardAllowFrom({
+    const updated = (await promptSetupWizardAllowFrom({
       promptAllowFrom,
       cfg,
       prompter,
       accountId: "work",
-    });
-    if (!updated) {
-      throw new Error("expected IRC allowFrom setup to return updated config");
-    }
+    })) as CoreConfig;
 
     expect(updated.channels?.irc?.allowFrom).toEqual(["alice", "bob!ident@example.org"]);
     expect(updated.channels?.irc?.accounts?.work?.allowFrom).toBeUndefined();

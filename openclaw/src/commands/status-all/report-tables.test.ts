@@ -51,17 +51,16 @@ describe("status-all report tables", () => {
   });
 
   it("builds colored detail table sections", () => {
-    const renderTable = ({ rows }: { rows: unknown[] }) => `rows:${rows.length}`;
     const [section] = buildStatusChannelDetailSections({
       details: [
         {
           title: "Channel detail",
           columns: ["Channel", "Status", "Notes"],
-          rows: [{ Channel: "quietchat", Status: "WARN", Notes: "setup" }],
+          rows: [{ Channel: "telegram", Status: "WARN", Notes: "setup" }],
         },
       ],
       width: 120,
-      renderTable,
+      renderTable: ({ rows }) => `rows:${rows.length}`,
       ok: (value) => `ok(${value})`,
       warn: (value) => `warn(${value})`,
     });
@@ -70,13 +69,13 @@ describe("status-all report tables", () => {
       kind: "table",
       title: "Channel detail",
       width: 120,
-      renderTable,
+      renderTable: expect.any(Function),
       columns: [
         { key: "Channel", header: "Channel", flex: false, minWidth: 10 },
         { key: "Status", header: "Status", flex: false, minWidth: 10 },
         { key: "Notes", header: "Notes", flex: true, minWidth: 28 },
       ],
-      rows: [{ Channel: "quietchat", Status: "warn(WARN)", Notes: "setup" }],
+      rows: [{ Channel: "telegram", Status: "warn(WARN)", Notes: "setup" }],
     });
   });
 

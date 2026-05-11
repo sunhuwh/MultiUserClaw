@@ -1,4 +1,3 @@
-// @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __test,
@@ -20,7 +19,6 @@ function createState(request: RequestFn, overrides: Partial<UsageState> = {}): U
     usageError: null,
     usageStartDate: "2026-02-16",
     usageEndDate: "2026-02-16",
-    usageScope: "family",
     usageSelectedSessions: [],
     usageSelectedDays: [],
     usageTimeSeries: null,
@@ -40,8 +38,6 @@ function expectSpecificTimezoneCalls(request: ReturnType<typeof vi.fn>, startCal
     endDate: "2026-02-16",
     mode: "specific",
     utcOffset: "UTC+5:30",
-    groupBy: "family",
-    includeHistorical: true,
     limit: 1000,
     includeContextWeight: true,
   });
@@ -88,8 +84,6 @@ describe("usage controller date interpretation params", () => {
       startDate: "2026-02-16",
       endDate: "2026-02-16",
       mode: "utc",
-      groupBy: "family",
-      includeHistorical: true,
       limit: 1000,
       includeContextWeight: true,
     });
@@ -144,8 +138,6 @@ describe("usage controller date interpretation params", () => {
     expect(request).toHaveBeenNthCalledWith(3, "sessions.usage", {
       startDate: "2026-02-16",
       endDate: "2026-02-16",
-      groupBy: "family",
-      includeHistorical: true,
       limit: 1000,
       includeContextWeight: true,
     });
@@ -160,8 +152,6 @@ describe("usage controller date interpretation params", () => {
     expect(request).toHaveBeenNthCalledWith(5, "sessions.usage", {
       startDate: "2026-02-16",
       endDate: "2026-02-16",
-      groupBy: "family",
-      includeHistorical: true,
       limit: 1000,
       includeContextWeight: true,
     });
@@ -176,69 +166,6 @@ describe("usage controller date interpretation params", () => {
 
     vi.unstubAllGlobals();
   });
-
-  it("falls back and remembers compatibility when sessions.usage rejects lineage params", async () => {
-    const storage = createStorageMock();
-    vi.stubGlobal("localStorage", storage as unknown as Storage);
-    vi.spyOn(Date.prototype, "getTimezoneOffset").mockReturnValue(-330);
-
-    const request = vi.fn(async (method: string, params?: unknown) => {
-      if (method === "sessions.usage") {
-        const record = (params ?? {}) as Record<string, unknown>;
-        if ("groupBy" in record || "includeHistorical" in record) {
-          throw new Error(
-            "invalid sessions.usage params: at root: unexpected property 'groupBy'; at root: unexpected property 'includeHistorical'",
-          );
-        }
-        return { sessions: [] };
-      }
-      return {};
-    });
-
-    const state = createState(request, {
-      usageTimeZone: "local",
-      settings: { gatewayUrl: "ws://127.0.0.1:18789" },
-    });
-
-    await loadUsage(state);
-
-    expectSpecificTimezoneCalls(request, 1);
-    expect(request).toHaveBeenNthCalledWith(3, "sessions.usage", {
-      startDate: "2026-02-16",
-      endDate: "2026-02-16",
-      mode: "specific",
-      utcOffset: "UTC+5:30",
-      limit: 1000,
-      includeContextWeight: true,
-    });
-    expect(request).toHaveBeenNthCalledWith(4, "usage.cost", {
-      startDate: "2026-02-16",
-      endDate: "2026-02-16",
-      mode: "specific",
-      utcOffset: "UTC+5:30",
-    });
-
-    // Subsequent loads for the same gateway should still send date params but skip lineage params.
-    await loadUsage(state);
-
-    expect(request).toHaveBeenNthCalledWith(5, "sessions.usage", {
-      startDate: "2026-02-16",
-      endDate: "2026-02-16",
-      mode: "specific",
-      utcOffset: "UTC+5:30",
-      limit: 1000,
-      includeContextWeight: true,
-    });
-    expect(request).toHaveBeenNthCalledWith(6, "usage.cost", {
-      startDate: "2026-02-16",
-      endDate: "2026-02-16",
-      mode: "specific",
-      utcOffset: "UTC+5:30",
-    });
-
-    vi.unstubAllGlobals();
-  });
-
   it("keeps optional loaders resilient when requests fail", async () => {
     const request = vi.fn(async (method: string) => {
       if (method === "sessions.usage.timeseries" || method === "sessions.usage.logs") {
@@ -280,7 +207,7 @@ function createStorageMock() {
       return store.get(key) ?? null;
     },
     setItem(key: string, value: string) {
-      store.set(key, value);
+      store.set(key, String(value));
     },
     removeItem(key: string) {
       store.delete(key);

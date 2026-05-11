@@ -1,4 +1,3 @@
-// @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import {
   createResolvedModelPatch,
@@ -18,21 +17,6 @@ function row(key: string, overrides?: Partial<GatewaySessionRow>): GatewaySessio
     updatedAt: null,
     ...overrides,
   };
-}
-
-function requireRequestCall(
-  request: ReturnType<typeof vi.fn>,
-  method: string,
-): { method: string; payload: Record<string, unknown> } {
-  const call = request.mock.calls.find(([calledMethod]) => calledMethod === method);
-  if (!call) {
-    throw new Error(`expected ${method} request`);
-  }
-  return { method: call[0] as string, payload: call[1] as Record<string, unknown> };
-}
-
-function expectNoRequestCall(request: ReturnType<typeof vi.fn>, method: string) {
-  expect(request.mock.calls.some(([calledMethod]) => calledMethod === method)).toBe(false);
 }
 
 describe("executeSlashCommand /kill", () => {
@@ -223,7 +207,7 @@ describe("executeSlashCommand /kill", () => {
               spawnedBy: "agent:main:subagent:mine",
             }),
             row("agent:main:subagent:other-root", {
-              spawnedBy: "agent:main:quietchat:dm:alice",
+              spawnedBy: "agent:main:discord:dm:alice",
             }),
           ],
         };
@@ -284,7 +268,7 @@ describe("executeSlashCommand directives", () => {
       "**Current model:** `gpt-4.1-mini`\n**Available:** `gpt-4.1-mini`, `gpt-4.1`",
     );
     expect(request).toHaveBeenNthCalledWith(1, "sessions.list", {});
-    expect(request).toHaveBeenNthCalledWith(2, "models.list", { view: "configured" });
+    expect(request).toHaveBeenNthCalledWith(2, "models.list", {});
   });
 
   it("mirrors resolved provider-qualified model refs after /model changes", async () => {
@@ -503,70 +487,7 @@ describe("executeSlashCommand directives", () => {
     );
 
     expect(result.content).toBe(
-      "**Session Usage**\nInput: **1.2k** tokens\nOutput: **300** tokens\nTotal: **1.5k** tokens\nContext: **38%** of 4k\nModel: `gpt-4.1-mini`",
-    );
-    expect(request).toHaveBeenNthCalledWith(1, "sessions.list", {});
-  });
-
-  it("keeps /usage context hidden when the context snapshot is stale", async () => {
-    const request = vi.fn(async (method: string, _payload?: unknown) => {
-      if (method === "sessions.list") {
-        return {
-          sessions: [
-            row("agent:main:main", {
-              model: "gpt-4.1-mini",
-              inputTokens: 1200,
-              outputTokens: 300,
-              totalTokens: 1500,
-              totalTokensFresh: false,
-              contextTokens: 4000,
-            }),
-          ],
-        };
-      }
-      throw new Error(`unexpected method: ${method}`);
-    });
-
-    const result = await executeSlashCommand(
-      { request } as unknown as GatewayBrowserClient,
-      "agent:main:main",
-      "usage",
-      "",
-    );
-
-    expect(result.content).toBe(
-      "**Session Usage**\nInput: **1.2k** tokens\nOutput: **300** tokens\nTotal: **~1.5k** tokens\nModel: `gpt-4.1-mini`",
-    );
-    expect(request).toHaveBeenNthCalledWith(1, "sessions.list", {});
-  });
-
-  it("uses the context snapshot for /usage while preserving cumulative total display", async () => {
-    const request = vi.fn(async (method: string, _payload?: unknown) => {
-      if (method === "sessions.list") {
-        return {
-          sessions: [
-            row("agent:main:main", {
-              model: "gpt-4.1-mini",
-              inputTokens: 1200,
-              outputTokens: 300,
-              totalTokens: 1250,
-              contextTokens: 4000,
-            }),
-          ],
-        };
-      }
-      throw new Error(`unexpected method: ${method}`);
-    });
-
-    const result = await executeSlashCommand(
-      { request } as unknown as GatewayBrowserClient,
-      "agent:main:main",
-      "usage",
-      "",
-    );
-
-    expect(result.content).toBe(
-      "**Session Usage**\nInput: **1.2k** tokens\nOutput: **300** tokens\nTotal: **1.5k** tokens\nContext: **31%** of 4k\nModel: `gpt-4.1-mini`",
+      "**Session Usage**\nInput: **1.2k** tokens\nOutput: **300** tokens\nTotal: **1.5k** tokens\nContext: **30%** of 4k\nModel: `gpt-4.1-mini`",
     );
     expect(request).toHaveBeenNthCalledWith(1, "sessions.list", {});
   });
@@ -599,28 +520,14 @@ describe("executeSlashCommand directives", () => {
     );
 
     expect(result.content).toBe(
-      "Current thinking level: low.\nOptions: default, off, minimal, low, medium, high.",
+      "Current thinking level: low.\nOptions: off, minimal, low, medium, high, adaptive.",
     );
     expect(request).toHaveBeenNthCalledWith(1, "sessions.list", {});
-    expect(request).toHaveBeenNthCalledWith(2, "models.list", { view: "configured" });
+    expect(request).toHaveBeenNthCalledWith(2, "models.list", {});
   });
 
   it("accepts minimal and xhigh thinking levels", async () => {
-    const request = vi.fn(async (method: string, payload?: unknown) => {
-      if (method === "sessions.list") {
-        return {
-          sessions: [
-            row("agent:main:main", {
-              thinkingOptions: ["off", "minimal", "low", "medium", "high", "xhigh"],
-            }),
-          ],
-        };
-      }
-      if (method === "sessions.patch") {
-        return { ok: true, ...((payload ?? {}) as object) };
-      }
-      throw new Error(`unexpected method: ${method}`);
-    });
+    const request = vi.fn().mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ ok: true });
 
     const minimal = await executeSlashCommand(
       { request } as unknown as GatewayBrowserClient,
@@ -637,249 +544,14 @@ describe("executeSlashCommand directives", () => {
 
     expect(minimal.content).toBe("Thinking level set to **minimal**.");
     expect(xhigh.content).toBe("Thinking level set to **xhigh**.");
-    expect(request).toHaveBeenNthCalledWith(1, "sessions.list", {});
-    expect(request).toHaveBeenNthCalledWith(2, "sessions.patch", {
+    expect(request).toHaveBeenNthCalledWith(1, "sessions.patch", {
       key: "agent:main:main",
       thinkingLevel: "minimal",
     });
-    expect(request).toHaveBeenNthCalledWith(3, "sessions.list", {});
-    expect(request).toHaveBeenNthCalledWith(4, "sessions.patch", {
+    expect(request).toHaveBeenNthCalledWith(2, "sessions.patch", {
       key: "agent:main:main",
       thinkingLevel: "xhigh",
     });
-  });
-
-  it("clears thinking override for /think default", async () => {
-    const request = vi.fn(async (method: string, payload?: unknown) => {
-      if (method === "sessions.patch") {
-        return { ok: true, ...((payload ?? {}) as object) };
-      }
-      throw new Error(`unexpected method: ${method}`);
-    });
-
-    const result = await executeSlashCommand(
-      { request } as unknown as GatewayBrowserClient,
-      "agent:main:main",
-      "think",
-      "default",
-    );
-
-    expect(result.content).toBe("Thinking level reset to default.");
-    expect(result.action).toBe("refresh");
-    expect(request).toHaveBeenCalledWith("sessions.patch", {
-      key: "agent:main:main",
-      thinkingLevel: null,
-    });
-  });
-
-  it("uses default thinking options when the active session is absent", async () => {
-    const request = vi.fn(async (method: string, payload?: unknown) => {
-      if (method === "sessions.list") {
-        return {
-          defaults: {
-            modelProvider: "openai-codex",
-            model: "gpt-5.5",
-            thinkingLevels: [
-              { id: "off", label: "off" },
-              { id: "minimal", label: "minimal" },
-              { id: "low", label: "low" },
-              { id: "medium", label: "medium" },
-              { id: "adaptive", label: "adaptive" },
-              { id: "high", label: "high" },
-              { id: "xhigh", label: "xhigh" },
-              { id: "max", label: "maximum" },
-            ],
-            thinkingOptions: [
-              "off",
-              "minimal",
-              "low",
-              "medium",
-              "adaptive",
-              "high",
-              "xhigh",
-              "maximum",
-            ],
-            thinkingDefault: "adaptive",
-          },
-          sessions: [],
-        };
-      }
-      if (method === "models.list") {
-        return {
-          models: [{ id: "gpt-5.5", provider: "openai-codex", reasoning: true }],
-        };
-      }
-      if (method === "sessions.patch") {
-        return { ok: true, ...((payload ?? {}) as object) };
-      }
-      throw new Error(`unexpected method: ${method}`);
-    });
-
-    const status = await executeSlashCommand(
-      { request } as unknown as GatewayBrowserClient,
-      "agent:main:main",
-      "think",
-      "",
-    );
-    const setXhigh = await executeSlashCommand(
-      { request } as unknown as GatewayBrowserClient,
-      "agent:main:main",
-      "think",
-      "xhigh",
-    );
-    const setMax = await executeSlashCommand(
-      { request } as unknown as GatewayBrowserClient,
-      "agent:main:main",
-      "think",
-      "max",
-    );
-    const setMaximum = await executeSlashCommand(
-      { request } as unknown as GatewayBrowserClient,
-      "agent:main:main",
-      "think",
-      "maximum",
-    );
-    const setAdaptive = await executeSlashCommand(
-      { request } as unknown as GatewayBrowserClient,
-      "agent:main:main",
-      "think",
-      "auto",
-    );
-
-    expect(status.content).toBe(
-      "Current thinking level: adaptive.\nOptions: default, off, minimal, low, medium, adaptive, high, xhigh, maximum.",
-    );
-    expect(setXhigh.content).toBe("Thinking level set to **xhigh**.");
-    expect(setMax.content).toBe("Thinking level set to **max**.");
-    expect(setMaximum.content).toBe("Thinking level set to **max**.");
-    expect(setAdaptive.content).toBe("Thinking level set to **adaptive**.");
-    expect(request).toHaveBeenCalledWith("sessions.patch", {
-      key: "agent:main:main",
-      thinkingLevel: "xhigh",
-    });
-    expect(request).toHaveBeenCalledWith("sessions.patch", {
-      key: "agent:main:main",
-      thinkingLevel: "max",
-    });
-    expect(request).toHaveBeenCalledWith("sessions.patch", {
-      key: "agent:main:main",
-      thinkingLevel: "adaptive",
-    });
-  });
-
-  it("prefers session model over defaults when models differ (#76482)", async () => {
-    const request = vi.fn(async (method: string, payload?: unknown) => {
-      if (method === "sessions.list") {
-        return {
-          defaults: {
-            modelProvider: "anthropic",
-            model: "claude-sonnet-4-6",
-            thinkingLevels: [
-              { id: "off", label: "off" },
-              { id: "minimal", label: "minimal" },
-              { id: "low", label: "low" },
-              { id: "medium", label: "medium" },
-              { id: "high", label: "high" },
-            ],
-            thinkingOptions: ["off", "minimal", "low", "medium", "high"],
-            thinkingDefault: "off",
-          },
-          sessions: [
-            row("agent:main:main", {
-              modelProvider: "deepseek",
-              model: "deepseek-v4-pro",
-              thinkingLevels: [
-                { id: "off", label: "off" },
-                { id: "minimal", label: "minimal" },
-                { id: "low", label: "low" },
-                { id: "medium", label: "medium" },
-                { id: "high", label: "high" },
-                { id: "xhigh", label: "xhigh" },
-                { id: "max", label: "max" },
-              ],
-            }),
-          ],
-        };
-      }
-      if (method === "models.list") {
-        return {
-          models: [{ id: "deepseek-v4-pro", provider: "deepseek", reasoning: true }],
-        };
-      }
-      if (method === "sessions.patch") {
-        return { ok: true, ...((payload ?? {}) as object) };
-      }
-      throw new Error(`unexpected method: ${method}`);
-    });
-
-    const status = await executeSlashCommand(
-      { request } as unknown as GatewayBrowserClient,
-      "agent:main:main",
-      "think",
-      "",
-    );
-    const setMax = await executeSlashCommand(
-      { request } as unknown as GatewayBrowserClient,
-      "agent:main:main",
-      "think",
-      "max",
-    );
-
-    expect(status.content).toBe(
-      "Current thinking level: off.\nOptions: default, off, minimal, low, medium, high, xhigh, max.",
-    );
-    expect(setMax.content).toBe("Thinking level set to **max**.");
-  });
-
-  it("does not use extended defaults for session with different model when thinkingLevels is empty (#76482)", async () => {
-    // Regression: when session model differs from defaults and session has no thinkingLevels,
-    // we should NOT blindly use defaults (which could have extra levels like xhigh/max
-    // from a different model). The client-side fallback uses the base thinking levels.
-    const request = vi.fn(async (method: string, _payload?: unknown) => {
-      if (method === "sessions.list") {
-        return {
-          defaults: {
-            modelProvider: "deepseek",
-            model: "deepseek-v4-pro",
-            thinkingLevels: [
-              { id: "off", label: "off" },
-              { id: "minimal", label: "minimal" },
-              { id: "low", label: "low" },
-              { id: "medium", label: "medium" },
-              { id: "high", label: "high" },
-              { id: "xhigh", label: "xhigh" },
-              { id: "max", label: "max" },
-            ],
-            thinkingOptions: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
-            thinkingDefault: "high",
-          },
-          sessions: [
-            row("agent:main:main", {
-              modelProvider: "anthropic",
-              model: "claude-sonnet-4-6",
-              // thinkingLevels intentionally absent — lightweight row
-            }),
-          ],
-        };
-      }
-      if (method === "models.list") {
-        return {
-          models: [{ id: "claude-sonnet-4-6", provider: "anthropic", reasoning: true }],
-        };
-      }
-      throw new Error(`unexpected method: ${method}`);
-    });
-
-    const status = await executeSlashCommand(
-      { request } as unknown as GatewayBrowserClient,
-      "agent:main:main",
-      "think",
-      "",
-    );
-
-    // Should NOT show DeepSeek defaults (xhigh, max) for an Anthropic session
-    expect(status.content).not.toContain("xhigh");
-    expect(status.content).not.toContain("max");
   });
 
   it("reports the current verbose level for bare /verbose", async () => {
@@ -920,7 +592,7 @@ describe("executeSlashCommand directives", () => {
       "",
     );
 
-    expect(result.content).toBe("Current fast mode: on.\nOptions: status, on, off, default.");
+    expect(result.content).toBe("Current fast mode: on.\nOptions: status, on, off.");
     expect(request).toHaveBeenNthCalledWith(1, "sessions.list", {});
   });
 
@@ -938,29 +610,6 @@ describe("executeSlashCommand directives", () => {
     expect(request).toHaveBeenCalledWith("sessions.patch", {
       key: "agent:main:main",
       fastMode: true,
-    });
-  });
-
-  it("clears fast mode override for /fast default", async () => {
-    const request = vi.fn(async (method: string, payload?: unknown) => {
-      if (method === "sessions.patch") {
-        return { ok: true, ...((payload ?? {}) as object) };
-      }
-      throw new Error(`unexpected method: ${method}`);
-    });
-
-    const result = await executeSlashCommand(
-      { request } as unknown as GatewayBrowserClient,
-      "agent:main:main",
-      "fast",
-      "default",
-    );
-
-    expect(result.content).toBe("Fast mode reset to default.");
-    expect(result.action).toBe("refresh");
-    expect(request).toHaveBeenCalledWith("sessions.patch", {
-      key: "agent:main:main",
-      fastMode: null,
     });
   });
 });
@@ -985,10 +634,14 @@ describe("executeSlashCommand /steer (soft inject)", () => {
     );
 
     expect(result.content).toBe("Steered.");
-    const chatSend = requireRequestCall(request, "chat.send");
-    expect(chatSend.payload.sessionKey).toBe("agent:main:main");
-    expect(chatSend.payload.message).toBe("try a different approach");
-    expect(chatSend.payload.deliver).toBe(false);
+    expect(request).toHaveBeenCalledWith(
+      "chat.send",
+      expect.objectContaining({
+        sessionKey: "agent:main:main",
+        message: "try a different approach",
+        deliver: false,
+      }),
+    );
   });
 
   it("injects into a matching subagent when the first word resolves to one", async () => {
@@ -1018,10 +671,14 @@ describe("executeSlashCommand /steer (soft inject)", () => {
     );
 
     expect(result.content).toBe("Steered `researcher`.");
-    const chatSend = requireRequestCall(request, "chat.send");
-    expect(chatSend.payload.sessionKey).toBe("agent:main:subagent:researcher");
-    expect(chatSend.payload.message).toBe("try a different approach");
-    expect(chatSend.payload.deliver).toBe(false);
+    expect(request).toHaveBeenCalledWith(
+      "chat.send",
+      expect.objectContaining({
+        sessionKey: "agent:main:subagent:researcher",
+        message: "try a different approach",
+        deliver: false,
+      }),
+    );
   });
 
   it("uses cached sessions to avoid an extra sessions.list round trip", async () => {
@@ -1052,10 +709,14 @@ describe("executeSlashCommand /steer (soft inject)", () => {
 
     expect(result.content).toBe("Steered `researcher`.");
     expect(request).toHaveBeenCalledTimes(1);
-    const chatSend = requireRequestCall(request, "chat.send");
-    expect(chatSend.payload.sessionKey).toBe("agent:main:subagent:researcher");
-    expect(chatSend.payload.message).toBe("try a different approach");
-    expect(chatSend.payload.deliver).toBe(false);
+    expect(request).toHaveBeenCalledWith(
+      "chat.send",
+      expect.objectContaining({
+        sessionKey: "agent:main:subagent:researcher",
+        message: "try a different approach",
+        deliver: false,
+      }),
+    );
   });
 
   it("matches an explicit full subagent session key", async () => {
@@ -1085,10 +746,14 @@ describe("executeSlashCommand /steer (soft inject)", () => {
     );
 
     expect(result.content).toBe("Steered `agent:main:subagent:researcher`.");
-    const chatSend = requireRequestCall(request, "chat.send");
-    expect(chatSend.payload.sessionKey).toBe("agent:main:subagent:researcher");
-    expect(chatSend.payload.message).toBe("try a different approach");
-    expect(chatSend.payload.deliver).toBe(false);
+    expect(request).toHaveBeenCalledWith(
+      "chat.send",
+      expect.objectContaining({
+        sessionKey: "agent:main:subagent:researcher",
+        message: "try a different approach",
+        deliver: false,
+      }),
+    );
   });
 
   it("does not treat 'all' as a subagent wildcard", async () => {
@@ -1110,10 +775,14 @@ describe("executeSlashCommand /steer (soft inject)", () => {
     );
 
     expect(result.content).toBe("Steered.");
-    const chatSend = requireRequestCall(request, "chat.send");
-    expect(chatSend.payload.sessionKey).toBe("agent:main:main");
-    expect(chatSend.payload.message).toBe("all good now");
-    expect(chatSend.payload.deliver).toBe(false);
+    expect(request).toHaveBeenCalledWith(
+      "chat.send",
+      expect.objectContaining({
+        sessionKey: "agent:main:main",
+        message: "all good now",
+        deliver: false,
+      }),
+    );
   });
 
   it("does not match agent id as target — treats 'main' as message text", async () => {
@@ -1140,10 +809,14 @@ describe("executeSlashCommand /steer (soft inject)", () => {
     );
 
     expect(result.content).toBe("Steered.");
-    const chatSend = requireRequestCall(request, "chat.send");
-    expect(chatSend.payload.sessionKey).toBe("agent:main:main");
-    expect(chatSend.payload.message).toBe("main refine the plan");
-    expect(chatSend.payload.deliver).toBe(false);
+    expect(request).toHaveBeenCalledWith(
+      "chat.send",
+      expect.objectContaining({
+        sessionKey: "agent:main:main",
+        message: "main refine the plan",
+        deliver: false,
+      }),
+    );
   });
 
   it("keeps ended subagent targets so steer does not fall back to the current session", async () => {
@@ -1174,7 +847,7 @@ describe("executeSlashCommand /steer (soft inject)", () => {
 
     expect(result.content).toBe("No active run matched `researcher`. Use `/redirect` instead.");
     expect(request).toHaveBeenCalledWith("sessions.list", {});
-    expectNoRequestCall(request, "chat.send");
+    expect(request).not.toHaveBeenCalledWith("chat.send", expect.anything());
   });
 
   it("returns a no-op summary when the current session has no active run", async () => {
@@ -1194,10 +867,10 @@ describe("executeSlashCommand /steer (soft inject)", () => {
 
     expect(result.content).toBe("No active run. Use the chat input or `/redirect` instead.");
     expect(request).toHaveBeenCalledWith("sessions.list", {});
-    expectNoRequestCall(request, "chat.send");
+    expect(request).not.toHaveBeenCalledWith("chat.send", expect.anything());
   });
 
-  it("returns steer usage when no message is provided", async () => {
+  it("returns usage when no message is provided", async () => {
     const request = vi.fn();
 
     const result = await executeSlashCommand(
@@ -1211,7 +884,7 @@ describe("executeSlashCommand /steer (soft inject)", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  it("returns steer error message on RPC failure", async () => {
+  it("returns error message on RPC failure", async () => {
     const request = vi.fn(async (method: string, _payload?: unknown) => {
       if (method === "sessions.list") {
         return { sessions: [row("agent:main:main", { status: "running" })] };
@@ -1324,7 +997,7 @@ describe("executeSlashCommand /redirect (hard kill-and-restart)", () => {
     });
   });
 
-  it("returns redirect usage when no message is provided", async () => {
+  it("returns usage when no message is provided", async () => {
     const request = vi.fn();
 
     const result = await executeSlashCommand(
@@ -1338,7 +1011,7 @@ describe("executeSlashCommand /redirect (hard kill-and-restart)", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  it("returns redirect error message on RPC failure", async () => {
+  it("returns error message on RPC failure", async () => {
     const request = vi.fn(async (method: string, _payload?: unknown) => {
       if (method === "sessions.list") {
         return { sessions: [row("agent:main:main")] };

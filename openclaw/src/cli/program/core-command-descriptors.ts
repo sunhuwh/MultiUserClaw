@@ -5,13 +5,8 @@ export type CoreCliCommandDescriptor = NamedCommandDescriptor;
 
 const coreCliCommandCatalog = defineCommandDescriptorCatalog([
   {
-    name: "crestodian",
-    description: "Open the interactive setup and repair assistant",
-    hasSubcommands: false,
-  },
-  {
     name: "setup",
-    description: "Initialize local config and an agent workspace",
+    description: "Initialize local config and agent workspace",
     hasSubcommands: false,
   },
   {
@@ -36,13 +31,8 @@ const coreCliCommandCatalog = defineCommandDescriptorCatalog([
     hasSubcommands: true,
   },
   {
-    name: "migrate",
-    description: "Import state from another agent system",
-    hasSubcommands: true,
-  },
-  {
     name: "doctor",
-    description: "Diagnose and repair config, Gateway, plugin, and channel problems",
+    description: "Health checks + quick fixes for the gateway and channels",
     hasSubcommands: false,
   },
   {
@@ -62,7 +52,7 @@ const coreCliCommandCatalog = defineCommandDescriptorCatalog([
   },
   {
     name: "message",
-    description: "Send, read, and manage channel messages",
+    description: "Send, read, and manage messages",
     hasSubcommands: true,
   },
   {
@@ -82,12 +72,12 @@ const coreCliCommandCatalog = defineCommandDescriptorCatalog([
   },
   {
     name: "status",
-    description: "Show Gateway, channel, model, and recent-session status",
+    description: "Show channel health and recent session recipients",
     hasSubcommands: false,
   },
   {
     name: "health",
-    description: "Fetch detailed health from the running Gateway",
+    description: "Fetch health from the running gateway",
     hasSubcommands: false,
   },
   {
@@ -96,13 +86,8 @@ const coreCliCommandCatalog = defineCommandDescriptorCatalog([
     hasSubcommands: true,
   },
   {
-    name: "commitments",
-    description: "List and manage inferred follow-up commitments",
-    hasSubcommands: true,
-  },
-  {
     name: "tasks",
-    description: "Inspect durable background tasks and flows",
+    description: "Inspect durable background task state",
     hasSubcommands: true,
   },
 ] as const satisfies ReadonlyArray<CoreCliCommandDescriptor>);

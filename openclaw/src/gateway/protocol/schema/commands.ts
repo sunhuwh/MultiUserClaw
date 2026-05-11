@@ -1,18 +1,5 @@
-import { Type } from "typebox";
+import { Type } from "@sinclair/typebox";
 import { NonEmptyString } from "./primitives.js";
-
-export const COMMAND_NAME_MAX_LENGTH = 200;
-export const COMMAND_DESCRIPTION_MAX_LENGTH = 2_000;
-export const COMMAND_ALIAS_MAX_ITEMS = 20;
-export const COMMAND_ARGS_MAX_ITEMS = 20;
-export const COMMAND_ARG_NAME_MAX_LENGTH = 200;
-export const COMMAND_ARG_DESCRIPTION_MAX_LENGTH = 500;
-export const COMMAND_ARG_CHOICES_MAX_ITEMS = 50;
-export const COMMAND_CHOICE_VALUE_MAX_LENGTH = 200;
-export const COMMAND_CHOICE_LABEL_MAX_LENGTH = 200;
-export const COMMAND_LIST_MAX_ITEMS = 500;
-
-const BoundedNonEmptyString = (maxLength: number) => Type.String({ minLength: 1, maxLength });
 
 export const CommandSourceSchema = Type.Union([
   Type.Literal("native"),
@@ -38,21 +25,19 @@ export const CommandCategorySchema = Type.Union([
 
 export const CommandArgChoiceSchema = Type.Object(
   {
-    value: Type.String({ maxLength: COMMAND_CHOICE_VALUE_MAX_LENGTH }),
-    label: Type.String({ maxLength: COMMAND_CHOICE_LABEL_MAX_LENGTH }),
+    value: Type.String(),
+    label: Type.String(),
   },
   { additionalProperties: false },
 );
 
 export const CommandArgSchema = Type.Object(
   {
-    name: BoundedNonEmptyString(COMMAND_ARG_NAME_MAX_LENGTH),
-    description: Type.String({ maxLength: COMMAND_ARG_DESCRIPTION_MAX_LENGTH }),
+    name: NonEmptyString,
+    description: Type.String(),
     type: Type.Union([Type.Literal("string"), Type.Literal("number"), Type.Literal("boolean")]),
     required: Type.Optional(Type.Boolean()),
-    choices: Type.Optional(
-      Type.Array(CommandArgChoiceSchema, { maxItems: COMMAND_ARG_CHOICES_MAX_ITEMS }),
-    ),
+    choices: Type.Optional(Type.Array(CommandArgChoiceSchema)),
     dynamic: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
@@ -60,19 +45,15 @@ export const CommandArgSchema = Type.Object(
 
 export const CommandEntrySchema = Type.Object(
   {
-    name: BoundedNonEmptyString(COMMAND_NAME_MAX_LENGTH),
-    nativeName: Type.Optional(BoundedNonEmptyString(COMMAND_NAME_MAX_LENGTH)),
-    textAliases: Type.Optional(
-      Type.Array(BoundedNonEmptyString(COMMAND_NAME_MAX_LENGTH), {
-        maxItems: COMMAND_ALIAS_MAX_ITEMS,
-      }),
-    ),
-    description: Type.String({ maxLength: COMMAND_DESCRIPTION_MAX_LENGTH }),
+    name: NonEmptyString,
+    nativeName: Type.Optional(NonEmptyString),
+    textAliases: Type.Optional(Type.Array(NonEmptyString)),
+    description: Type.String(),
     category: Type.Optional(CommandCategorySchema),
     source: CommandSourceSchema,
     scope: CommandScopeSchema,
     acceptsArgs: Type.Boolean(),
-    args: Type.Optional(Type.Array(CommandArgSchema, { maxItems: COMMAND_ARGS_MAX_ITEMS })),
+    args: Type.Optional(Type.Array(CommandArgSchema)),
   },
   { additionalProperties: false },
 );
@@ -89,7 +70,7 @@ export const CommandsListParamsSchema = Type.Object(
 
 export const CommandsListResultSchema = Type.Object(
   {
-    commands: Type.Array(CommandEntrySchema, { maxItems: COMMAND_LIST_MAX_ITEMS }),
+    commands: Type.Array(CommandEntrySchema),
   },
   { additionalProperties: false },
 );

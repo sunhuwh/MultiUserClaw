@@ -1,14 +1,10 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
-import { access, mkdir, writeFile } from "node:fs/promises";
+import { access, appendFile, mkdir, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { sleep } from "openclaw/plugin-sdk/runtime-env";
-import { appendRegularFile } from "openclaw/plugin-sdk/security-runtime";
 import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
-import type { QaProviderMode } from "./model-selection.js";
-import { resolveQaForwardedLiveEnv, resolveQaLiveProviderConfigPath } from "./providers/env.js";
-import { DEFAULT_QA_LIVE_PROVIDER_MODE, getQaProvider } from "./providers/index.js";
 
 const MULTIPASS_MOUNTED_REPO_PATH = "/workspace/openclaw-host";
 const MULTIPASS_GUEST_REPO_PATH = "/workspace/openclaw";
@@ -34,7 +30,51 @@ const MULTIPASS_REPO_SYNC_EXCLUDES = [
 const MULTIPASS_EXEC_MAX_BUFFER = 64 * 1024 * 1024;
 const MULTIPASS_GUEST_RUN_TIMEOUT_MS = 60 * 60 * 1000;
 
-const qaMultipassDefaultResources = {
+const QA_LIVE_ENV_ALIASES = Object.freeze([
+  {
+    liveVar: "OPENCLAW_LIVE_OPENAI_KEY",
+    providerVar: "OPENAI_API_KEY",
+  },
+  {
+    liveVar: "OPENCLAW_LIVE_ANTHROPIC_KEY",
+    providerVar: "ANTHROPIC_API_KEY",
+  },
+  {
+    liveVar: "OPENCLAW_LIVE_GEMINI_KEY",
+    providerVar: "GEMINI_API_KEY",
+  },
+]);
+
+const QA_LIVE_ALLOWED_ENV_VARS = Object.freeze([
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_OAUTH_TOKEN",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_BEARER_TOKEN_BEDROCK",
+  "AWS_REGION",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+  "GEMINI_API_KEY",
+  "GEMINI_API_KEYS",
+  "GOOGLE_API_KEY",
+  "MISTRAL_API_KEY",
+  "OPENAI_API_KEY",
+  "OPENAI_API_KEYS",
+  "OPENAI_BASE_URL",
+  "OPENCLAW_LIVE_ANTHROPIC_KEY",
+  "OPENCLAW_LIVE_ANTHROPIC_KEYS",
+  "OPENCLAW_LIVE_GEMINI_KEY",
+  "OPENCLAW_LIVE_OPENAI_KEY",
+  "OPENCLAW_QA_LIVE_PROVIDER_CONFIG_PATH",
+  "OPENCLAW_CONFIG_PATH",
+  "VOYAGE_API_KEY",
+]);
+const QA_LIVE_ALLOWED_ENV_PATTERNS = Object.freeze([
+  /^[A-Z0-9_]+_API_KEYS$/u,
+  /^[A-Z0-9_]+_API_KEY_[0-9]+$/u,
+  /^OPENCLAW_LIVE_[A-Z0-9_]+_KEYS$/u,
+]);
+
+export const qaMultipassDefaultResources = {
   image: "lts",
   cpus: 2,
   memory: "4G",
@@ -54,7 +94,7 @@ type ExecFileOptions = {
   timeoutMs?: number;
 };
 
-type QaMultipassPlan = {
+export type QaMultipassPlan = {
   repoRoot: string;
   outputDir: string;
   reportPath: string;
@@ -68,12 +108,10 @@ type QaMultipassPlan = {
   memory: string;
   disk: string;
   pnpmVersion: string;
-  transportId: string;
-  providerMode: QaProviderMode;
+  providerMode: "mock-openai" | "live-frontier";
   primaryModel?: string;
   alternateModel?: string;
   fastMode?: boolean;
-  thinkingDefault?: string;
   scenarioIds: string[];
   forwardedEnv: Record<string, string>;
   hostCodexHomePath?: string;
@@ -88,7 +126,7 @@ type QaMultipassPlan = {
   qaCommand: string[];
 };
 
-type QaMultipassRunResult = {
+export type QaMultipassRunResult = {
   outputDir: string;
   reportPath: string;
   summaryPath: string;
@@ -113,6 +151,10 @@ function createOutputStamp() {
 
 function createVmSuffix() {
   return `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function execFileAsync(file: string, args: string[], options: ExecFileOptions = {}) {
@@ -213,6 +255,62 @@ function resolveMultipassInstallHint() {
   return "https://multipass.run/install";
 }
 
+function resolveUserPath(value: string, env: NodeJS.ProcessEnv = process.env) {
+  if (value === "~") {
+    return env.HOME ?? os.homedir();
+  }
+  if (value.startsWith("~/")) {
+    return path.join(env.HOME ?? os.homedir(), value.slice(2));
+  }
+  return path.resolve(value);
+}
+
+function resolveLiveProviderConfigPath(env: NodeJS.ProcessEnv = process.env) {
+  const explicit =
+    env.OPENCLAW_QA_LIVE_PROVIDER_CONFIG_PATH?.trim() || env.OPENCLAW_CONFIG_PATH?.trim();
+  return explicit
+    ? { path: resolveUserPath(explicit, env), explicit: true }
+    : { path: path.join(os.homedir(), ".openclaw", "openclaw.json"), explicit: false };
+}
+
+function resolveQaLiveCliAuthEnv(baseEnv: NodeJS.ProcessEnv) {
+  const configuredCodexHome = baseEnv.CODEX_HOME?.trim();
+  if (configuredCodexHome) {
+    const codexHome = resolveUserPath(configuredCodexHome, baseEnv);
+    return fs.existsSync(codexHome) ? { CODEX_HOME: codexHome } : {};
+  }
+  const hostHome = baseEnv.HOME?.trim() || os.homedir();
+  const codexHome = path.join(hostHome, ".codex");
+  return fs.existsSync(codexHome) ? { CODEX_HOME: codexHome } : {};
+}
+
+function resolveForwardedLiveEnv(baseEnv: NodeJS.ProcessEnv = process.env) {
+  const forwarded: Record<string, string> = {};
+  for (const [key, rawValue] of Object.entries(baseEnv)) {
+    if (
+      !QA_LIVE_ALLOWED_ENV_VARS.includes(key) &&
+      !QA_LIVE_ALLOWED_ENV_PATTERNS.some((pattern) => pattern.test(key))
+    ) {
+      continue;
+    }
+    const value = rawValue?.trim();
+    if (value) {
+      forwarded[key] = value;
+    }
+  }
+  for (const { liveVar, providerVar } of QA_LIVE_ENV_ALIASES) {
+    const liveValue = forwarded[liveVar]?.trim();
+    if (liveValue && !forwarded[providerVar]?.trim()) {
+      forwarded[providerVar] = liveValue;
+    }
+  }
+  const liveCliAuth = resolveQaLiveCliAuthEnv(baseEnv);
+  if (liveCliAuth.CODEX_HOME) {
+    forwarded.CODEX_HOME = liveCliAuth.CODEX_HOME;
+  }
+  return forwarded;
+}
+
 function createQaMultipassOutputDir(repoRoot: string) {
   return path.join(repoRoot, ".artifacts", "qa-e2e", `multipass-${createOutputStamp()}`);
 }
@@ -231,13 +329,10 @@ function appendScenarioArgs(command: string[], scenarioIds: string[]) {
 export function createQaMultipassPlan(params: {
   repoRoot: string;
   outputDir?: string;
-  transportId?: string;
-  providerMode?: QaProviderMode;
+  providerMode?: "mock-openai" | "live-frontier";
   primaryModel?: string;
   alternateModel?: string;
   fastMode?: boolean;
-  thinkingDefault?: string;
-  allowFailures?: boolean;
   scenarioIds?: string[];
   concurrency?: number;
   image?: string;
@@ -247,14 +342,11 @@ export function createQaMultipassPlan(params: {
 }) {
   const outputDir = params.outputDir ?? createQaMultipassOutputDir(params.repoRoot);
   const scenarioIds = [...new Set(params.scenarioIds ?? [])];
-  const transportId = params.transportId?.trim() || "qa-channel";
-  const providerMode = params.providerMode ?? DEFAULT_QA_LIVE_PROVIDER_MODE;
-  const provider = getQaProvider(providerMode);
-  const forwardedEnv = provider.appliesLiveEnvAliases ? resolveQaForwardedLiveEnv() : {};
+  const providerMode = params.providerMode ?? "mock-openai";
+  const forwardedEnv = providerMode === "live-frontier" ? resolveForwardedLiveEnv() : {};
   const hostCodexHomePath = forwardedEnv.CODEX_HOME;
-  const liveProviderConfig = provider.usesModelProviderPlugins
-    ? resolveQaLiveProviderConfigPath()
-    : undefined;
+  const liveProviderConfig =
+    providerMode === "live-frontier" ? resolveLiveProviderConfigPath() : undefined;
   const hostLiveProviderConfigPath =
     liveProviderConfig && fs.existsSync(liveProviderConfig.path)
       ? liveProviderConfig.path
@@ -267,8 +359,6 @@ export function createQaMultipassPlan(params: {
       "openclaw",
       "qa",
       "suite",
-      "--transport",
-      transportId,
       "--provider-mode",
       providerMode,
       "--output-dir",
@@ -276,8 +366,6 @@ export function createQaMultipassPlan(params: {
       ...(params.primaryModel ? ["--model", params.primaryModel] : []),
       ...(params.alternateModel ? ["--alt-model", params.alternateModel] : []),
       ...(params.fastMode ? ["--fast"] : []),
-      ...(params.thinkingDefault ? ["--thinking", params.thinkingDefault] : []),
-      ...(params.allowFailures ? ["--allow-failures"] : []),
       ...(params.concurrency ? ["--concurrency", String(params.concurrency)] : []),
     ],
     scenarioIds,
@@ -297,12 +385,10 @@ export function createQaMultipassPlan(params: {
     memory: params.memory ?? qaMultipassDefaultResources.memory,
     disk: params.disk ?? qaMultipassDefaultResources.disk,
     pnpmVersion: validatePnpmVersion(resolvePnpmVersion(params.repoRoot)),
-    transportId,
     providerMode,
     primaryModel: params.primaryModel,
     alternateModel: params.alternateModel,
     fastMode: params.fastMode,
-    thinkingDefault: params.thinkingDefault,
     scenarioIds,
     forwardedEnv,
     hostCodexHomePath,
@@ -430,7 +516,7 @@ export function renderQaMultipassGuestScript(
 }
 
 async function appendMultipassLog(logPath: string, message: string) {
-  await appendRegularFile({ filePath: logPath, content: message });
+  await appendFile(logPath, message, "utf8");
 }
 
 async function runMultipassCommand(logPath: string, args: string[], options: ExecFileOptions = {}) {
@@ -543,12 +629,10 @@ async function tryCopyGuestBootstrapLog(plan: QaMultipassPlan) {
 export async function runQaMultipass(params: {
   repoRoot: string;
   outputDir?: string;
-  transportId?: string;
-  providerMode?: QaProviderMode;
+  providerMode?: "mock-openai" | "live-frontier";
   primaryModel?: string;
   alternateModel?: string;
   fastMode?: boolean;
-  allowFailures?: boolean;
   scenarioIds?: string[];
   concurrency?: number;
   image?: string;

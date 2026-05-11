@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const sdkExports = vi.hoisted(() => ({
   generateImage: vi.fn(),
@@ -14,11 +14,6 @@ import {
 import { generateImage, listRuntimeImageGenerationProviders } from "./runtime.js";
 
 describe("image-generation-core runtime", () => {
-  afterAll(() => {
-    vi.doUnmock("openclaw/plugin-sdk/image-generation-runtime");
-    vi.resetModules();
-  });
-
   it("re-exports generateImage from the plugin sdk runtime", () => {
     expect(generateImage).toBe(sdkGenerateImage);
   });

@@ -1,7 +1,5 @@
-/**
- * @deprecated Broad public SDK barrel. Prefer focused conversation/thread
- * binding subpaths and avoid adding new imports here.
- */
+// Public binding helpers for both runtime plugin-owned bindings and
+// config-driven channel bindings.
 
 export {
   createConversationBindingRecord,
@@ -15,8 +13,6 @@ export {
   ensureConfiguredBindingRouteReady,
   resolveConfiguredBindingRoute,
   type ConfiguredBindingRouteResult,
-  resolveRuntimeConversationBindingRoute,
-  type RuntimeConversationBindingRouteResult,
 } from "../channels/plugins/binding-routing.js";
 export {
   primeConfiguredBindingRegistry,
@@ -47,7 +43,6 @@ export {
 } from "../channels/thread-bindings-messages.js";
 export {
   formatThreadBindingDisabledError,
-  formatThreadBindingSpawnDisabledError,
   resolveThreadBindingEffectiveExpiresAt,
   resolveThreadBindingIdleTimeoutMs,
   resolveThreadBindingIdleTimeoutMsForChannel,
@@ -111,4 +106,4 @@ export {
   resolvePluginConversationBindingApproval,
   toPluginConversationBinding,
 } from "../plugins/conversation-binding.js";
-export { resolvePinnedMainDmOwnerFromAllowlist } from "./channel-access-compat.js";
+export { resolvePinnedMainDmOwnerFromAllowlist } from "../security/dm-policy-shared.js";

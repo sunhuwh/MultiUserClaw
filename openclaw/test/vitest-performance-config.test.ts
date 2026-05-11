@@ -42,7 +42,7 @@ describe("loadVitestExperimentalConfig", () => {
   });
 
   it("disables the filesystem module cache by default on Windows", () => {
-    expect(loadVitestExperimentalConfig({}, "win32")).toStrictEqual({});
+    expect(loadVitestExperimentalConfig({}, "win32")).toEqual({});
   });
 
   it("still allows enabling the filesystem module cache explicitly on Windows", () => {
@@ -68,7 +68,7 @@ describe("loadVitestExperimentalConfig", () => {
         },
         "linux",
       ),
-    ).toStrictEqual({});
+    ).toEqual({});
   });
 
   it("enables import timing output and import breakdown reporting", () => {
@@ -90,6 +90,6 @@ describe("loadVitestExperimentalConfig", () => {
   });
 
   it("uses RUNNER_OS to detect Windows even when the platform is not win32", () => {
-    expect(loadVitestExperimentalConfig({ RUNNER_OS: "Windows" }, "linux")).toStrictEqual({});
+    expect(loadVitestExperimentalConfig({ RUNNER_OS: "Windows" }, "linux")).toEqual({});
   });
 });

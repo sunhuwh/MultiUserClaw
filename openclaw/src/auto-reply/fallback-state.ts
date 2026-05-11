@@ -1,28 +1,23 @@
-import { areRuntimeModelRefsEquivalent } from "../agents/model-runtime-aliases.js";
 import { formatRawAssistantErrorForUi } from "../agents/pi-embedded-helpers.js";
+import type { SessionEntry } from "../config/sessions.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
-import type { FallbackNoticeState } from "../status/fallback-notice-state.js";
 import { formatProviderModelRef } from "./model-runtime.js";
 import type { RuntimeFallbackAttempt } from "./reply/agent-runner-execution.js";
-export {
-  resolveActiveFallbackState,
-  type FallbackNoticeState,
-} from "../status/fallback-notice-state.js";
 
 const FALLBACK_REASON_PART_MAX = 80;
-const TRANSIENT_FALLBACK_REASONS = new Set([
-  "rate_limit",
-  "overloaded",
-  "timeout",
-  "empty_response",
-  "no_error_details",
-  "unclassified",
-]);
+const TRANSIENT_FALLBACK_REASONS = new Set(["rate_limit", "overloaded", "timeout"]);
 const TRANSIENT_ERROR_DETAIL_HINT_RE =
   /\b(?:429|5\d\d|too many requests|usage limit|quota|try again in|retry[- ]after|seconds?|minutes?|hours?|temporarily unavailable|overloaded|service unavailable|throttl)\b/i;
 
+export type FallbackNoticeState = Pick<
+  SessionEntry,
+  "fallbackNoticeSelectedModel" | "fallbackNoticeActiveModel" | "fallbackNoticeReason"
+>;
+
 function truncateFallbackReasonPart(value: string, max = FALLBACK_REASON_PART_MAX): string {
-  const text = value.replace(/\s+/g, " ").trim();
+  const text = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
   if (text.length <= max) {
     return text;
   }
@@ -50,7 +45,7 @@ function formatFallbackAttemptErrorPreview(attempt: RuntimeFallbackAttempt): str
   return formatted;
 }
 
-function formatFallbackAttemptReason(attempt: RuntimeFallbackAttempt): string {
+export function formatFallbackAttemptReason(attempt: RuntimeFallbackAttempt): string {
   const errorPreview = formatFallbackAttemptErrorPreview(attempt);
   if (errorPreview) {
     return errorPreview;
@@ -73,7 +68,7 @@ function formatFallbackAttemptSummary(attempt: RuntimeFallbackAttempt): string {
   return `${formatProviderModelRef(attempt.provider, attempt.model)} ${formatFallbackAttemptReason(attempt)}`;
 }
 
-function buildFallbackReasonSummary(attempts: RuntimeFallbackAttempt[]): string {
+export function buildFallbackReasonSummary(attempts: RuntimeFallbackAttempt[]): string {
   const firstAttempt = attempts[0];
   const firstReason = firstAttempt
     ? formatFallbackAttemptReason(firstAttempt)
@@ -82,7 +77,7 @@ function buildFallbackReasonSummary(attempts: RuntimeFallbackAttempt[]): string 
   return `${truncateFallbackReasonPart(firstReason)}${moreAttempts}`;
 }
 
-function buildFallbackAttemptSummaries(attempts: RuntimeFallbackAttempt[]): string[] {
+export function buildFallbackAttemptSummaries(attempts: RuntimeFallbackAttempt[]): string[] {
   return attempts.map((attempt) =>
     truncateFallbackReasonPart(formatFallbackAttemptSummary(attempt)),
   );
@@ -97,7 +92,7 @@ export function buildFallbackNotice(params: {
 }): string | null {
   const selected = formatProviderModelRef(params.selectedProvider, params.selectedModel);
   const active = formatProviderModelRef(params.activeProvider, params.activeModel);
-  if (areRuntimeModelRefsEquivalent(selected, active)) {
+  if (selected === active) {
     return null;
   }
   const reasonSummary = buildFallbackReasonSummary(params.attempts);
@@ -117,7 +112,25 @@ export function buildFallbackClearedNotice(params: {
   return `↪️ Model Fallback cleared: ${selected}`;
 }
 
-type ResolvedFallbackTransition = {
+export function resolveActiveFallbackState(params: {
+  selectedModelRef: string;
+  activeModelRef: string;
+  state?: FallbackNoticeState;
+}): { active: boolean; reason?: string } {
+  const selected = normalizeOptionalString(params.state?.fallbackNoticeSelectedModel);
+  const active = normalizeOptionalString(params.state?.fallbackNoticeActiveModel);
+  const reason = normalizeOptionalString(params.state?.fallbackNoticeReason);
+  const fallbackActive =
+    params.selectedModelRef !== params.activeModelRef &&
+    selected === params.selectedModelRef &&
+    active === params.activeModelRef;
+  return {
+    active: fallbackActive,
+    reason: fallbackActive ? reason : undefined,
+  };
+}
+
+export type ResolvedFallbackTransition = {
   selectedModelRef: string;
   activeModelRef: string;
   fallbackActive: boolean;
@@ -153,17 +166,13 @@ export function resolveFallbackTransition(params: {
     activeModel: normalizeOptionalString(params.state?.fallbackNoticeActiveModel),
     reason: normalizeOptionalString(params.state?.fallbackNoticeReason),
   };
-  const fallbackActive = !areRuntimeModelRefsEquivalent(selectedModelRef, activeModelRef);
+  const fallbackActive = selectedModelRef !== activeModelRef;
   const fallbackTransitioned =
     fallbackActive &&
     (previousState.selectedModel !== selectedModelRef ||
       previousState.activeModel !== activeModelRef);
-  const previousStateWasRealFallback = Boolean(
-    previousState.selectedModel &&
-    previousState.activeModel &&
-    !areRuntimeModelRefsEquivalent(previousState.selectedModel, previousState.activeModel),
-  );
-  const fallbackCleared = !fallbackActive && previousStateWasRealFallback;
+  const fallbackCleared =
+    !fallbackActive && Boolean(previousState.selectedModel || previousState.activeModel);
   const reasonSummary = buildFallbackReasonSummary(params.attempts);
   const attemptSummaries = buildFallbackAttemptSummaries(params.attempts);
   const nextState = fallbackActive

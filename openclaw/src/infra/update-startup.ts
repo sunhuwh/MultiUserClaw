@@ -2,13 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { formatCliCommand } from "../cli/command-format.js";
+import type { loadConfig } from "../config/config.js";
 import { resolveStateDir } from "../config/paths.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { runCommandWithTimeout } from "../process/exec.js";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { VERSION } from "../version.js";
-import { isTruthyEnvValue } from "./env.js";
-import { writeJson } from "./json-files.js";
+import { writeJsonAtomic } from "./json-files.js";
 import { resolveOpenClawPackageRoot } from "./openclaw-root.js";
 import { normalizeUpdateChannel, DEFAULT_PACKAGE_CHANNEL } from "./update-channels.js";
 import { compareSemverStrings, resolveNpmChannelTag, checkUpdateStatus } from "./update-check.js";
@@ -78,7 +77,7 @@ function shouldSkipCheck(allowInTests: boolean): boolean {
   return false;
 }
 
-function resolveAutoUpdatePolicy(cfg: OpenClawConfig): AutoUpdatePolicy {
+function resolveAutoUpdatePolicy(cfg: ReturnType<typeof loadConfig>): AutoUpdatePolicy {
   const auto = cfg.update?.auto;
   const stableDelayHours =
     typeof auto?.stableDelayHours === "number" && Number.isFinite(auto.stableDelayHours)
@@ -101,7 +100,7 @@ function resolveAutoUpdatePolicy(cfg: OpenClawConfig): AutoUpdatePolicy {
   };
 }
 
-function resolveCheckIntervalMs(cfg: OpenClawConfig): number {
+function resolveCheckIntervalMs(cfg: ReturnType<typeof loadConfig>): number {
   const channel = normalizeUpdateChannel(cfg.update?.channel) ?? DEFAULT_PACKAGE_CHANNEL;
   const auto = resolveAutoUpdatePolicy(cfg);
   if (!auto.enabled) {
@@ -127,7 +126,7 @@ async function readState(statePath: string): Promise<UpdateCheckState> {
 }
 
 async function writeState(statePath: string, state: UpdateCheckState): Promise<void> {
-  await writeJson(statePath, state);
+  await writeJsonAtomic(statePath, state);
 }
 
 function sameUpdateAvailable(a: UpdateAvailable | null, b: UpdateAvailable | null): boolean {
@@ -300,7 +299,7 @@ function clearAutoState(nextState: UpdateCheckState): void {
 }
 
 export async function runGatewayUpdateCheck(params: {
-  cfg: OpenClawConfig;
+  cfg: ReturnType<typeof loadConfig>;
   log: { info: (msg: string, meta?: Record<string, unknown>) => void };
   isNixMode: boolean;
   allowInTests?: boolean;
@@ -318,10 +317,8 @@ export async function runGatewayUpdateCheck(params: {
     return;
   }
   const auto = resolveAutoUpdatePolicy(params.cfg);
-  const autoDisabledByEnv = isTruthyEnvValue(process.env.OPENCLAW_NO_AUTO_UPDATE);
-  const shouldRunAutoUpdate = auto.enabled && !autoDisabledByEnv;
   const shouldRunUpdateHints = params.cfg.update?.checkOnStart !== false;
-  if (!shouldRunUpdateHints && !shouldRunAutoUpdate) {
+  if (!shouldRunUpdateHints && !auto.enabled) {
     return;
   }
 
@@ -341,9 +338,7 @@ export async function runGatewayUpdateCheck(params: {
       onUpdateAvailableChange: params.onUpdateAvailableChange,
     });
   }
-  const checkIntervalMs = shouldRunAutoUpdate
-    ? resolveCheckIntervalMs(params.cfg)
-    : UPDATE_CHECK_INTERVAL_MS;
+  const checkIntervalMs = resolveCheckIntervalMs(params.cfg);
   if (lastCheckedAt && Number.isFinite(lastCheckedAt)) {
     if (now - lastCheckedAt < checkIntervalMs) {
       return;
@@ -412,14 +407,7 @@ export async function runGatewayUpdateCheck(params: {
       nextState.lastNotifiedTag = tag;
     }
 
-    if (auto.enabled && autoDisabledByEnv) {
-      params.log.info("auto-update disabled by OPENCLAW_NO_AUTO_UPDATE", {
-        version: resolved.version,
-        tag,
-      });
-    }
-
-    if (shouldRunAutoUpdate && (channel === "stable" || channel === "beta")) {
+    if (auto.enabled && (channel === "stable" || channel === "beta")) {
       const runAuto = params.runAutoUpdate ?? runAutoUpdateCommand;
       const attemptIntervalMs =
         channel === "beta"
@@ -498,7 +486,7 @@ export async function runGatewayUpdateCheck(params: {
 }
 
 export function scheduleGatewayUpdateCheck(params: {
-  cfg: OpenClawConfig;
+  cfg: ReturnType<typeof loadConfig>;
   log: { info: (msg: string, meta?: Record<string, unknown>) => void };
   isNixMode: boolean;
   onUpdateAvailableChange?: (updateAvailable: UpdateAvailable | null) => void;

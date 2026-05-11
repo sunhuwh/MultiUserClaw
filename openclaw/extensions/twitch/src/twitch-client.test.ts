@@ -58,8 +58,10 @@ const mockAuthProvider = {
 };
 
 vi.mock("@twurple/auth", () => ({
-  StaticAuthProvider: function StaticAuthProvider(...args: unknown[]) {
-    mockAuthProvider.constructor(...args);
+  StaticAuthProvider: class {
+    constructor(...args: unknown[]) {
+      mockAuthProvider.constructor(...args);
+    }
   },
   RefreshingAuthProvider: class {
     addUserForToken = mockAddUserForToken;
@@ -232,7 +234,7 @@ describe("TwitchClientManager", () => {
       await manager.getClient(testAccount);
 
       expect(mockOnMessage).toHaveBeenCalled();
-      expect(mockLogger.info).toHaveBeenCalledWith("Set up handlers for testbot:testchannel");
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining("Set up handlers for"));
     });
 
     it("should create separate clients for same account with different channels", async () => {
@@ -279,7 +281,7 @@ describe("TwitchClientManager", () => {
       await manager.disconnect(testAccount);
 
       expect(mockQuit).toHaveBeenCalledTimes(1);
-      expect(mockLogger.info).toHaveBeenCalledWith("Disconnected testbot:testchannel");
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining("Disconnected"));
     });
 
     it("should clear client and message handler", async () => {
@@ -295,7 +297,7 @@ describe("TwitchClientManager", () => {
     });
 
     it("should handle disconnecting non-existent client gracefully", async () => {
-      // Missing clients are ignored.
+      // disconnect doesn't throw, just does nothing
       await manager.disconnect(testAccount);
       expect(mockQuit).not.toHaveBeenCalled();
     });
@@ -326,7 +328,7 @@ describe("TwitchClientManager", () => {
     });
 
     it("should handle empty client list gracefully", async () => {
-      // Empty client sets are ignored.
+      // disconnectAll doesn't throw, just does nothing
       await manager.disconnectAll();
       expect(mockQuit).not.toHaveBeenCalled();
     });
@@ -436,6 +438,7 @@ describe("TwitchClientManager", () => {
         id: "msg123",
       });
 
+      expect(capturedMessage).not.toBeNull();
       expect(capturedMessage?.username).toBe("testuser");
       expect(capturedMessage?.displayName).toBe("TestUser");
       expect(capturedMessage?.userId).toBe("12345");

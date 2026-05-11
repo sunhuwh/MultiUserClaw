@@ -19,16 +19,15 @@ import { formatDocsLink } from "openclaw/plugin-sdk/setup-tools";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
+} from "openclaw/plugin-sdk/text-runtime";
 import { inspectSlackAccount } from "./account-inspect.js";
 import { resolveSlackAccount } from "./accounts.js";
 import {
-  buildSlackManifest,
   buildSlackSetupLines,
-  isSlackSetupAccountConfigured,
   SLACK_CHANNEL as channel,
+  isSlackSetupAccountConfigured,
   setSlackChannelAllowlist,
-} from "./setup-shared.js";
+} from "./shared.js";
 
 function enableSlackAccount(cfg: OpenClawConfig, accountId: string): OpenClawConfig {
   return patchChannelConfigForAccount({
@@ -43,7 +42,7 @@ function hasSlackInteractiveRepliesConfig(cfg: OpenClawConfig, accountId: string
   const capabilities = resolveSlackAccount({ cfg, accountId }).config.capabilities;
   if (Array.isArray(capabilities)) {
     return capabilities.some(
-      (entry) => normalizeLowercaseStringOrEmpty(entry) === "interactivereplies",
+      (entry) => normalizeLowercaseStringOrEmpty(String(entry)) === "interactivereplies",
     );
   }
   if (!capabilities || typeof capabilities !== "object") {
@@ -62,7 +61,7 @@ function setSlackInteractiveReplies(
     ? interactiveReplies
       ? [...new Set([...capabilities, "interactiveReplies"])]
       : capabilities.filter(
-          (entry) => normalizeLowercaseStringOrEmpty(entry) !== "interactivereplies",
+          (entry) => normalizeLowercaseStringOrEmpty(String(entry)) !== "interactivereplies",
         )
     : {
         ...((capabilities && typeof capabilities === "object" ? capabilities : {}) as Record<
@@ -177,17 +176,6 @@ export function createSlackSetupWizardBase(handlers: {
       lines: buildSlackSetupLines(),
       shouldShow: ({ cfg, accountId }) =>
         !isSlackSetupAccountConfigured(resolveSlackAccount({ cfg, accountId })),
-    },
-    prepare: async ({ cfg, accountId, prompter }) => {
-      if (isSlackSetupAccountConfigured(resolveSlackAccount({ cfg, accountId }))) {
-        return;
-      }
-      const manifest = buildSlackManifest();
-      if (prompter.plain) {
-        await prompter.plain(manifest);
-      } else {
-        await prompter.note(manifest, "Slack manifest JSON");
-      }
     },
     envShortcut: {
       prompt: "SLACK_BOT_TOKEN + SLACK_APP_TOKEN detected. Use env vars?",

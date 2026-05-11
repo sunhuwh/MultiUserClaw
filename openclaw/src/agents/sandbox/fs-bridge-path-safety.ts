@@ -1,17 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { PathAliasPolicy } from "../../infra/path-alias-guards.js";
-import { openRootFile, type RootFileOpenResult } from "./fs-bridge-path-safety.runtime.js";
+import type { SafeOpenSyncAllowedType } from "../../infra/safe-open-sync.js";
+import { openBoundaryFile, type BoundaryFileOpenResult } from "./fs-bridge-path-safety.runtime.js";
 import type { SandboxResolvedFsPath, SandboxFsMount } from "./fs-paths.js";
 import { isPathInsideContainerRoot, normalizeContainerPath } from "./path-utils.js";
-
-type BoundaryAllowedType = "file" | "directory";
 
 export type PathSafetyOptions = {
   action: string;
   aliasPolicy?: PathAliasPolicy;
   requireWritable?: boolean;
-  allowedType?: BoundaryAllowedType;
+  allowedType?: SafeOpenSyncAllowedType;
 };
 
 export type PathSafetyCheck = {
@@ -70,7 +69,7 @@ export class SandboxFsPathGuard {
 
   async openReadableFile(
     target: SandboxResolvedFsPath,
-  ): Promise<RootFileOpenResult & { ok: true }> {
+  ): Promise<BoundaryFileOpenResult & { ok: true }> {
     const opened = await this.openBoundaryWithinRequiredMount(target, "read files");
     if (!opened.ok) {
       throw opened.error instanceof Error
@@ -111,7 +110,7 @@ export class SandboxFsPathGuard {
   private async assertGuardedPathSafety(
     target: SandboxResolvedFsPath,
     options: PathSafetyOptions,
-    guarded: RootFileOpenResult,
+    guarded: BoundaryFileOpenResult,
   ) {
     if (!guarded.ok) {
       if (guarded.reason !== "path") {
@@ -146,11 +145,11 @@ export class SandboxFsPathGuard {
     action: string,
     options?: {
       aliasPolicy?: PathAliasPolicy;
-      allowedType?: BoundaryAllowedType;
+      allowedType?: SafeOpenSyncAllowedType;
     },
-  ): Promise<RootFileOpenResult> {
+  ): Promise<BoundaryFileOpenResult> {
     const lexicalMount = this.resolveRequiredMount(target.containerPath, action);
-    const guarded = await openRootFile({
+    const guarded = await openBoundaryFile({
       absolutePath: target.hostPath,
       rootPath: lexicalMount.hostRoot,
       boundaryLabel: "sandbox mount root",

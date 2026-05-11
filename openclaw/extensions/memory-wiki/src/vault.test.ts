@@ -24,8 +24,7 @@ describe("initializeMemoryWikiVault", () => {
     expect(result.created).toBe(true);
     await Promise.all(
       WIKI_VAULT_DIRECTORIES.map(async (relativeDir) => {
-        const dirStat = await fs.stat(path.join(rootDir, relativeDir));
-        expect(dirStat.isDirectory()).toBe(true);
+        await expect(fs.stat(path.join(rootDir, relativeDir))).resolves.toBeTruthy();
       }),
     );
     await expect(fs.readFile(path.join(rootDir, "AGENTS.md"), "utf8")).resolves.toContain(

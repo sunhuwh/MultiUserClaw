@@ -4,7 +4,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { formatErrorMessage } from "../src/infra/errors.ts";
-import { writePackageDistInventory } from "../src/infra/package-dist-inventory.ts";
+
+const skipPrepackPreparedEnv = "OPENCLAW_PREPACK_PREPARED";
 const requiredPreparedPathGroups = [
   ["dist/index.js", "dist/index.mjs"],
   ["dist/control-ui/index.html"],
@@ -18,6 +19,14 @@ type PreparedFileReader = {
 
 function normalizeFiles(files: Iterable<string>): Set<string> {
   return new Set(Array.from(files, (file) => file.replace(/\\/g, "/")));
+}
+
+export function shouldSkipPrepack(env = process.env): boolean {
+  const raw = env[skipPrepackPreparedEnv];
+  if (!raw) {
+    return false;
+  }
+  return !/^(0|false)$/i.test(raw);
 }
 
 export function collectPreparedPrepackErrors(
@@ -73,7 +82,9 @@ function ensurePreparedArtifacts(): void {
     const preparedFiles = collectPreparedFilePaths();
     const errors = collectPreparedPrepackErrors(preparedFiles.files, preparedFiles.assets);
     if (errors.length === 0) {
-      console.error("prepack: using existing prepared artifacts.");
+      console.error(
+        `prepack: using prepared artifacts from ${skipPrepackPreparedEnv}; skipping rebuild.`,
+      );
       return;
     }
     for (const error of errors) {
@@ -85,7 +96,7 @@ function ensurePreparedArtifacts(): void {
   }
 
   console.error(
-    "prepack: requires an existing build and Control UI bundle. Run `pnpm build && pnpm ui:build` before packing or publishing.",
+    `prepack: ${skipPrepackPreparedEnv}=1 requires an existing build and Control UI bundle. Run \`pnpm build && pnpm ui:build\` first or unset ${skipPrepackPreparedEnv}.`,
   );
   process.exit(1);
 }
@@ -105,19 +116,18 @@ function runBuildSmoke(): void {
   run(process.execPath, ["scripts/test-built-bundled-channel-entry-smoke.mjs"]);
 }
 
-async function writeDistInventory(): Promise<void> {
-  await writePackageDistInventory(process.cwd());
-}
-
-async function main(): Promise<void> {
+function main(): void {
   const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+  if (shouldSkipPrepack()) {
+    ensurePreparedArtifacts();
+    runBuildSmoke();
+    return;
+  }
   run(pnpmCommand, ["build"]);
   run(pnpmCommand, ["ui:build"]);
-  ensurePreparedArtifacts();
-  await writeDistInventory();
   runBuildSmoke();
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  await main();
+  main();
 }

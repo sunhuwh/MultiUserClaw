@@ -1,5 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchRemoteEmbeddingVectors } from "./embeddings-remote-fetch.js";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const postJsonMock = vi.hoisted(() => vi.fn());
 
@@ -7,7 +6,15 @@ vi.mock("./post-json.js", () => ({
   postJson: postJsonMock,
 }));
 
+type EmbeddingsRemoteFetchModule = typeof import("./embeddings-remote-fetch.js");
+
+let fetchRemoteEmbeddingVectors: EmbeddingsRemoteFetchModule["fetchRemoteEmbeddingVectors"];
+
 describe("fetchRemoteEmbeddingVectors", () => {
+  beforeAll(async () => {
+    ({ fetchRemoteEmbeddingVectors } = await import("./embeddings-remote-fetch.js"));
+  });
+
   beforeEach(() => {
     postJsonMock.mockReset();
   });
@@ -27,11 +34,14 @@ describe("fetchRemoteEmbeddingVectors", () => {
     });
 
     expect(vectors).toEqual([[0.1, 0.2], [], [0.3]]);
-    const postJsonParams = postJsonMock.mock.calls[0]?.[0];
-    expect(postJsonParams?.url).toBe("https://memory.example/v1/embeddings");
-    expect(postJsonParams?.headers).toEqual({ Authorization: "Bearer test" });
-    expect(postJsonParams?.body).toEqual({ input: ["one", "two", "three"] });
-    expect(postJsonParams?.errorPrefix).toBe("embedding fetch failed");
+    expect(postJsonMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://memory.example/v1/embeddings",
+        headers: { Authorization: "Bearer test" },
+        body: { input: ["one", "two", "three"] },
+        errorPrefix: "embedding fetch failed",
+      }),
+    );
   });
 
   it("throws a status-rich error on non-ok responses", async () => {

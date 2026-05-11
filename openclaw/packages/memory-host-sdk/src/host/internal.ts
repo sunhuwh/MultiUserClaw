@@ -2,35 +2,18 @@ import crypto from "node:crypto";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { CANONICAL_ROOT_MEMORY_FILENAME } from "./config-utils.js";
+import { detectMime } from "../../../../src/media/mime.js";
+import { CHARS_PER_TOKEN_ESTIMATE, estimateStringChars } from "../../../../src/utils/cjk-chars.js";
+import { runTasksWithConcurrency } from "../../../../src/utils/run-with-concurrency.js";
 import { estimateStructuredEmbeddingInputBytes } from "./embedding-input-limits.js";
 import { buildTextEmbeddingInput, type EmbeddingInput } from "./embedding-inputs.js";
-import {
-  isFileMissingError,
-  readRegularFile,
-  statRegularFile,
-  walkDirectory,
-  type WalkDirectoryEntry,
-} from "./fs-utils.js";
+import { isFileMissingError } from "./fs-utils.js";
 import {
   buildMemoryMultimodalLabel,
   classifyMemoryMultimodalPath,
   type MemoryMultimodalModality,
   type MemoryMultimodalSettings,
 } from "./multimodal.js";
-import {
-  CHARS_PER_TOKEN_ESTIMATE,
-  detectMime,
-  estimateStringChars,
-  runTasksWithConcurrency,
-} from "./openclaw-runtime-io.js";
-import {
-  resolveCanonicalRootMemoryFile,
-  shouldSkipRootMemoryAuxiliaryPath,
-} from "./openclaw-runtime-memory.js";
-
-export { hashText } from "./hash.js";
-import { hashText } from "./hash.js";
 
 export type MemoryFileEntry = {
   path: string;
@@ -94,7 +77,7 @@ export function isMemoryPath(relPath: string): boolean {
   if (!normalized) {
     return false;
   }
-  if (normalized === CANONICAL_ROOT_MEMORY_FILENAME || normalized.toLowerCase() === "dreams.md") {
+  if (normalized === "MEMORY.md" || normalized === "memory.md" || normalized === "dreams.md") {
     return true;
   }
   return normalized.startsWith("memory/");
@@ -109,31 +92,25 @@ function isAllowedMemoryFilePath(filePath: string, multimodal?: MemoryMultimodal
   );
 }
 
-function shouldDescendMemoryEntry(
-  entry: WalkDirectoryEntry,
-  shouldSkipPath?: (absPath: string) => boolean,
-): boolean {
-  if (shouldSkipPath?.(entry.path)) {
-    return false;
+async function walkDir(dir: string, files: string[], multimodal?: MemoryMultimodalSettings) {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isSymbolicLink()) {
+      continue;
+    }
+    if (entry.isDirectory()) {
+      await walkDir(full, files, multimodal);
+      continue;
+    }
+    if (!entry.isFile()) {
+      continue;
+    }
+    if (!isAllowedMemoryFilePath(full, multimodal)) {
+      continue;
+    }
+    files.push(full);
   }
-  return entry.kind === "directory" && entry.name !== ".openclaw-repair";
-}
-
-async function collectMemoryFilesFromDir(
-  dir: string,
-  files: string[],
-  multimodal?: MemoryMultimodalSettings,
-  shouldSkipPath?: (absPath: string) => boolean,
-): Promise<void> {
-  const scan = await walkDirectory(dir, {
-    symlinks: "skip",
-    descend: (entry) => shouldDescendMemoryEntry(entry, shouldSkipPath),
-    include: (entry) =>
-      !shouldSkipPath?.(entry.path) &&
-      entry.kind === "file" &&
-      isAllowedMemoryFilePath(entry.path, multimodal),
-  });
-  files.push(...scan.entries.map((entry) => entry.path));
 }
 
 export async function listMemoryFiles(
@@ -142,15 +119,14 @@ export async function listMemoryFiles(
   multimodal?: MemoryMultimodalSettings,
 ): Promise<string[]> {
   const result: string[] = [];
+  const memoryFile = path.join(workspaceDir, "MEMORY.md");
+  const altMemoryFile = path.join(workspaceDir, "memory.md");
   const memoryDir = path.join(workspaceDir, "memory");
-
-  const shouldSkipWorkspaceMemoryPath = (absPath: string): boolean =>
-    shouldSkipRootMemoryAuxiliaryPath({ workspaceDir, absPath });
 
   const addMarkdownFile = async (absPath: string) => {
     try {
-      const stat = await statRegularFile(absPath);
-      if (stat.missing) {
+      const stat = await fs.lstat(absPath);
+      if (stat.isSymbolicLink() || !stat.isFile()) {
         return;
       }
       if (!absPath.endsWith(".md")) {
@@ -160,35 +136,25 @@ export async function listMemoryFiles(
     } catch {}
   };
 
-  const memoryFile = await resolveCanonicalRootMemoryFile(workspaceDir);
-  if (memoryFile) {
-    await addMarkdownFile(memoryFile);
-  }
+  await addMarkdownFile(memoryFile);
+  await addMarkdownFile(altMemoryFile);
   try {
     const dirStat = await fs.lstat(memoryDir);
     if (!dirStat.isSymbolicLink() && dirStat.isDirectory()) {
-      await collectMemoryFilesFromDir(memoryDir, result, multimodal, shouldSkipWorkspaceMemoryPath);
+      await walkDir(memoryDir, result);
     }
   } catch {}
 
   const normalizedExtraPaths = normalizeExtraMemoryPaths(workspaceDir, extraPaths);
   if (normalizedExtraPaths.length > 0) {
     for (const inputPath of normalizedExtraPaths) {
-      if (shouldSkipWorkspaceMemoryPath(inputPath)) {
-        continue;
-      }
       try {
         const stat = await fs.lstat(inputPath);
         if (stat.isSymbolicLink()) {
           continue;
         }
         if (stat.isDirectory()) {
-          await collectMemoryFilesFromDir(
-            inputPath,
-            result,
-            multimodal,
-            shouldSkipWorkspaceMemoryPath,
-          );
+          await walkDir(inputPath, result, multimodal);
           continue;
         }
         if (stat.isFile() && isAllowedMemoryFilePath(inputPath, multimodal)) {
@@ -216,16 +182,24 @@ export async function listMemoryFiles(
   return deduped;
 }
 
+export function hashText(value: string): string {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
 export async function buildFileEntry(
   absPath: string,
   workspaceDir: string,
   multimodal?: MemoryMultimodalSettings,
 ): Promise<MemoryFileEntry | null> {
-  const regularFile = await statRegularFile(absPath);
-  if (regularFile.missing) {
-    return null;
+  let stat;
+  try {
+    stat = await fs.stat(absPath);
+  } catch (err) {
+    if (isFileMissingError(err)) {
+      return null;
+    }
+    throw err;
   }
-  const stat = regularFile.stat;
   const normalizedPath = path.relative(workspaceDir, absPath).replace(/\\/g, "/");
   const multimodalSettings = multimodal ?? DISABLED_MULTIMODAL_SETTINGS;
   const modality = classifyMemoryMultimodalPath(absPath, multimodalSettings);
@@ -235,12 +209,7 @@ export async function buildFileEntry(
     }
     let buffer: Buffer;
     try {
-      buffer = (
-        await readRegularFile({
-          filePath: absPath,
-          maxBytes: multimodalSettings.maxFileBytes,
-        })
-      ).buffer;
+      buffer = await fs.readFile(absPath);
     } catch (err) {
       if (isFileMissingError(err)) {
         return null;
@@ -276,7 +245,7 @@ export async function buildFileEntry(
   }
   let content: string;
   try {
-    content = (await readRegularFile({ filePath: absPath })).buffer.toString("utf-8");
+    content = await fs.readFile(absPath, "utf-8");
   } catch (err) {
     if (isFileMissingError(err)) {
       return null;
@@ -303,17 +272,21 @@ async function loadMultimodalEmbeddingInput(
   if (entry.kind !== "multimodal" || !entry.contentText || !entry.mimeType) {
     return null;
   }
-  const regularFile = await statRegularFile(entry.absPath);
-  if (regularFile.missing) {
-    return null;
+  let stat;
+  try {
+    stat = await fs.stat(entry.absPath);
+  } catch (err) {
+    if (isFileMissingError(err)) {
+      return null;
+    }
+    throw err;
   }
-  const stat = regularFile.stat;
   if (stat.size !== entry.size) {
     return null;
   }
   let buffer: Buffer;
   try {
-    buffer = (await readRegularFile({ filePath: entry.absPath, maxBytes: entry.size })).buffer;
+    buffer = await fs.readFile(entry.absPath);
   } catch (err) {
     if (isFileMissingError(err)) {
       return null;
@@ -415,7 +388,7 @@ export function chunkMarkdown(
       }
     }
     current = kept;
-    currentChars = acc;
+    currentChars = kept.reduce((sum, entry) => sum + estimateStringChars(entry.line) + 1, 0);
   };
 
   for (let i = 0; i < lines.length; i += 1) {

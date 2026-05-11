@@ -7,12 +7,16 @@ let registerSlackMemberEvents: typeof import("./members.js").registerSlackMember
 let initSlackHarness: typeof import("./system-event-test-harness.js").createSlackSystemEventTestHarness;
 type MemberOverrides = import("./system-event-test-harness.js").SlackSystemEventTestOverrides;
 
-vi.mock("openclaw/plugin-sdk/system-event-runtime", () => ({
-  enqueueSystemEvent: (...args: unknown[]) => memberMocks.enqueue(...args),
-}));
-vi.mock("openclaw/plugin-sdk/system-event-runtime.js", () => ({
-  enqueueSystemEvent: (...args: unknown[]) => memberMocks.enqueue(...args),
-}));
+async function createChannelRuntimeMock() {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/infra-runtime")>(
+    "openclaw/plugin-sdk/infra-runtime",
+  );
+  return { ...actual, enqueueSystemEvent: memberMocks.enqueue };
+}
+
+vi.mock("openclaw/plugin-sdk/infra-runtime", createChannelRuntimeMock);
+vi.mock("openclaw/plugin-sdk/infra-runtime.js", createChannelRuntimeMock);
+
 type MemberHandler = (args: { event: Record<string, unknown>; body: unknown }) => Promise<void>;
 
 type MemberCaseArgs = {
@@ -58,10 +62,8 @@ async function runMemberCase(args: MemberCaseArgs = {}): Promise<void> {
   });
   const key = args.handler ?? "joined";
   const handler = handlers[key];
-  if (!handler) {
-    throw new Error(`expected Slack member ${key} handler`);
-  }
-  await handler({
+  expect(handler).toBeTruthy();
+  await handler!({
     event: (args.event ?? makeMemberEvent()) as Record<string, unknown>,
     body: args.body ?? {},
   });

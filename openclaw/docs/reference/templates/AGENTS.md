@@ -1,6 +1,6 @@
 ---
+title: "AGENTS.md Template"
 summary: "Workspace template for AGENTS.md"
-title: "AGENTS.md template"
 read_when:
   - Bootstrapping a workspace manually
 ---
@@ -15,19 +15,14 @@ If `BOOTSTRAP.md` exists, that's your birth certificate. Follow it, figure out w
 
 ## Session Startup
 
-Use runtime-provided startup context first.
+Before doing anything else:
 
-That context may already include:
+1. Read `SOUL.md` — this is who you are
+2. Read `USER.md` — this is who you're helping
+3. Read `memory/YYYY-MM-DD.md` (today + yesterday) for recent context
+4. **If in MAIN SESSION** (direct chat with your human): Also read `MEMORY.md`
 
-- `AGENTS.md`, `SOUL.md`, and `USER.md`
-- recent daily memory such as `memory/YYYY-MM-DD.md`
-- `MEMORY.md` when this is the main session
-
-Do not manually reread startup files unless:
-
-1. The user explicitly asks
-2. The provided context is missing something you need
-3. You need a deeper follow-up read beyond the provided startup context
+Don't ask permission. Just do it.
 
 ## Memory
 
@@ -94,7 +89,7 @@ In group chats where you receive every message, be **smart about when to contrib
 - Correcting important misinformation
 - Summarizing when asked
 
-**Stay silent when:**
+**Stay silent (HEARTBEAT_OK) when:**
 
 - It's just casual banter between humans
 - Someone already answered the question
@@ -219,7 +214,3 @@ The goal: Be helpful without being annoying. Check in a few times a day, do usef
 ## Make It Yours
 
 This is a starting point. Add your own conventions, style, and rules as you figure out what works.
-
-## Related
-
-- [Default AGENTS.md](/reference/AGENTS.default)

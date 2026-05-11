@@ -12,7 +12,7 @@ import {
   createLoggedPairingApprovalNotifier,
   createPairingPrefixStripper,
 } from "openclaw/plugin-sdk/channel-pairing";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { buildPassiveProbedChannelStatusSummary } from "openclaw/plugin-sdk/extension-shared";
 import {
   createComputedAccountStatusAdapter,
@@ -29,7 +29,7 @@ import {
   resolveTwitchAccountContext,
   resolveTwitchSnapshotAccountId,
 } from "./config.js";
-import { twitchMessageAdapter, twitchOutbound } from "./outbound.js";
+import { twitchOutbound } from "./outbound.js";
 import { probeTwitch } from "./probe.js";
 import { resolveTwitchTargets } from "./resolver.js";
 import { twitchSetupAdapter, twitchSetupWizard } from "./setup-surface.js";
@@ -78,7 +78,6 @@ export const twitchPlugin: ChannelPlugin<ResolvedTwitchAccount> =
       capabilities: {
         chatTypes: ["group"],
       },
-      message: twitchMessageAdapter,
       configSchema: buildChannelConfigSchema(TwitchConfigSchema),
       config: {
         listAccountIds: (cfg: OpenClawConfig): string[] => listAccountIds(cfg),

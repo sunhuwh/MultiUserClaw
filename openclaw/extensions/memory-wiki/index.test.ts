@@ -5,7 +5,7 @@ import { createMemoryWikiTestHarness } from "./src/test-helpers.js";
 const { createPluginApi } = createMemoryWikiTestHarness();
 
 describe("memory-wiki plugin", () => {
-  it("registers prompt supplement, gateway methods, tools, and wiki cli surface", () => {
+  it("registers prompt supplement, gateway methods, tools, and wiki cli surface", async () => {
     const {
       api,
       registerCli,
@@ -15,15 +15,12 @@ describe("memory-wiki plugin", () => {
       registerTool,
     } = createPluginApi();
 
-    plugin.register(api);
+    await plugin.register(api);
 
     expect(registerMemoryCorpusSupplement).toHaveBeenCalledTimes(1);
     expect(registerMemoryPromptSupplement).toHaveBeenCalledTimes(1);
     expect(registerGatewayMethod.mock.calls.map((call) => call[0])).toEqual([
       "wiki.status",
-      "wiki.importRuns",
-      "wiki.importInsights",
-      "wiki.palace",
       "wiki.init",
       "wiki.doctor",
       "wiki.compile",
@@ -49,13 +46,12 @@ describe("memory-wiki plugin", () => {
       "wiki_get",
     ]);
     expect(registerCli).toHaveBeenCalledTimes(1);
-    expect(registerCli.mock.calls[0]?.[1]).toStrictEqual({
+    expect(registerCli.mock.calls[0]?.[1]).toMatchObject({
       descriptors: [
-        {
+        expect.objectContaining({
           name: "wiki",
-          description: "Inspect and initialize the memory wiki vault",
           hasSubcommands: true,
-        },
+        }),
       ],
     });
   });

@@ -12,21 +12,20 @@ type JsonLike =
     };
 
 type BoundTaskFlow = ReturnType<
-  NonNullable<OpenClawPluginApi["runtime"]>["tasks"]["managedFlows"]["bindSession"]
+  NonNullable<OpenClawPluginApi["runtime"]>["taskFlow"]["bindSession"]
 >;
 
 type FlowRecord = ReturnType<BoundTaskFlow["createManaged"]>;
 type MutationResult = ReturnType<BoundTaskFlow["setWaiting"]>;
 
-type LobsterApprovalWaitState = {
+export type LobsterApprovalWaitState = {
   kind: "lobster_approval";
   prompt: string;
   items: JsonLike[];
   resumeToken?: string;
-  approvalId?: string;
 };
 
-type RunManagedLobsterFlowParams = {
+export type RunManagedLobsterFlowParams = {
   taskFlow: BoundTaskFlow;
   runner: LobsterRunner;
   runnerParams: LobsterRunnerParams;
@@ -37,13 +36,14 @@ type RunManagedLobsterFlowParams = {
   waitingStep?: string;
 };
 
-type ResumeManagedLobsterFlowParams = {
+export type ResumeManagedLobsterFlowParams = {
   taskFlow: BoundTaskFlow;
   runner: LobsterRunner;
   runnerParams: LobsterRunnerParams & {
     action: "resume";
+    token: string;
     approve: boolean;
-  } & ({ token: string } | { approvalId: string });
+  };
   flowId: string;
   expectedRevision: number;
   currentStep?: string;
@@ -119,9 +119,6 @@ function buildApprovalWaitState(envelope: Extract<LobsterEnvelope, { ok: true }>
     items: envelope.requiresApproval.items.map((item) => toJsonLike(item)),
     ...(envelope.requiresApproval.resumeToken
       ? { resumeToken: envelope.requiresApproval.resumeToken }
-      : {}),
-    ...(envelope.requiresApproval.approvalId
-      ? { approvalId: envelope.requiresApproval.approvalId }
       : {}),
   } satisfies LobsterApprovalWaitState;
 }

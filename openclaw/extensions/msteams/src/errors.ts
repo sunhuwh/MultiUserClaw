@@ -1,6 +1,4 @@
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+import { isRecord } from "./attachments/shared.js";
 
 export function formatUnknownError(err: unknown): string {
   if (err instanceof Error) {
@@ -149,15 +147,9 @@ function extractRetryAfterMs(err: unknown): number | null {
   return null;
 }
 
-type MSTeamsSendErrorKind =
-  | "auth"
-  | "throttled"
-  | "transient"
-  | "permanent"
-  | "network"
-  | "unknown";
+export type MSTeamsSendErrorKind = "auth" | "throttled" | "transient" | "permanent" | "unknown";
 
-type MSTeamsSendErrorClassification = {
+export type MSTeamsSendErrorClassification = {
   kind: MSTeamsSendErrorKind;
   statusCode?: number;
   retryAfterMs?: number;
@@ -210,21 +202,6 @@ export function classifyMSTeamsSendError(err: unknown): MSTeamsSendErrorClassifi
     return { kind: "permanent", statusCode, errorCode };
   }
 
-  // Transport-level errors (no HTTP status code) — check for well-known
-  // network error codes that indicate egress is blocked (#77674).
-  if (statusCode == null) {
-    const networkCode = isRecord(err) && typeof err.code === "string" ? err.code : null;
-    if (
-      networkCode === "ECONNREFUSED" ||
-      networkCode === "ENOTFOUND" ||
-      networkCode === "EHOSTUNREACH" ||
-      networkCode === "ETIMEDOUT" ||
-      networkCode === "ECONNRESET"
-    ) {
-      return { kind: "network", errorCode: networkCode };
-    }
-  }
-
   return {
     kind: "unknown",
     statusCode: statusCode ?? undefined,
@@ -262,9 +239,6 @@ export function formatMSTeamsSendErrorHint(
   }
   if (classification.kind === "transient") {
     return "transient Teams/Bot Framework error; retry may succeed";
-  }
-  if (classification.kind === "network") {
-    return "transport-level failure sending reply to Teams Bot Connector (smba.trafficmanager.net) — check egress firewall rules allow outbound HTTPS to smba.trafficmanager.net";
   }
   return undefined;
 }

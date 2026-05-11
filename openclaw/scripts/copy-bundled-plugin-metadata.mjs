@@ -1,12 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { NON_PACKAGED_BUNDLED_PLUGIN_DIRS } from "./lib/bundled-plugin-build-entries.mjs";
 import { shouldBuildBundledCluster } from "./lib/optional-bundled-clusters.mjs";
-import {
-  mergeGeneratedChannelConfigs,
-  readGeneratedBundledChannelConfigs,
-} from "./lib/plugin-npm-package-manifest.mjs";
 import {
   removeFileIfExists,
   removePathIfExists,
@@ -16,13 +11,6 @@ import {
 const GENERATED_BUNDLED_SKILLS_DIR = "bundled-skills";
 const TRANSIENT_COPY_ERROR_CODES = new Set(["EEXIST", "ENOENT", "ENOTEMPTY", "EBUSY"]);
 const COPY_RETRY_DELAYS_MS = [10, 25, 50];
-
-function shouldCopyBundledPluginMetadata(id, env) {
-  if (!NON_PACKAGED_BUNDLED_PLUGIN_DIRS.has(id)) {
-    return true;
-  }
-  return env.OPENCLAW_BUILD_PRIVATE_QA === "1";
-}
 
 export function rewritePackageExtensions(entries) {
   if (!Array.isArray(entries)) {
@@ -195,11 +183,6 @@ function copyDeclaredPluginSkillPaths(params) {
     const shouldExcludeNestedNodeModules = /^node_modules(?:\/|$)/u.test(
       normalizeManifestRelativePath(raw),
     );
-    if (shouldExcludeNestedNodeModules) {
-      removePathIfExists(
-        ensurePathInsideRoot(params.distPluginDir, normalizeManifestRelativePath(raw)),
-      );
-    }
     copySkillPathWithRetry({
       sourcePath,
       targetPath,
@@ -237,7 +220,6 @@ export function copyBundledPluginMetadata(params = {}) {
     return;
   }
 
-  const generatedChannelConfigsByPlugin = readGeneratedBundledChannelConfigs(repoRoot);
   const sourcePluginDirs = new Set();
   for (const dirent of fs.readdirSync(extensionsRoot, { withFileTypes: true })) {
     if (!dirent.isDirectory()) {
@@ -252,10 +234,6 @@ export function copyBundledPluginMetadata(params = {}) {
       ? JSON.parse(fs.readFileSync(packageJsonPath, "utf8"))
       : undefined;
     const topLevelPublicSurfaceEntries = collectTopLevelPublicSurfaceEntries(pluginDir);
-    if (!shouldCopyBundledPluginMetadata(dirent.name, env)) {
-      removePathIfExists(distPluginDir);
-      continue;
-    }
     if (!shouldBuildBundledCluster(dirent.name, env, { packageJson })) {
       removePathIfExists(distPluginDir);
       continue;
@@ -280,21 +258,19 @@ export function copyBundledPluginMetadata(params = {}) {
 
     if (fs.existsSync(manifestPath)) {
       const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-      const manifestWithGeneratedChannelConfigs = mergeGeneratedChannelConfigs(
-        manifest,
-        generatedChannelConfigsByPlugin.get(manifest.id),
-      );
-      // Generated skill assets live under a dedicated dist-owned directory.
+      // Generated skill assets live under a dedicated dist-owned directory. Also
+      // remove the older bad node_modules tree so release packs cannot pick it up.
       removePathIfExists(path.join(distPluginDir, GENERATED_BUNDLED_SKILLS_DIR));
+      removePathIfExists(path.join(distPluginDir, "node_modules"));
       const copiedSkills = copyDeclaredPluginSkillPaths({
-        manifest: manifestWithGeneratedChannelConfigs,
+        manifest,
         pluginDir,
         distPluginDir,
         repoRoot,
       });
-      const bundledManifest = Array.isArray(manifestWithGeneratedChannelConfigs.skills)
-        ? { ...manifestWithGeneratedChannelConfigs, skills: copiedSkills }
-        : manifestWithGeneratedChannelConfigs;
+      const bundledManifest = Array.isArray(manifest.skills)
+        ? { ...manifest, skills: copiedSkills }
+        : manifest;
       writeTextFileIfChanged(distManifestPath, `${JSON.stringify(bundledManifest, null, 2)}\n`);
     } else {
       removeFileIfExists(distManifestPath);

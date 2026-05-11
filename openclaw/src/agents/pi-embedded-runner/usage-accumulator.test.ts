@@ -7,49 +7,32 @@ import {
   toNormalizedUsage,
 } from "./usage-accumulator.js";
 
-type UsageInput = NonNullable<Parameters<typeof mergeUsageIntoAccumulator>[1]>;
-
-const FIRST_USAGE: UsageInput = {
-  input: 100,
-  output: 50,
-  cacheRead: 80_000,
-  cacheWrite: 5_000,
-  total: 85_150,
-};
-
-const SECOND_USAGE: UsageInput = {
-  input: 120,
-  output: 30,
-  cacheRead: 82_000,
-  cacheWrite: 0,
-  total: 82_150,
-};
-
-const FINAL_USAGE: UsageInput = {
-  input: 150,
-  output: 40,
-  cacheRead: 84_000,
-  cacheWrite: 0,
-  total: 84_190,
-};
-
-function createAccumulatorWithUsage(...usages: UsageInput[]) {
-  const acc = createUsageAccumulator();
-  for (const usage of usages) {
-    mergeUsageIntoAccumulator(acc, usage);
-  }
-  return acc;
-}
-
-const emptyAccumulatorCases = [
-  { name: "toNormalizedUsage", resolve: toNormalizedUsage },
-  { name: "toLastCallUsage", resolve: toLastCallUsage },
-];
-
 describe("usage-accumulator", () => {
   describe("mergeUsageIntoAccumulator", () => {
     it("accumulates usage across multiple API calls", () => {
-      const acc = createAccumulatorWithUsage(FIRST_USAGE, SECOND_USAGE, FINAL_USAGE);
+      const acc = createUsageAccumulator();
+
+      mergeUsageIntoAccumulator(acc, {
+        input: 100,
+        output: 50,
+        cacheRead: 80_000,
+        cacheWrite: 5_000,
+        total: 85_150,
+      });
+      mergeUsageIntoAccumulator(acc, {
+        input: 120,
+        output: 30,
+        cacheRead: 82_000,
+        cacheWrite: 0,
+        total: 82_150,
+      });
+      mergeUsageIntoAccumulator(acc, {
+        input: 150,
+        output: 40,
+        cacheRead: 84_000,
+        cacheWrite: 0,
+        total: 84_190,
+      });
 
       expect(acc.input).toBe(370);
       expect(acc.output).toBe(120);
@@ -59,7 +42,22 @@ describe("usage-accumulator", () => {
     });
 
     it("stores the exact final call snapshot", () => {
-      const acc = createAccumulatorWithUsage(FIRST_USAGE, FINAL_USAGE);
+      const acc = createUsageAccumulator();
+
+      mergeUsageIntoAccumulator(acc, {
+        input: 100,
+        output: 50,
+        cacheRead: 80_000,
+        cacheWrite: 5_000,
+        total: 85_150,
+      });
+      mergeUsageIntoAccumulator(acc, {
+        input: 150,
+        output: 40,
+        cacheRead: 84_000,
+        cacheWrite: 0,
+        total: 84_190,
+      });
 
       expect(acc.lastInput).toBe(150);
       expect(acc.lastOutput).toBe(40);
@@ -84,16 +82,11 @@ describe("usage-accumulator", () => {
     });
   });
 
-  describe("empty accumulator", () => {
-    it.each(emptyAccumulatorCases)(
-      "$name returns undefined for an empty accumulator",
-      ({ resolve }) => {
-        expect(resolve(createUsageAccumulator())).toBeUndefined();
-      },
-    );
-  });
-
   describe("toNormalizedUsage", () => {
+    it("returns undefined for an empty accumulator", () => {
+      expect(toNormalizedUsage(createUsageAccumulator())).toBeUndefined();
+    });
+
     it("returns accumulated totals for billing", () => {
       const acc = createUsageAccumulator();
 
@@ -141,7 +134,22 @@ describe("usage-accumulator", () => {
 
   describe("toLastCallUsage", () => {
     it("returns the exact final call snapshot", () => {
-      const acc = createAccumulatorWithUsage(FIRST_USAGE, FINAL_USAGE);
+      const acc = createUsageAccumulator();
+
+      mergeUsageIntoAccumulator(acc, {
+        input: 100,
+        output: 50,
+        cacheRead: 80_000,
+        cacheWrite: 5_000,
+        total: 85_150,
+      });
+      mergeUsageIntoAccumulator(acc, {
+        input: 150,
+        output: 40,
+        cacheRead: 84_000,
+        cacheWrite: 0,
+        total: 84_190,
+      });
 
       expect(toLastCallUsage(acc)).toEqual({
         input: 150,
@@ -150,6 +158,10 @@ describe("usage-accumulator", () => {
         cacheWrite: undefined,
         total: 84_190,
       });
+    });
+
+    it("returns undefined for an empty accumulator", () => {
+      expect(toLastCallUsage(createUsageAccumulator())).toBeUndefined();
     });
   });
 
@@ -185,7 +197,14 @@ describe("usage-accumulator", () => {
     });
 
     it("falls back to the accumulator when assistant usage is missing", () => {
-      const acc = createAccumulatorWithUsage(FINAL_USAGE);
+      const acc = createUsageAccumulator();
+      mergeUsageIntoAccumulator(acc, {
+        input: 150,
+        output: 40,
+        cacheRead: 84_000,
+        cacheWrite: 0,
+        total: 84_190,
+      });
 
       expect(resolveLastCallUsage(undefined, acc)).toEqual({
         input: 150,
@@ -197,7 +216,14 @@ describe("usage-accumulator", () => {
     });
 
     it("falls back when assistant usage exists but is unusable", () => {
-      const acc = createAccumulatorWithUsage(FINAL_USAGE);
+      const acc = createUsageAccumulator();
+      mergeUsageIntoAccumulator(acc, {
+        input: 150,
+        output: 40,
+        cacheRead: 84_000,
+        cacheWrite: 0,
+        total: 84_190,
+      });
 
       expect(resolveLastCallUsage({ responseId: "abc" } as never, acc)).toEqual({
         input: 150,
@@ -209,7 +235,14 @@ describe("usage-accumulator", () => {
     });
 
     it("keeps an explicit zero-usage raw snapshot instead of falling back", () => {
-      const acc = createAccumulatorWithUsage(FINAL_USAGE);
+      const acc = createUsageAccumulator();
+      mergeUsageIntoAccumulator(acc, {
+        input: 150,
+        output: 40,
+        cacheRead: 84_000,
+        cacheWrite: 0,
+        total: 84_190,
+      });
 
       expect(
         resolveLastCallUsage(

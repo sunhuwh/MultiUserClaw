@@ -1,14 +1,5 @@
-// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { extractQueryTerms, filterSessionsByQuery, parseToolSummary } from "./usage-helpers.ts";
-
-function requireFirstTool(tools: Array<[string, number]>): [string, number] {
-  const tool = tools[0];
-  if (!tool) {
-    throw new Error("expected parsed tool summary entry");
-  }
-  return tool;
-}
 
 describe("usage-helpers", () => {
   it("tokenizes query terms including quoted strings", () => {
@@ -36,10 +27,8 @@ describe("usage-helpers", () => {
   it("warns on unknown keys and invalid numbers", () => {
     const session = { key: "a", usage: { totalTokens: 10, totalCost: 0 } };
     const res = filterSessionsByQuery([session], "wat:1 minTokens:wat");
-    expect(res.warnings).toEqual([
-      expect.stringContaining("Unknown filter"),
-      expect.stringContaining("Invalid number"),
-    ]);
+    expect(res.warnings.some((w) => w.includes("Unknown filter"))).toBe(true);
+    expect(res.warnings.some((w) => w.includes("Invalid number"))).toBe(true);
   });
 
   it("parses tool summaries from compact session logs", () => {
@@ -48,8 +37,7 @@ describe("usage-helpers", () => {
     );
     expect(res.summary).toContain("read");
     expect(res.summary).toContain("exec");
-    const firstTool = requireFirstTool(res.tools);
-    expect(firstTool[0]).toBe("read");
-    expect(firstTool[1]).toBe(2);
+    expect(res.tools[0]?.[0]).toBe("read");
+    expect(res.tools[0]?.[1]).toBe(2);
   });
 });

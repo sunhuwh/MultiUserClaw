@@ -4,18 +4,8 @@ import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
 } from "../../shared/string-coerce.js";
-import {
-  resolveTrajectoryFilePath,
-  resolveTrajectoryPointerFilePath,
-} from "../../trajectory/paths.js";
-import {
-  isCompactionCheckpointTranscriptFileName,
-  isPrimarySessionTranscriptFileName,
-  isSessionArchiveArtifactName,
-  isTrajectorySessionArtifactName,
-} from "./artifacts.js";
+import { isPrimarySessionTranscriptFileName, isSessionArchiveArtifactName } from "./artifacts.js";
 import { resolveSessionFilePath } from "./paths.js";
-import { isProtectedSessionMaintenanceEntry } from "./store-maintenance.js";
 import type { SessionEntry } from "./types.js";
 
 export type SessionDiskBudgetConfig = {
@@ -32,13 +22,6 @@ export type SessionDiskBudgetSweepResult = {
   maxBytes: number;
   highWaterBytes: number;
   overBudget: boolean;
-};
-
-export type SessionUnreferencedArtifactSweepResult = {
-  scannedFiles: number;
-  removedFiles: number;
-  freedBytes: number;
-  olderThanMs: number;
 };
 
 export type SessionDiskBudgetLogger = {
@@ -132,58 +115,18 @@ function resolveSessionTranscriptPathForEntry(params: {
   }
 }
 
-function resolveSessionArtifactPathsForEntry(params: {
-  sessionsDir: string;
-  entry: SessionEntry;
-}): string[] {
-  const transcriptPath = resolveSessionTranscriptPathForEntry(params);
-  if (!transcriptPath) {
-    return [];
-  }
-  const paths = [transcriptPath];
-  if (params.entry.sessionId) {
-    paths.push(resolveTrajectoryPointerFilePath(transcriptPath));
-    paths.push(
-      resolveTrajectoryFilePath({
-        env: {},
-        sessionFile: transcriptPath,
-        sessionId: params.entry.sessionId,
-      }),
-    );
-  }
-  return paths;
-}
-
-export function resolveSessionArtifactCanonicalPathsForEntry(params: {
-  sessionsDir: string;
-  entry: SessionEntry;
-}): string[] {
-  return resolveSessionArtifactPathsForEntry(params).map(canonicalizePathForComparison);
-}
-
-function resolveReferencedSessionArtifactPaths(params: {
+function resolveReferencedSessionTranscriptPaths(params: {
   sessionsDir: string;
   store: Record<string, SessionEntry>;
 }): Set<string> {
   const referenced = new Set<string>();
-  const resolvedSessionsDir = canonicalizePathForComparison(params.sessionsDir);
   for (const entry of Object.values(params.store)) {
-    for (const resolved of resolveSessionArtifactCanonicalPathsForEntry({
+    const resolved = resolveSessionTranscriptPathForEntry({
       sessionsDir: params.sessionsDir,
       entry,
-    })) {
-      referenced.add(resolved);
-    }
-    for (const checkpoint of entry.compactionCheckpoints ?? []) {
-      const checkpointFile = checkpoint.preCompaction.sessionFile?.trim();
-      if (!checkpointFile) {
-        continue;
-      }
-      const resolvedCheckpointPath = canonicalizePathForComparison(checkpointFile);
-      const relative = path.relative(resolvedSessionsDir, resolvedCheckpointPath);
-      if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) {
-        referenced.add(resolvedCheckpointPath);
-      }
+    });
+    if (resolved) {
+      referenced.add(canonicalizePathForComparison(resolved));
     }
   }
   return referenced;
@@ -214,30 +157,6 @@ async function readSessionsDirFiles(sessionsDir: string): Promise<SessionsDirFil
   return files;
 }
 
-function isUnreferencedSessionArtifactFile(
-  file: Pick<SessionsDirFileStat, "canonicalPath" | "name">,
-  referencedPaths: ReadonlySet<string>,
-): boolean {
-  if (referencedPaths.has(file.canonicalPath)) {
-    return false;
-  }
-  return (
-    isCompactionCheckpointTranscriptFileName(file.name) ||
-    isTrajectorySessionArtifactName(file.name) ||
-    isPrimarySessionTranscriptFileName(file.name)
-  );
-}
-
-function isDiskBudgetRemovableSessionFile(
-  file: Pick<SessionsDirFileStat, "canonicalPath" | "name">,
-  referencedPaths: ReadonlySet<string>,
-): boolean {
-  return (
-    isSessionArchiveArtifactName(file.name) ||
-    isUnreferencedSessionArtifactFile(file, referencedPaths)
-  );
-}
-
 async function removeFileIfExists(filePath: string): Promise<number> {
   const stat = await fs.promises.stat(filePath).catch(() => null);
   if (!stat?.isFile()) {
@@ -253,7 +172,6 @@ async function removeFileForBudget(params: {
   dryRun: boolean;
   fileSizesByPath: Map<string, number>;
   simulatedRemovedPaths: Set<string>;
-  onRemovedPath?: (canonicalPath: string) => void;
 }): Promise<number> {
   const resolvedPath = path.resolve(params.filePath);
   const canonicalPath = params.canonicalPath ?? canonicalizePathForComparison(resolvedPath);
@@ -266,66 +184,9 @@ async function removeFileForBudget(params: {
       return 0;
     }
     params.simulatedRemovedPaths.add(canonicalPath);
-    params.onRemovedPath?.(canonicalPath);
     return size;
   }
-  const size = await removeFileIfExists(resolvedPath);
-  if (size > 0) {
-    params.onRemovedPath?.(canonicalPath);
-  }
-  return size;
-}
-
-export async function pruneUnreferencedSessionArtifacts(params: {
-  store: Record<string, SessionEntry>;
-  storePath: string;
-  olderThanMs: number;
-  dryRun?: boolean;
-  excludeCanonicalPaths?: ReadonlySet<string>;
-}): Promise<SessionUnreferencedArtifactSweepResult> {
-  const olderThanMs =
-    Number.isFinite(params.olderThanMs) && params.olderThanMs > 0 ? params.olderThanMs : 0;
-  const sessionsDir = path.dirname(params.storePath);
-  const files = await readSessionsDirFiles(sessionsDir);
-  const fileSizesByPath = new Map(files.map((file) => [file.canonicalPath, file.size]));
-  const simulatedRemovedPaths = new Set<string>();
-  const referencedPaths = resolveReferencedSessionArtifactPaths({
-    sessionsDir,
-    store: params.store,
-  });
-  const cutoffMs = Date.now() - olderThanMs;
-  const removableFiles = files
-    .filter(
-      (file) =>
-        !params.excludeCanonicalPaths?.has(file.canonicalPath) &&
-        file.mtimeMs <= cutoffMs &&
-        isUnreferencedSessionArtifactFile(file, referencedPaths),
-    )
-    .toSorted((a, b) => a.mtimeMs - b.mtimeMs);
-
-  let removedFiles = 0;
-  let freedBytes = 0;
-  for (const file of removableFiles) {
-    const deletedBytes = await removeFileForBudget({
-      filePath: file.path,
-      canonicalPath: file.canonicalPath,
-      dryRun: params.dryRun === true,
-      fileSizesByPath,
-      simulatedRemovedPaths,
-    });
-    if (deletedBytes <= 0) {
-      continue;
-    }
-    removedFiles += 1;
-    freedBytes += deletedBytes;
-  }
-
-  return {
-    scannedFiles: files.length,
-    removedFiles,
-    freedBytes,
-    olderThanMs,
-  };
+  return removeFileIfExists(resolvedPath);
 }
 
 export async function enforceSessionDiskBudget(params: {
@@ -336,7 +197,6 @@ export async function enforceSessionDiskBudget(params: {
   warnOnly: boolean;
   dryRun?: boolean;
   log?: SessionDiskBudgetLogger;
-  onRemoveFile?: (canonicalPath: string) => void;
 }): Promise<SessionDiskBudgetSweepResult | null> {
   const maxBytes = params.maintenance.maxDiskBytes;
   const highWaterBytes = params.maintenance.highWaterBytes;
@@ -391,12 +251,16 @@ export async function enforceSessionDiskBudget(params: {
   let removedEntries = 0;
   let freedBytes = 0;
 
-  const referencedPaths = resolveReferencedSessionArtifactPaths({
+  const referencedPaths = resolveReferencedSessionTranscriptPaths({
     sessionsDir,
     store: params.store,
   });
   const removableFileQueue = files
-    .filter((file) => isDiskBudgetRemovableSessionFile(file, referencedPaths))
+    .filter(
+      (file) =>
+        isSessionArchiveArtifactName(file.name) ||
+        (isPrimarySessionTranscriptFileName(file.name) && !referencedPaths.has(file.canonicalPath)),
+    )
     .toSorted((a, b) => a.mtimeMs - b.mtimeMs);
   for (const file of removableFileQueue) {
     if (total <= highWaterBytes) {
@@ -408,7 +272,6 @@ export async function enforceSessionDiskBudget(params: {
       dryRun,
       fileSizesByPath,
       simulatedRemovedPaths,
-      onRemovedPath: params.onRemoveFile,
     });
     if (deletedBytes <= 0) {
       continue;
@@ -438,9 +301,6 @@ export async function enforceSessionDiskBudget(params: {
       if (!entry) {
         continue;
       }
-      if (isProtectedSessionMaintenanceEntry(key, entry)) {
-        continue;
-      }
       const previousProjectedBytes = projectedStoreBytes;
       delete params.store[key];
       const chunkBytes = entryChunkBytesByKey.get(key);
@@ -464,21 +324,22 @@ export async function enforceSessionDiskBudget(params: {
         continue;
       }
       sessionIdRefCounts.delete(sessionId);
-      for (const artifactPath of resolveSessionArtifactPathsForEntry({ sessionsDir, entry })) {
-        const deletedBytes = await removeFileForBudget({
-          filePath: artifactPath,
-          dryRun,
-          fileSizesByPath,
-          simulatedRemovedPaths,
-          onRemovedPath: params.onRemoveFile,
-        });
-        if (deletedBytes <= 0) {
-          continue;
-        }
-        total -= deletedBytes;
-        freedBytes += deletedBytes;
-        removedFiles += 1;
+      const transcriptPath = resolveSessionTranscriptPathForEntry({ sessionsDir, entry });
+      if (!transcriptPath) {
+        continue;
       }
+      const deletedBytes = await removeFileForBudget({
+        filePath: transcriptPath,
+        dryRun,
+        fileSizesByPath,
+        simulatedRemovedPaths,
+      });
+      if (deletedBytes <= 0) {
+        continue;
+      }
+      total -= deletedBytes;
+      freedBytes += deletedBytes;
+      removedFiles += 1;
     }
   }
 

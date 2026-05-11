@@ -69,7 +69,7 @@ describe("filterContainerGenericHints", () => {
         ],
         { OPENCLAW_CONTAINER: "openclaw-demo-container" } as NodeJS.ProcessEnv,
       ),
-    ).toStrictEqual([]);
+    ).toEqual([]);
   });
 
   it("drops the generic container foreground hint when OPENCLAW_CONTAINER_HINT is set", () => {
@@ -81,6 +81,6 @@ describe("filterContainerGenericHints", () => {
         ],
         { OPENCLAW_CONTAINER_HINT: "openclaw-demo-container" } as NodeJS.ProcessEnv,
       ),
-    ).toStrictEqual([]);
+    ).toEqual([]);
   });
 });

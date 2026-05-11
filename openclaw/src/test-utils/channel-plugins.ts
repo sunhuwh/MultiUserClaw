@@ -4,7 +4,7 @@ import type {
   ChannelMessagingAdapter,
   ChannelOutboundAdapter,
   ChannelPlugin,
-} from "../channels/plugins/types.public.js";
+} from "../channels/plugins/types.js";
 import type { PluginRegistry } from "../plugins/registry.js";
 
 export type TestChannelRegistration = {
@@ -26,7 +26,6 @@ export const createTestRegistry = (channels: TestChannelRegistration[] = []): Pl
     enabled: true,
   })),
   providers: [],
-  modelCatalogProviders: [],
   speechProviders: [],
   realtimeTranscriptionProviders: [],
   realtimeVoiceProviders: [],
@@ -36,11 +35,7 @@ export const createTestRegistry = (channels: TestChannelRegistration[] = []): Pl
   musicGenerationProviders: [],
   webFetchProviders: [],
   webSearchProviders: [],
-  migrationProviders: [],
-  codexAppServerExtensionFactories: [],
-  agentToolResultMiddlewares: [],
   memoryEmbeddingProviders: [],
-  textTransforms: [],
   agentHarnesses: [],
   gatewayHandlers: {},
   gatewayMethodScopes: {},
@@ -50,7 +45,6 @@ export const createTestRegistry = (channels: TestChannelRegistration[] = []): Pl
   nodeHostCommands: [],
   securityAuditCollectors: [],
   services: [],
-  gatewayDiscoveryServices: [],
   commands: [],
   conversationBindingResolvedHandlers: [],
   diagnostics: [],

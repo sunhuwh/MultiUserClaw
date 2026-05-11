@@ -9,16 +9,16 @@ import {
 import { normalizeGroupActivation } from "../auto-reply/group-activation.js";
 import {
   formatThinkingLevels,
-  isThinkingLevelSupported,
+  formatXHighModelHint,
   normalizeElevatedLevel,
   normalizeFastMode,
   normalizeReasoningLevel,
   normalizeThinkLevel,
   normalizeUsageDisplay,
-  resolveSupportedThinkingLevel,
+  supportsXHighThinking,
 } from "../auto-reply/thinking.js";
+import type { OpenClawConfig } from "../config/config.js";
 import type { SessionEntry } from "../config/sessions.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { normalizeExecTarget } from "../infra/exec-approvals.js";
 import {
   isAcpSessionKey,
@@ -26,12 +26,7 @@ import {
   normalizeAgentId,
   parseAgentSessionKey,
 } from "../routing/session-key.js";
-import {
-  applyTraceOverride,
-  applyVerboseOverride,
-  parseTraceOverride,
-  parseVerboseOverride,
-} from "../sessions/level-overrides.js";
+import { applyVerboseOverride, parseVerboseOverride } from "../sessions/level-overrides.js";
 import { applyModelOverrideToSessionEntry } from "../sessions/model-overrides.js";
 import { normalizeSendPolicy } from "../sessions/send-policy.js";
 import { parseSessionLabel } from "../sessions/session-label.js";
@@ -101,18 +96,6 @@ export async function applySessionsPatchToStore(params: {
   const subagentModelHint = isSubagentSessionKey(storeKey)
     ? resolveSubagentConfiguredModelSelection({ cfg, agentId: sessionAgentId })
     : undefined;
-  let loadedModelCatalog: ModelCatalogEntry[] | undefined;
-  const loadModelCatalogForPatch = async () => {
-    if (loadedModelCatalog) {
-      return loadedModelCatalog;
-    }
-    if (!params.loadGatewayModelCatalog) {
-      return undefined;
-    }
-    const catalog = await params.loadGatewayModelCatalog();
-    loadedModelCatalog = Array.isArray(catalog) ? catalog : [];
-    return loadedModelCatalog;
-  };
 
   const existing = store[storeKey];
   const next: SessionEntry = existing
@@ -260,9 +243,8 @@ export async function applySessionsPatchToStore(params: {
         const hintProvider =
           normalizeOptionalString(existing?.providerOverride) || resolvedDefault.provider;
         const hintModel = normalizeOptionalString(existing?.modelOverride) || resolvedDefault.model;
-        const thinkingCatalog = await loadModelCatalogForPatch();
         return invalid(
-          `invalid thinkingLevel (use ${formatThinkingLevels(hintProvider, hintModel, "|", thinkingCatalog)})`,
+          `invalid thinkingLevel (use ${formatThinkingLevels(hintProvider, hintModel, "|")})`,
         );
       }
       next.thinkingLevel = normalized;
@@ -289,15 +271,6 @@ export async function applySessionsPatchToStore(params: {
       return invalid(parsed.error);
     }
     applyVerboseOverride(next, parsed.value);
-  }
-
-  if ("traceLevel" in patch) {
-    const raw = patch.traceLevel;
-    const parsed = parseTraceOverride(raw);
-    if (!parsed.ok) {
-      return invalid(parsed.error);
-    }
-    applyTraceOverride(next, parsed.value);
   }
 
   if ("reasoningLevel" in patch) {
@@ -421,13 +394,7 @@ export async function applySessionsPatchToStore(params: {
           error: errorShape(ErrorCodes.UNAVAILABLE, "model catalog unavailable"),
         };
       }
-      const catalog = await loadModelCatalogForPatch();
-      if (!catalog) {
-        return {
-          ok: false,
-          error: errorShape(ErrorCodes.UNAVAILABLE, "model catalog unavailable"),
-        };
-      }
+      const catalog = await params.loadGatewayModelCatalog();
       const resolved = resolveAllowedModelRef({
         cfg,
         catalog,
@@ -453,32 +420,14 @@ export async function applySessionsPatchToStore(params: {
     }
   }
 
-  if (next.thinkingLevel) {
+  if (next.thinkingLevel === "xhigh") {
     const effectiveProvider = next.providerOverride ?? resolvedDefault.provider;
     const effectiveModel = next.modelOverride ?? resolvedDefault.model;
-    const thinkingLevel = normalizeThinkLevel(next.thinkingLevel);
-    const thinkingCatalog = await loadModelCatalogForPatch();
-    if (!thinkingLevel) {
-      delete next.thinkingLevel;
-    } else if (
-      !isThinkingLevelSupported({
-        provider: effectiveProvider,
-        model: effectiveModel,
-        level: thinkingLevel,
-        catalog: thinkingCatalog,
-      })
-    ) {
+    if (!supportsXHighThinking(effectiveProvider, effectiveModel)) {
       if ("thinkingLevel" in patch) {
-        return invalid(
-          `thinkingLevel "${thinkingLevel}" is not supported for ${effectiveProvider}/${effectiveModel} (use ${formatThinkingLevels(effectiveProvider, effectiveModel, "|", thinkingCatalog)})`,
-        );
+        return invalid(`thinkingLevel "xhigh" is only supported for ${formatXHighModelHint()}`);
       }
-      next.thinkingLevel = resolveSupportedThinkingLevel({
-        provider: effectiveProvider,
-        model: effectiveModel,
-        level: thinkingLevel,
-        catalog: thinkingCatalog,
-      });
+      next.thinkingLevel = "high";
     }
   }
 

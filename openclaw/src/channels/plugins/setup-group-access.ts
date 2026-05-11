@@ -3,7 +3,7 @@ import type { WizardPrompter } from "../../wizard/prompts.js";
 export type ChannelAccessPolicy = "allowlist" | "open" | "disabled";
 
 export function parseAllowlistEntries(raw: string): string[] {
-  return raw
+  return String(raw ?? "")
     .split(/[\n,;]+/g)
     .map((entry) => entry.trim())
     .filter(Boolean);

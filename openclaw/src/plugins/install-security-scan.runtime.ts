@@ -1,7 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { tryReadJson } from "../infra/json-files.js";
-import { resolveOpenClawPackageRootSync } from "../infra/openclaw-root.js";
 import { extensionUsesSkippedScannerPath, isPathInside } from "../security/scan-paths.js";
 import { scanDirectoryWithSummary } from "../security/skill-scanner.js";
 import {
@@ -13,7 +11,7 @@ import {
 } from "./dependency-denylist.js";
 import { getGlobalHookRunner } from "./hook-runner-global.js";
 import { createBeforeInstallHookPayload } from "./install-policy-context.js";
-import type { InstallSafetyOverrides } from "./install-security-scan.types.js";
+import type { InstallSafetyOverrides } from "./install-security-scan.js";
 
 type InstallScanLogger = {
   warn?: (message: string) => void;
@@ -72,24 +70,7 @@ type PluginInstallRequestKind =
   | "plugin-dir"
   | "plugin-archive"
   | "plugin-file"
-  | "plugin-npm"
-  | "plugin-git";
-
-type SkillInstallSpec = {
-  id?: string;
-  kind: "brew" | "node" | "go" | "uv" | "download";
-  label?: string;
-  bins?: string[];
-  os?: string[];
-  formula?: string;
-  package?: string;
-  module?: string;
-  url?: string;
-  archive?: string;
-  extract?: boolean;
-  stripComponents?: number;
-  targetDir?: string;
-};
+  | "plugin-npm";
 
 export type InstallSecurityScanResult = {
   blocked?: {
@@ -178,71 +159,10 @@ function pathContainsNodeModulesSegment(relativePath: string): boolean {
     .includes("node_modules");
 }
 
-function isPackageRootOpenClawPeerSymlink(segments: string[]): boolean {
-  return (
-    (segments.length === 2 && segments[0] === "node_modules" && segments[1] === "openclaw") ||
-    (segments.length === 3 &&
-      segments[0] === "node_modules" &&
-      segments[1] === ".bin" &&
-      segments[2] === "openclaw")
-  );
-}
-
-function isManagedNpmRootPackagePeerSymlink(segments: string[]): boolean {
-  if (segments[0] !== "node_modules") {
-    return false;
-  }
-  const packageEndIndex = segments[1]?.startsWith("@") ? 3 : 2;
-  const packageNameSegments = segments.slice(1, packageEndIndex);
-  if (
-    packageNameSegments.length === 0 ||
-    packageNameSegments.some((segment) => !segment || segment === "." || segment === "..")
-  ) {
-    return false;
-  }
-  return isPackageRootOpenClawPeerSymlink(segments.slice(packageEndIndex));
-}
-
-function isTrustedOpenClawPeerSymlink(params: {
-  allowManagedNpmRootPackagePeerSymlinks?: boolean;
-  relativePath: string;
-}): boolean {
-  const segments = params.relativePath.split(/[\\/]+/);
-  return (
-    isPackageRootOpenClawPeerSymlink(segments) ||
-    (params.allowManagedNpmRootPackagePeerSymlinks === true &&
-      isManagedNpmRootPackagePeerSymlink(segments))
-  );
-}
-
-async function resolveTrustedHostOpenClawRootRealPath(): Promise<string | null> {
-  const hostRoot = resolveOpenClawPackageRootSync({
-    argv1: process.argv[1],
-    cwd: process.cwd(),
-    moduleUrl: import.meta.url,
-  });
-  if (!hostRoot) {
-    return null;
-  }
-  return await fs.realpath(hostRoot).catch(() => path.resolve(hostRoot));
-}
-
-function isTrustedHostOpenClawPath(params: {
-  resolvedTargetPath: string;
-  trustedHostOpenClawRootRealPath: string | null;
-}): boolean {
-  return (
-    params.trustedHostOpenClawRootRealPath !== null &&
-    isPathInside(params.trustedHostOpenClawRootRealPath, params.resolvedTargetPath)
-  );
-}
-
 async function inspectNodeModulesSymlinkTarget(params: {
-  allowManagedNpmRootPackagePeerSymlinks?: boolean;
   rootRealPath: string;
   symlinkPath: string;
   symlinkRelativePath: string;
-  trustedHostOpenClawRootRealPath: string | null;
 }): Promise<
   Pick<PackageManifestTraversalResult, "blockedDirectoryFinding" | "blockedFileFinding">
 > {
@@ -259,21 +179,6 @@ async function inspectNodeModulesSymlinkTarget(params: {
   }
 
   if (!isPathInside(params.rootRealPath, resolvedTargetPath)) {
-    // Workspace package managers can leave peer links back to the OpenClaw host
-    // package. Trust only the exact peer-link shapes and only when the resolved
-    // target stays inside the host package root.
-    if (
-      isTrustedOpenClawPeerSymlink({
-        allowManagedNpmRootPackagePeerSymlinks: params.allowManagedNpmRootPackagePeerSymlinks,
-        relativePath: params.symlinkRelativePath,
-      }) &&
-      isTrustedHostOpenClawPath({
-        resolvedTargetPath,
-        trustedHostOpenClawRootRealPath: params.trustedHostOpenClawRootRealPath,
-      })
-    ) {
-      return {};
-    }
     throw new Error(
       `manifest dependency scan found node_modules symlink target outside install root at ${params.symlinkRelativePath}`,
     );
@@ -360,14 +265,11 @@ function resolvePackageManifestTraversalLimits(): PackageManifestTraversalLimits
   };
 }
 
-async function collectPackageManifestPaths(params: {
-  allowManagedNpmRootPackagePeerSymlinks?: boolean;
-  rootDir: string;
-}): Promise<PackageManifestTraversalResult> {
+async function collectPackageManifestPaths(
+  rootDir: string,
+): Promise<PackageManifestTraversalResult> {
   const limits = resolvePackageManifestTraversalLimits();
-  const rootDir = params.rootDir;
   const rootRealPath = await fs.realpath(rootDir).catch(() => rootDir);
-  const trustedHostOpenClawRootRealPath = await resolveTrustedHostOpenClawRootRealPath();
   const queue: Array<{ depth: number; dir: string }> = [{ depth: 0, dir: rootDir }];
   const packageManifestPaths: string[] = [];
   const visitedDirectories = new Set<string>();
@@ -434,11 +336,9 @@ async function collectPackageManifestPaths(params: {
         }
         if (pathContainsNodeModulesSegment(relativeNextPath)) {
           const symlinkTargetInspection = await inspectNodeModulesSymlinkTarget({
-            allowManagedNpmRootPackagePeerSymlinks: params.allowManagedNpmRootPackagePeerSymlinks,
             rootRealPath,
             symlinkPath: nextPath,
             symlinkRelativePath: relativeNextPath,
-            trustedHostOpenClawRootRealPath,
           });
           if (symlinkTargetInspection.blockedDirectoryFinding) {
             firstBlockedDirectoryFinding ??= symlinkTargetInspection.blockedDirectoryFinding;
@@ -486,19 +386,17 @@ async function collectPackageManifestPaths(params: {
 }
 
 async function scanManifestDependencyDenylist(params: {
-  allowManagedNpmRootPackagePeerSymlinks?: boolean;
   logger: InstallScanLogger;
   packageDir: string;
   targetLabel: string;
 }): Promise<InstallSecurityScanResult | undefined> {
-  const traversalResult = await collectPackageManifestPaths({
-    allowManagedNpmRootPackagePeerSymlinks: params.allowManagedNpmRootPackagePeerSymlinks,
-    rootDir: params.packageDir,
-  });
+  const traversalResult = await collectPackageManifestPaths(params.packageDir);
   const packageManifestPaths = traversalResult.packageManifestPaths;
   for (const manifestPath of packageManifestPaths) {
-    const manifest = await tryReadJson<PackageManifest>(manifestPath);
-    if (!manifest) {
+    let manifest: PackageManifest;
+    try {
+      manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as PackageManifest;
+    } catch {
       continue;
     }
 
@@ -560,20 +458,15 @@ async function scanDirectoryTarget(params: {
   includeFiles?: string[];
   logger: InstallScanLogger;
   path: string;
-  suppressBuiltinWarnings?: boolean;
   suspiciousMessage: string;
   targetName: string;
   warningMessage: string;
 }): Promise<BuiltinInstallScan> {
   try {
     const scanSummary = await scanDirectoryWithSummary(params.path, {
-      excludeTestFiles: true,
       includeFiles: params.includeFiles,
     });
     const builtinScan = buildBuiltinScanFromSummary(scanSummary);
-    if (params.suppressBuiltinWarnings) {
-      return builtinScan;
-    }
     if (scanSummary.critical > 0) {
       params.logger.warn?.(
         `${params.warningMessage}: ${buildCriticalDetails({ findings: scanSummary.findings })}`,
@@ -594,7 +487,6 @@ async function scanDirectoryTarget(params: {
 function buildBlockedScanResult(params: {
   builtinScan: BuiltinInstallScan;
   dangerouslyForceUnsafeInstall?: boolean;
-  trustedSourceLinkedOfficialInstall?: boolean;
   targetLabel: string;
 }): InstallSecurityScanResult | undefined {
   if (params.builtinScan.status === "error") {
@@ -609,7 +501,7 @@ function buildBlockedScanResult(params: {
     };
   }
   if (params.builtinScan.critical > 0) {
-    if (params.dangerouslyForceUnsafeInstall || params.trustedSourceLinkedOfficialInstall) {
+    if (params.dangerouslyForceUnsafeInstall) {
       return undefined;
     }
     return {
@@ -645,7 +537,6 @@ function resolveBuiltinScanDecision(
   const builtinBlocked = buildBlockedScanResult({
     builtinScan: params.builtinScan,
     dangerouslyForceUnsafeInstall: params.dangerouslyForceUnsafeInstall,
-    trustedSourceLinkedOfficialInstall: params.trustedSourceLinkedOfficialInstall,
     targetLabel: params.targetLabel,
   });
   if (params.dangerouslyForceUnsafeInstall && params.builtinScan.critical > 0) {
@@ -690,7 +581,21 @@ async function runBeforeInstallHook(params: {
   builtinScan: BuiltinInstallScan;
   skill?: {
     installId: string;
-    installSpec?: SkillInstallSpec;
+    installSpec?: {
+      id?: string;
+      kind: "brew" | "node" | "go" | "uv" | "download";
+      label?: string;
+      bins?: string[];
+      os?: string[];
+      formula?: string;
+      package?: string;
+      module?: string;
+      url?: string;
+      archive?: string;
+      extract?: boolean;
+      stripComponents?: number;
+      targetDir?: string;
+    };
   };
   plugin?: {
     contentType: "bundle" | "package" | "file";
@@ -844,7 +749,6 @@ export async function scanPackageInstallSourceRuntime(
     includeFiles: forcedScanEntries,
     logger: params.logger,
     path: params.packageDir,
-    suppressBuiltinWarnings: params.trustedSourceLinkedOfficialInstall === true,
     suspiciousMessage: `Plugin "{target}" has {count} suspicious code pattern(s). Run "openclaw security audit --deep" for details.`,
     targetName: params.pluginId,
     warningMessage: `WARNING: Plugin "${params.pluginId}" contains dangerous code patterns`,
@@ -853,7 +757,6 @@ export async function scanPackageInstallSourceRuntime(
     builtinScan,
     logger: params.logger,
     dangerouslyForceUnsafeInstall: params.dangerouslyForceUnsafeInstall,
-    trustedSourceLinkedOfficialInstall: params.trustedSourceLinkedOfficialInstall,
     targetLabel: `Plugin "${params.pluginId}" installation`,
   });
 
@@ -882,7 +785,6 @@ export async function scanPackageInstallSourceRuntime(
 }
 
 export async function scanInstalledPackageDependencyTreeRuntime(params: {
-  allowManagedNpmRootPackagePeerSymlinks?: boolean;
   logger: InstallScanLogger;
   packageDir: string;
   pluginId: string;
@@ -890,7 +792,6 @@ export async function scanInstalledPackageDependencyTreeRuntime(params: {
   return await scanManifestDependencyDenylist({
     logger: params.logger,
     packageDir: params.packageDir,
-    allowManagedNpmRootPackagePeerSymlinks: params.allowManagedNpmRootPackagePeerSymlinks,
     targetLabel: `Plugin "${params.pluginId}" installation`,
   });
 }
@@ -942,7 +843,21 @@ export async function scanFileInstallSourceRuntime(
 export async function scanSkillInstallSourceRuntime(params: {
   dangerouslyForceUnsafeInstall?: boolean;
   installId: string;
-  installSpec?: SkillInstallSpec;
+  installSpec?: {
+    id?: string;
+    kind: "brew" | "node" | "go" | "uv" | "download";
+    label?: string;
+    bins?: string[];
+    os?: string[];
+    formula?: string;
+    package?: string;
+    module?: string;
+    url?: string;
+    archive?: string;
+    extract?: boolean;
+    stripComponents?: number;
+    targetDir?: string;
+  };
   logger: InstallScanLogger;
   origin: string;
   skillName: string;
@@ -959,7 +874,6 @@ export async function scanSkillInstallSourceRuntime(params: {
   const builtinBlocked = buildBlockedScanResult({
     builtinScan,
     dangerouslyForceUnsafeInstall: params.dangerouslyForceUnsafeInstall,
-    trustedSourceLinkedOfficialInstall: false,
     targetLabel: `Skill "${params.skillName}" installation`,
   });
   if (params.dangerouslyForceUnsafeInstall && builtinScan.critical > 0) {

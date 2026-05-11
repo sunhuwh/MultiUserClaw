@@ -1,5 +1,4 @@
 import { stripHeartbeatToken } from "./heartbeat.js";
-import { HEARTBEAT_TRANSCRIPT_PROMPT } from "./heartbeat.js";
 
 const HEARTBEAT_TASK_PROMPT_PREFIX =
   "Run the following periodic tasks (only those due based on their intervals):";
@@ -13,23 +12,24 @@ function resolveMessageText(content: unknown): { text: string; hasNonTextContent
     return { text: "", hasNonTextContent: content != null };
   }
   let hasNonTextContent = false;
-  let text = "";
-  for (const block of content) {
-    if (typeof block !== "object" || block === null || !("type" in block)) {
-      hasNonTextContent = true;
-      continue;
-    }
-    if (block.type !== "text") {
-      hasNonTextContent = true;
-      continue;
-    }
-    const blockText = (block as { text?: unknown }).text;
-    if (typeof blockText !== "string") {
-      hasNonTextContent = true;
-      continue;
-    }
-    text += blockText;
-  }
+  const text = content
+    .filter((block): block is { type: "text"; text: string } => {
+      if (typeof block !== "object" || block === null || !("type" in block)) {
+        hasNonTextContent = true;
+        return false;
+      }
+      if (block.type !== "text") {
+        hasNonTextContent = true;
+        return false;
+      }
+      if (typeof (block as { text?: unknown }).text !== "string") {
+        hasNonTextContent = true;
+        return false;
+      }
+      return true;
+    })
+    .map((block) => block.text)
+    .join("");
   return { text, hasNonTextContent };
 }
 
@@ -46,9 +46,6 @@ export function isHeartbeatUserMessage(
     return false;
   }
   const normalizedHeartbeatPrompt = heartbeatPrompt?.trim();
-  if (trimmed === HEARTBEAT_TRANSCRIPT_PROMPT) {
-    return true;
-  }
   if (normalizedHeartbeatPrompt && trimmed.startsWith(normalizedHeartbeatPrompt)) {
     return true;
   }

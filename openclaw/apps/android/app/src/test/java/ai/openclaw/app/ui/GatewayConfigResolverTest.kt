@@ -1,11 +1,11 @@
 package ai.openclaw.app.ui
 
+import java.util.Base64
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import java.util.Base64
 
 @RunWith(RobolectricTestRunner::class)
 class GatewayConfigResolverTest {
@@ -99,16 +99,33 @@ class GatewayConfigResolverTest {
   }
 
   @Test
-  fun parseGatewayEndpointRejectsPrivateLanCleartextWsUrls() {
+  fun parseGatewayEndpointAllowsPrivateLanCleartextWsUrls() {
     val parsed = parseGatewayEndpoint("ws://192.168.1.20:18789")
-    assertNull(parsed)
+
+    assertEquals(
+      GatewayEndpointConfig(
+        host = "192.168.1.20",
+        port = 18789,
+        tls = false,
+        displayUrl = "http://192.168.1.20:18789",
+      ),
+      parsed,
+    )
   }
 
   @Test
-  fun parseGatewayEndpointRejectsMdnsCleartextWsUrls() {
+  fun parseGatewayEndpointAllowsMdnsCleartextWsUrls() {
     val parsed = parseGatewayEndpoint("ws://gateway.local:18789")
 
-    assertNull(parsed)
+    assertEquals(
+      GatewayEndpointConfig(
+        host = "gateway.local",
+        port = 18789,
+        tls = false,
+        displayUrl = "http://gateway.local:18789",
+      ),
+      parsed,
+    )
   }
 
   @Test
@@ -146,9 +163,13 @@ class GatewayConfigResolverTest {
   }
 
   @Test
-  fun parseGatewayEndpointRejectsLinkLocalIpv6ZoneCleartextWsUrls() {
+  fun parseGatewayEndpointAllowsLinkLocalIpv6ZoneCleartextWsUrls() {
     val parsed = parseGatewayEndpoint("ws://[fe80::1%25eth0]")
-    assertNull(parsed)
+
+    assertEquals("fe80::1%25eth0", parsed?.host)
+    assertEquals(18789, parsed?.port)
+    assertEquals(false, parsed?.tls)
+    assertEquals("http://[fe80::1%25eth0]:18789", parsed?.displayUrl)
   }
 
   @Test
@@ -269,10 +290,19 @@ class GatewayConfigResolverTest {
   }
 
   @Test
-  fun parseGatewayEndpointResultFlagsInsecureLanCleartextGateway() {
+  fun parseGatewayEndpointResultAcceptsLanCleartextGateway() {
     val parsed = parseGatewayEndpointResult("ws://192.168.1.20:18789")
-    assertNull(parsed.config)
-    assertEquals(GatewayEndpointValidationError.INSECURE_REMOTE_URL, parsed.error)
+
+    assertEquals(
+      GatewayEndpointConfig(
+        host = "192.168.1.20",
+        port = 18789,
+        tls = false,
+        displayUrl = "http://192.168.1.20:18789",
+      ),
+      parsed.config,
+    )
+    assertNull(parsed.error)
   }
 
   @Test
@@ -413,7 +443,7 @@ class GatewayConfigResolverTest {
   }
 
   @Test
-  fun resolveGatewayConnectConfigRejectsPrivateLanManualCleartextEndpoint() {
+  fun resolveGatewayConnectConfigAllowsPrivateLanManualCleartextEndpoint() {
     val resolved =
       resolveGatewayConnectConfig(
         useSetupCode = false,
@@ -429,7 +459,9 @@ class GatewayConfigResolverTest {
         fallbackPassword = "",
       )
 
-    assertNull(resolved)
+    assertEquals("192.168.31.100", resolved?.host)
+    assertEquals(18789, resolved?.port)
+    assertEquals(false, resolved?.tls)
   }
 
   @Test
@@ -468,5 +500,7 @@ class GatewayConfigResolverTest {
     assertEquals(true, resolved?.tls)
   }
 
-  private fun encodeSetupCode(payloadJson: String): String = Base64.getUrlEncoder().withoutPadding().encodeToString(payloadJson.toByteArray(Charsets.UTF_8))
+  private fun encodeSetupCode(payloadJson: String): String {
+    return Base64.getUrlEncoder().withoutPadding().encodeToString(payloadJson.toByteArray(Charsets.UTF_8))
+  }
 }

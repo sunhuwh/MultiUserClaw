@@ -1,20 +1,16 @@
 import { spawn } from "node:child_process";
-import path from "node:path";
 import { formatCliCommand } from "../cli/command-format.js";
 import {
-  getRuntimeConfig,
   type OpenClawConfig,
   CONFIG_PATH,
+  loadConfig,
   readConfigFileSnapshot,
-  replaceConfigFile,
   resolveGatewayPort,
   validateConfigObjectWithPlugins,
+  writeConfigFile,
 } from "../config/config.js";
-import { resolveExecutable } from "../infra/executable-path.js";
-import { getWindowsInstallRoots } from "../infra/windows-install-roots.js";
 import { runCommandWithTimeout } from "../process/exec.js";
 import { defaultRuntime } from "../runtime.js";
-import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { displayPath } from "../utils.js";
 import {
   ensureDependency,
@@ -79,38 +75,6 @@ export type GmailRunOptions = GmailCommonOptions & {
 };
 
 const DEFAULT_GMAIL_TOPIC_IAM_MEMBER = "serviceAccount:gmail-api-push@system.gserviceaccount.com";
-let gogBin: string | undefined;
-const WINDOWS_UNSAFE_CMD_CHARS_RE = /[&|<>^%\r\n]/;
-
-function escapeForCmdExe(arg: string): string {
-  if (WINDOWS_UNSAFE_CMD_CHARS_RE.test(arg)) {
-    throw new Error(`Unsafe Windows cmd.exe argument detected: ${JSON.stringify(arg)}`);
-  }
-  if (!arg.includes(" ") && !arg.includes('"')) {
-    return arg;
-  }
-  return `"${arg.replace(/"/g, '""')}"`;
-}
-
-function resolveGogServeInvocation(args: string[]): {
-  args: string[];
-  command: string;
-  windowsHide?: true;
-  windowsVerbatimArguments?: true;
-} {
-  const command = (gogBin ??= resolveExecutable("gog"));
-  const ext = normalizeLowercaseStringOrEmpty(path.extname(command));
-  if (process.platform !== "win32" || (ext !== ".cmd" && ext !== ".bat")) {
-    return { command, args, windowsHide: process.platform === "win32" ? true : undefined };
-  }
-  const cmdExe = path.win32.join(getWindowsInstallRoots().systemRoot, "System32", "cmd.exe");
-  return {
-    command: cmdExe,
-    args: ["/d", "/s", "/c", [command, ...args].map(escapeForCmdExe).join(" ")],
-    windowsHide: true,
-    windowsVerbatimArguments: true,
-  };
-}
 
 export async function runGmailSetup(opts: GmailSetupOptions) {
   await ensureDependency("gcloud", ["--cask", "gcloud-cli"]);
@@ -273,10 +237,7 @@ export async function runGmailSetup(opts: GmailSetupOptions) {
   if (!validated.ok) {
     throw new Error(`Config validation failed: ${validated.issues[0]?.message ?? "invalid"}`);
   }
-  await replaceConfigFile({
-    nextConfig: validated.config,
-    afterWrite: { mode: "auto" },
-  });
+  await writeConfigFile(validated.config);
 
   const summary = {
     projectId,
@@ -310,7 +271,7 @@ export async function runGmailSetup(opts: GmailSetupOptions) {
 
 export async function runGmailService(opts: GmailRunOptions) {
   await ensureDependency("gog", ["gogcli"]);
-  const config = getRuntimeConfig();
+  const config = loadConfig();
 
   const overrides: GmailHookOverrides = {
     account: opts.account,
@@ -394,19 +355,14 @@ export async function runGmailService(opts: GmailRunOptions) {
 function spawnGogServe(cfg: GmailHookRuntimeConfig) {
   const args = buildGogWatchServeArgs(cfg);
   defaultRuntime.log(`Starting gog ${buildGogWatchServeLogArgs(cfg).join(" ")}`);
-  const invocation = resolveGogServeInvocation(args);
-  return spawn(invocation.command, invocation.args, {
-    stdio: "inherit",
-    windowsHide: invocation.windowsHide,
-    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-  });
+  return spawn("gog", args, { stdio: "inherit" });
 }
 
 async function startGmailWatch(
   cfg: Pick<GmailHookRuntimeConfig, "account" | "label" | "topic">,
   fatal = false,
 ) {
-  const args = [(gogBin ??= resolveExecutable("gog")), ...buildGogWatchStartArgs(cfg)];
+  const args = ["gog", ...buildGogWatchStartArgs(cfg)];
   const result = await runCommandWithTimeout(args, { timeoutMs: 120_000 });
   if (result.code !== 0) {
     const message = result.stderr || result.stdout || "gog watch start failed";

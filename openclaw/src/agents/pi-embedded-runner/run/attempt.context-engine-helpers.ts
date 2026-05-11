@@ -1,54 +1,43 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import type { AssistantMessage } from "@mariozechner/pi-ai";
-import type { ContextEngine } from "../../../context-engine/types.js";
-import type { BootstrapMode } from "../../bootstrap-mode.js";
-import { normalizeUsage, type NormalizedUsage } from "../../usage.js";
+import type { MemoryCitationsMode } from "../../../config/types.memory.js";
+import type { ContextEngine, ContextEngineRuntimeContext } from "../../../context-engine/types.js";
+import type { NormalizedUsage } from "../../usage.js";
 import type { PromptCacheChange } from "../prompt-cache-observability.js";
 import type { EmbeddedRunAttemptResult } from "./types.js";
-export {
-  assembleHarnessContextEngine as assembleAttemptContextEngine,
-  bootstrapHarnessContextEngine as runAttemptContextEngineBootstrap,
-  finalizeHarnessContextEngineTurn as finalizeAttemptContextEngineTurn,
-} from "../../harness/context-engine-lifecycle.js";
 
 export type AttemptContextEngine = ContextEngine;
 
-export type AttemptBootstrapContext<TBootstrapFile = unknown, TContextFile = unknown> = {
-  bootstrapFiles: TBootstrapFile[];
-  contextFiles: TContextFile[];
+export type AttemptBootstrapContext = {
+  bootstrapFiles: unknown[];
+  contextFiles: unknown[];
 };
 
-export async function resolveAttemptBootstrapContext<TBootstrapFile, TContextFile>(params: {
-  contextInjectionMode: "always" | "continuation-skip" | "never";
+export async function resolveAttemptBootstrapContext<
+  TContext extends AttemptBootstrapContext,
+>(params: {
+  contextInjectionMode: "always" | "continuation-skip";
   bootstrapContextMode?: string;
   bootstrapContextRunKind?: string;
-  bootstrapMode?: BootstrapMode;
   sessionFile: string;
   hasCompletedBootstrapTurn: (sessionFile: string) => Promise<boolean>;
-  resolveBootstrapContextForRun: () => Promise<
-    AttemptBootstrapContext<TBootstrapFile, TContextFile>
-  >;
+  resolveBootstrapContextForRun: () => Promise<TContext>;
 }): Promise<
-  AttemptBootstrapContext<TBootstrapFile, TContextFile> & {
+  TContext & {
     isContinuationTurn: boolean;
     shouldRecordCompletedBootstrapTurn: boolean;
   }
 > {
   const isContinuationTurn =
-    params.bootstrapMode !== "full" &&
     params.contextInjectionMode === "continuation-skip" &&
     params.bootstrapContextRunKind !== "heartbeat" &&
     (await params.hasCompletedBootstrapTurn(params.sessionFile));
-  const shouldSkipBootstrapInjection =
-    params.contextInjectionMode === "never" || isContinuationTurn;
   const shouldRecordCompletedBootstrapTurn =
-    !shouldSkipBootstrapInjection &&
+    !isContinuationTurn &&
     params.bootstrapContextMode !== "lightweight" &&
-    params.bootstrapContextRunKind !== "heartbeat" &&
-    params.bootstrapMode === "full";
+    params.bootstrapContextRunKind !== "heartbeat";
 
-  const context = shouldSkipBootstrapInjection
-    ? { bootstrapFiles: [], contextFiles: [] }
+  const context = isContinuationTurn
+    ? ({ bootstrapFiles: [], contextFiles: [] } as unknown as TContext)
     : await params.resolveBootstrapContextForRun();
 
   return {
@@ -106,64 +95,178 @@ export function buildContextEnginePromptCacheInfo(params: {
 export function findCurrentAttemptAssistantMessage(params: {
   messagesSnapshot: AgentMessage[];
   prePromptMessageCount: number;
-}): AssistantMessage | undefined {
+}): AgentMessage | undefined {
   return params.messagesSnapshot
     .slice(Math.max(0, params.prePromptMessageCount))
     .toReversed()
-    .find((message): message is AssistantMessage => message.role === "assistant");
+    .find((message) => message.role === "assistant");
 }
 
-function parsePromptCacheTouchTimestamp(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
+export async function runAttemptContextEngineBootstrap(params: {
+  hadSessionFile: boolean;
+  contextEngine?: AttemptContextEngine;
+  sessionId: string;
+  sessionKey?: string;
+  sessionFile: string;
+  sessionManager: unknown;
+  runtimeContext?: ContextEngineRuntimeContext;
+  runMaintenance: (params: {
+    contextEngine?: unknown;
+    sessionId: string;
+    sessionKey?: string;
+    sessionFile: string;
+    reason: "bootstrap";
+    sessionManager: unknown;
+    runtimeContext?: ContextEngineRuntimeContext;
+  }) => Promise<unknown>;
+  warn: (message: string) => void;
+}) {
+  if (
+    !params.hadSessionFile ||
+    !(params.contextEngine?.bootstrap || params.contextEngine?.maintain)
+  ) {
+    return;
   }
-  if (typeof value === "string") {
-    const parsed = Date.parse(value);
-    if (Number.isFinite(parsed)) {
-      return parsed;
+  try {
+    if (typeof params.contextEngine?.bootstrap === "function") {
+      await params.contextEngine.bootstrap({
+        sessionId: params.sessionId,
+        sessionKey: params.sessionKey,
+        sessionFile: params.sessionFile,
+      });
     }
+    await params.runMaintenance({
+      contextEngine: params.contextEngine,
+      sessionId: params.sessionId,
+      sessionKey: params.sessionKey,
+      sessionFile: params.sessionFile,
+      reason: "bootstrap",
+      sessionManager: params.sessionManager,
+      runtimeContext: params.runtimeContext,
+    });
+  } catch (bootstrapErr) {
+    params.warn(`context engine bootstrap failed: ${String(bootstrapErr)}`);
   }
-  return null;
 }
 
-/** Resolve the effective prompt-cache touch timestamp for the current assistant turn. */
-export function resolvePromptCacheTouchTimestamp(params: {
-  lastCallUsage?: NormalizedUsage;
-  assistantTimestamp?: unknown;
-  fallbackLastCacheTouchAt?: number | null;
-}): number | null {
-  const hasCacheUsage =
-    typeof params.lastCallUsage?.cacheRead === "number" ||
-    typeof params.lastCallUsage?.cacheWrite === "number";
-  if (!hasCacheUsage) {
-    return params.fallbackLastCacheTouchAt ?? null;
+export async function assembleAttemptContextEngine(params: {
+  contextEngine?: AttemptContextEngine;
+  sessionId: string;
+  sessionKey?: string;
+  messages: AgentMessage[];
+  tokenBudget?: number;
+  availableTools?: Set<string>;
+  citationsMode?: MemoryCitationsMode;
+  modelId: string;
+  prompt?: string;
+}) {
+  if (!params.contextEngine) {
+    return undefined;
   }
-  return (
-    parsePromptCacheTouchTimestamp(params.assistantTimestamp) ??
-    params.fallbackLastCacheTouchAt ??
-    null
-  );
+  return await params.contextEngine.assemble({
+    sessionId: params.sessionId,
+    sessionKey: params.sessionKey,
+    messages: params.messages,
+    tokenBudget: params.tokenBudget,
+    ...(params.availableTools ? { availableTools: params.availableTools } : {}),
+    ...(params.citationsMode ? { citationsMode: params.citationsMode } : {}),
+    model: params.modelId,
+    ...(params.prompt !== undefined ? { prompt: params.prompt } : {}),
+  });
 }
 
-export function buildLoopPromptCacheInfo(params: {
+export async function finalizeAttemptContextEngineTurn(params: {
+  contextEngine?: AttemptContextEngine;
+  promptError: boolean;
+  aborted: boolean;
+  yieldAborted: boolean;
+  sessionIdUsed: string;
+  sessionKey?: string;
+  sessionFile: string;
   messagesSnapshot: AgentMessage[];
   prePromptMessageCount: number;
-  retention?: "none" | "short" | "long";
-  fallbackLastCacheTouchAt?: number | null;
-}): EmbeddedRunAttemptResult["promptCache"] {
-  const currentAttemptAssistant = findCurrentAttemptAssistantMessage({
-    messagesSnapshot: params.messagesSnapshot,
-    prePromptMessageCount: params.prePromptMessageCount,
-  });
-  const lastCallUsage = normalizeUsage(currentAttemptAssistant?.usage);
+  tokenBudget?: number;
+  runtimeContext?: ContextEngineRuntimeContext;
+  runMaintenance: (params: {
+    contextEngine?: unknown;
+    sessionId: string;
+    sessionKey?: string;
+    sessionFile: string;
+    reason: "turn";
+    sessionManager: unknown;
+    runtimeContext?: ContextEngineRuntimeContext;
+  }) => Promise<unknown>;
+  sessionManager: unknown;
+  warn: (message: string) => void;
+}) {
+  if (!params.contextEngine) {
+    return { postTurnFinalizationSucceeded: true };
+  }
 
-  return buildContextEnginePromptCacheInfo({
-    retention: params.retention,
-    lastCallUsage,
-    lastCacheTouchAt: resolvePromptCacheTouchTimestamp({
-      lastCallUsage,
-      assistantTimestamp: currentAttemptAssistant?.timestamp,
-      fallbackLastCacheTouchAt: params.fallbackLastCacheTouchAt,
-    }),
-  });
+  let postTurnFinalizationSucceeded = true;
+
+  if (typeof params.contextEngine.afterTurn === "function") {
+    try {
+      await params.contextEngine.afterTurn({
+        sessionId: params.sessionIdUsed,
+        sessionKey: params.sessionKey,
+        sessionFile: params.sessionFile,
+        messages: params.messagesSnapshot,
+        prePromptMessageCount: params.prePromptMessageCount,
+        tokenBudget: params.tokenBudget,
+        runtimeContext: params.runtimeContext,
+      });
+    } catch (afterTurnErr) {
+      postTurnFinalizationSucceeded = false;
+      params.warn(`context engine afterTurn failed: ${String(afterTurnErr)}`);
+    }
+  } else {
+    const newMessages = params.messagesSnapshot.slice(params.prePromptMessageCount);
+    if (newMessages.length > 0) {
+      if (typeof params.contextEngine.ingestBatch === "function") {
+        try {
+          await params.contextEngine.ingestBatch({
+            sessionId: params.sessionIdUsed,
+            sessionKey: params.sessionKey,
+            messages: newMessages,
+          });
+        } catch (ingestErr) {
+          postTurnFinalizationSucceeded = false;
+          params.warn(`context engine ingest failed: ${String(ingestErr)}`);
+        }
+      } else {
+        for (const msg of newMessages) {
+          try {
+            await params.contextEngine.ingest?.({
+              sessionId: params.sessionIdUsed,
+              sessionKey: params.sessionKey,
+              message: msg,
+            });
+          } catch (ingestErr) {
+            postTurnFinalizationSucceeded = false;
+            params.warn(`context engine ingest failed: ${String(ingestErr)}`);
+          }
+        }
+      }
+    }
+  }
+
+  if (
+    !params.promptError &&
+    !params.aborted &&
+    !params.yieldAborted &&
+    postTurnFinalizationSucceeded
+  ) {
+    await params.runMaintenance({
+      contextEngine: params.contextEngine,
+      sessionId: params.sessionIdUsed,
+      sessionKey: params.sessionKey,
+      sessionFile: params.sessionFile,
+      reason: "turn",
+      sessionManager: params.sessionManager,
+      runtimeContext: params.runtimeContext,
+    });
+  }
+
+  return { postTurnFinalizationSucceeded };
 }

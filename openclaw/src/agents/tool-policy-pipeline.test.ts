@@ -82,7 +82,7 @@ describe("tool-policy-pipeline", () => {
       label: "tools.profile (coding)",
       suppressUnavailableCoreToolWarningAllowlist: ["apply_patch"],
     });
-    expect(warnings).toStrictEqual([]);
+    expect(warnings).toEqual([]);
   });
 
   test("still warns for profile steps when explicit alsoAllow entries are present", () => {
@@ -127,7 +127,7 @@ describe("tool-policy-pipeline", () => {
       }),
     });
 
-    expect(warnings).toStrictEqual([]);
+    expect(warnings).toEqual([]);
   });
 
   test("dedupes identical unknown-allowlist warnings across repeated runs", () => {

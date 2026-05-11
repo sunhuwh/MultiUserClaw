@@ -15,7 +15,7 @@ describe("collectChannelStatusIssues", () => {
       { id: "telegram", status: { collectStatusIssues: collectTelegramIssues } },
     ]);
 
-    expect(collectChannelStatusIssues({})).toStrictEqual([]);
+    expect(collectChannelStatusIssues({})).toEqual([]);
     expect(collectChannelStatusIssues({ channelAccounts: { telegram: { bad: true } } })).toEqual(
       [],
     );

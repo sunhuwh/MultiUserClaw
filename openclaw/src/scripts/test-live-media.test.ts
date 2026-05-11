@@ -13,17 +13,6 @@ vi.mock("../../src/agents/live-auth-keys.js", () => ({
   collectProviderApiKeys: collectProviderApiKeysMock,
 }));
 
-function requirePlanEntry(
-  plan: ReturnType<typeof import("../../scripts/test-live-media.ts").buildRunPlan>,
-  suiteId: string,
-) {
-  const entry = plan.find((candidate) => candidate.suite.id === suiteId);
-  if (!entry) {
-    throw new Error(`expected ${suiteId} run plan entry`);
-  }
-  return entry;
-}
-
 describe("test-live-media", () => {
   afterEach(() => {
     collectProviderApiKeysMock.mockClear();
@@ -42,15 +31,19 @@ describe("test-live-media", () => {
     const plan = buildRunPlan(parseArgs([]));
 
     expect(plan.map((entry) => entry.suite.id)).toEqual(["image", "music", "video"]);
-    expect(requirePlanEntry(plan, "image").providers).toEqual([
+    expect(plan.find((entry) => entry.suite.id === "image")?.providers).toEqual([
       "fal",
       "google",
       "minimax",
       "openai",
       "vydra",
     ]);
-    expect(requirePlanEntry(plan, "music").providers).toEqual(["google", "minimax"]);
-    expect(requirePlanEntry(plan, "video").providers).toEqual([
+    expect(plan.find((entry) => entry.suite.id === "music")?.providers).toEqual([
+      "google",
+      "minimax",
+    ]);
+    expect(plan.find((entry) => entry.suite.id === "video")?.providers).toEqual([
+      "fal",
       "google",
       "minimax",
       "openai",
@@ -61,13 +54,12 @@ describe("test-live-media", () => {
   it("supports suite-specific provider filters without auth narrowing", async () => {
     const { buildRunPlan, parseArgs } = await import("../../scripts/test-live-media.ts");
     const plan = buildRunPlan(
-      parseArgs(["video", "--video-providers", "fal,openai,runway", "--all-providers"]),
+      parseArgs(["video", "--video-providers", "openai,runway", "--all-providers"]),
     );
 
     expect(plan).toHaveLength(1);
-    const [entry] = plan;
-    expect(entry?.suite.id).toBe("video");
-    expect(entry?.providers).toEqual(["fal", "openai", "runway"]);
+    expect(plan[0]?.suite.id).toBe("video");
+    expect(plan[0]?.providers).toEqual(["openai", "runway"]);
   });
 
   it("forwards quiet flags separately from passthrough args", async () => {

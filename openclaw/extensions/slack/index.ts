@@ -6,7 +6,7 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk/channel-entry-contra
 
 function registerSlackPluginHttpRoutes(api: OpenClawPluginApi): void {
   const register = loadBundledEntryExportSync<(api: OpenClawPluginApi) => void>(import.meta.url, {
-    specifier: "./http-routes-api.js",
+    specifier: "./runtime-api.js",
     exportName: "registerSlackPluginHttpRoutes",
   });
   register(api);
@@ -26,12 +26,8 @@ export default defineBundledChannelEntry({
     exportName: "channelSecrets",
   },
   runtime: {
-    specifier: "./runtime-setter-api.js",
+    specifier: "./runtime-api.js",
     exportName: "setSlackRuntime",
-  },
-  accountInspect: {
-    specifier: "./account-inspect-api.js",
-    exportName: "inspectSlackReadOnlyAccount",
   },
   registerFull: registerSlackPluginHttpRoutes,
 });

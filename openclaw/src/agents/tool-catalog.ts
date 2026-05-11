@@ -17,7 +17,7 @@ type ToolProfilePolicy = {
   deny?: string[];
 };
 
-type CoreToolSection = {
+export type CoreToolSection = {
   id: string;
   label: string;
   tools: Array<{
@@ -208,9 +208,10 @@ const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
   {
     id: "canvas",
     label: "canvas",
-    description: "Control node Canvas surfaces when the Canvas plugin is enabled",
+    description: "Control canvases",
     sectionId: "ui",
     profiles: [],
+    includeInOpenClawGroup: true,
   },
   {
     id: "message",
@@ -218,14 +219,6 @@ const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
     description: "Send messages",
     sectionId: "messaging",
     profiles: ["messaging"],
-    includeInOpenClawGroup: true,
-  },
-  {
-    id: "heartbeat_respond",
-    label: "heartbeat_respond",
-    description: "Record heartbeat outcomes",
-    sectionId: "automation",
-    profiles: [],
     includeInOpenClawGroup: true,
   },
   {
@@ -325,14 +318,12 @@ const CORE_TOOL_PROFILES: Record<ToolProfileId, ToolProfilePolicy> = {
     allow: listCoreToolIdsForProfile("minimal"),
   },
   coding: {
-    allow: [...listCoreToolIdsForProfile("coding"), "bundle-mcp"],
+    allow: listCoreToolIdsForProfile("coding"),
   },
   messaging: {
-    allow: [...listCoreToolIdsForProfile("messaging"), "bundle-mcp"],
+    allow: listCoreToolIdsForProfile("messaging"),
   },
-  full: {
-    allow: ["*"],
-  },
+  full: {},
 };
 
 function buildCoreToolGroupMap() {

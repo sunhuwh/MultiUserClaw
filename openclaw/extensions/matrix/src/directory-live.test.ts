@@ -104,7 +104,7 @@ describe("matrix directory live", () => {
       query: "   ",
     });
 
-    expect(result).toStrictEqual([]);
+    expect(result).toEqual([]);
     expect(resolveMatrixAuth).not.toHaveBeenCalled();
     expect(requestJsonMock).not.toHaveBeenCalled();
   });
@@ -115,7 +115,7 @@ describe("matrix directory live", () => {
       query: "",
     });
 
-    expect(result).toStrictEqual([]);
+    expect(result).toEqual([]);
     expect(resolveMatrixAuth).not.toHaveBeenCalled();
     expect(requestJsonMock).not.toHaveBeenCalled();
   });

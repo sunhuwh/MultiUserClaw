@@ -81,7 +81,7 @@ describe("promptChannelAccessPolicy", () => {
   });
 });
 
-describe("promptChannelAccessConfig policy-only entries", () => {
+describe("promptChannelAccessConfig", () => {
   it("skips the allowlist text prompt when entries are policy-only", async () => {
     const prompter = createPrompter({
       confirm: async () => true,
@@ -101,7 +101,7 @@ describe("promptChannelAccessConfig policy-only entries", () => {
   });
 });
 
-describe("promptChannelAccessConfig skip flow", () => {
+describe("promptChannelAccessConfig", () => {
   it("returns null when user skips configuration", async () => {
     const prompter = createPrompter({
       confirm: async () => false,

@@ -1,24 +1,21 @@
 import fs from "node:fs";
 import path from "node:path";
-import {
-  CANONICAL_ROOT_MEMORY_FILENAME,
-  type MemoryBackend,
-  type MemoryCitationsMode,
-  type MemoryQmdConfig,
-  type MemoryQmdIndexPath,
-  type MemoryQmdMcporterConfig,
-  type MemoryQmdSearchMode,
-  type MemoryQmdStartupMode,
-  type OpenClawConfig,
-  parseDurationMs,
-  resolveAgentWorkspaceDir,
-  normalizeAgentId,
-  resolveUserPath,
-  type SessionSendPolicyConfig,
-  splitShellArgs,
-} from "./config-utils.js";
-import { isPathInside } from "./fs-utils.js";
-import { normalizeLowercaseStringOrEmpty } from "./string-utils.js";
+import { resolveAgentWorkspaceDir } from "../../../../src/agents/agent-scope.js";
+import { parseDurationMs } from "../../../../src/cli/parse-duration.js";
+import type { OpenClawConfig } from "../../../../src/config/config.js";
+import type { SessionSendPolicyConfig } from "../../../../src/config/types.base.js";
+import type {
+  MemoryBackend,
+  MemoryCitationsMode,
+  MemoryQmdConfig,
+  MemoryQmdIndexPath,
+  MemoryQmdMcporterConfig,
+  MemoryQmdSearchMode,
+} from "../../../../src/config/types.memory.js";
+import { normalizeAgentId } from "../../../../src/routing/session-key.js";
+import { normalizeLowercaseStringOrEmpty } from "../../../../src/shared/string-coerce.js";
+import { resolveUserPath } from "../../../../src/utils.js";
+import { splitShellArgs } from "../../../../src/utils/shell-argv.js";
 
 export type ResolvedMemoryBackendConfig = {
   backend: MemoryBackend;
@@ -37,8 +34,6 @@ export type ResolvedQmdUpdateConfig = {
   intervalMs: number;
   debounceMs: number;
   onBoot: boolean;
-  startup: MemoryQmdStartupMode;
-  startupDelayMs: number;
   waitForBootSync: boolean;
   embedIntervalMs: number;
   commandTimeoutMs: number;
@@ -86,16 +81,14 @@ const DEFAULT_QMD_TIMEOUT_MS = 4_000;
 // Defaulting to `query` can be extremely slow on CPU-only systems (query expansion + rerank).
 // Prefer a faster mode for interactive use; users can opt into `query` for best recall.
 const DEFAULT_QMD_SEARCH_MODE: MemoryQmdSearchMode = "search";
-const DEFAULT_QMD_STARTUP: MemoryQmdStartupMode = "off";
-const DEFAULT_QMD_STARTUP_DELAY_MS = 120_000;
 const DEFAULT_QMD_EMBED_INTERVAL = "60m";
 const DEFAULT_QMD_COMMAND_TIMEOUT_MS = 30_000;
 const DEFAULT_QMD_UPDATE_TIMEOUT_MS = 120_000;
 const DEFAULT_QMD_EMBED_TIMEOUT_MS = 120_000;
 const DEFAULT_QMD_LIMITS: ResolvedQmdLimitsConfig = {
-  maxResults: 4,
-  maxSnippetChars: 450,
-  maxInjectedChars: 2_200,
+  maxResults: 6,
+  maxSnippetChars: 700,
+  maxInjectedChars: 4_000,
   timeoutMs: DEFAULT_QMD_TIMEOUT_MS,
 };
 const DEFAULT_QMD_MCPORTER: ResolvedQmdMcporterConfig = {
@@ -144,10 +137,11 @@ function canonicalizePathForContainment(rawPath: string): string {
 }
 
 function isPathInsideRoot(candidatePath: string, rootPath: string): boolean {
-  return isPathInside(
+  const relative = path.relative(
     canonicalizePathForContainment(rootPath),
     canonicalizePathForContainment(candidatePath),
   );
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 function ensureUniqueName(base: string, existing: Set<string>): string {
@@ -212,21 +206,6 @@ function resolveTimeoutMs(raw: number | undefined, fallback: number): number {
     return Math.floor(raw);
   }
   return fallback;
-}
-
-function resolveStartupMode(raw: MemoryQmdConfig["update"]): MemoryQmdStartupMode {
-  const value = raw?.startup;
-  if (value === "idle" || value === "immediate" || value === "off") {
-    return value;
-  }
-  return DEFAULT_QMD_STARTUP;
-}
-
-function resolveStartupDelayMs(raw: number | undefined): number {
-  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) {
-    return Math.floor(raw);
-  }
-  return DEFAULT_QMD_STARTUP_DELAY_MS;
 }
 
 function resolveLimits(raw?: MemoryQmdConfig["limits"]): ResolvedQmdLimitsConfig {
@@ -349,7 +328,8 @@ function resolveDefaultCollections(
     return [];
   }
   const entries: Array<{ path: string; pattern: string; base: string }> = [
-    { path: workspaceDir, pattern: CANONICAL_ROOT_MEMORY_FILENAME, base: "memory-root" },
+    { path: workspaceDir, pattern: "MEMORY.md", base: "memory-root" },
+    { path: workspaceDir, pattern: "memory.md", base: "memory-alt" },
     { path: path.join(workspaceDir, "memory"), pattern: "**/*.md", base: "memory-dir" },
   ];
   return entries.map((entry) => ({
@@ -392,9 +372,8 @@ export function resolveMemoryBackendConfig(params: {
   const mergedExtraCollections = [
     ...(params.cfg.agents?.defaults?.memorySearch?.qmd?.extraCollections ?? []),
     ...(agentEntry?.memorySearch?.qmd?.extraCollections ?? []),
-  ].filter(
-    (value): value is MemoryQmdIndexPath =>
-      value !== null && typeof value === "object" && typeof value.path === "string",
+  ].filter((value): value is MemoryQmdIndexPath =>
+    Boolean(value && typeof value === "object" && typeof value.path === "string"),
   );
 
   // Combine QMD-specific paths with extraPaths and per-agent cross-agent collections.
@@ -424,8 +403,6 @@ export function resolveMemoryBackendConfig(params: {
       intervalMs: resolveIntervalMs(qmdCfg?.update?.interval),
       debounceMs: resolveDebounceMs(qmdCfg?.update?.debounceMs),
       onBoot: qmdCfg?.update?.onBoot !== false,
-      startup: resolveStartupMode(qmdCfg?.update),
-      startupDelayMs: resolveStartupDelayMs(qmdCfg?.update?.startupDelayMs),
       waitForBootSync: qmdCfg?.update?.waitForBootSync === true,
       embedIntervalMs: resolveEmbedIntervalMs(qmdCfg?.update?.embedInterval),
       commandTimeoutMs: resolveTimeoutMs(

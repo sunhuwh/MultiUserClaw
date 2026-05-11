@@ -1,17 +1,28 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pathExists as fsSafePathExists } from "./infra/fs-safe.js";
 import {
   resolveEffectiveHomeDir,
   resolveHomeRelativePath,
   resolveRequiredHomeDir,
 } from "./infra/home-dir.js";
 import { isPlainObject } from "./infra/plain-object.js";
-export { escapeRegExp } from "./shared/regexp.js";
+import { formatTerminalLink } from "./terminal/terminal-link.js";
 
 export async function ensureDir(dir: string) {
   await fs.promises.mkdir(dir, { recursive: true });
+}
+
+/**
+ * Check if a file or directory exists at the given path.
+ */
+export async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.promises.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function clampNumber(value: number, min: number, max: number): number {
@@ -26,9 +37,15 @@ export function clampInt(value: number, min: number, max: number): number {
 export const clamp = clampNumber;
 
 /**
+ * Escapes special regex characters in a string so it can be used in a RegExp constructor.
+ */
+export function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
  * Safely parse JSON, returning null on error instead of throwing.
  */
-// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- JSON parsing helper lets callers ascribe the expected payload type.
 export function safeParseJson<T>(raw: string): T | null {
   try {
     return JSON.parse(raw) as T;
@@ -37,7 +54,7 @@ export function safeParseJson<T>(raw: string): T | null {
   }
 }
 
-export { isPlainObject };
+export { formatTerminalLink, isPlainObject };
 
 /**
  * Type guard for Record<string, unknown> (less strict than isPlainObject).
@@ -195,9 +212,3 @@ export function displayString(input: string): string {
 
 // Configuration root; can be overridden via OPENCLAW_STATE_DIR.
 export const CONFIG_DIR = resolveConfigDir();
-/**
- * Check if a file or directory exists at the given path.
- */
-export async function pathExists(targetPath: string): Promise<boolean> {
-  return await fsSafePathExists(targetPath);
-}

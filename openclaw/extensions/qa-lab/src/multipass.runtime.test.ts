@@ -6,15 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 
 const execFileMock = vi.hoisted(() => vi.fn());
 
-function readRootPackageManager() {
-  const packageJson = JSON.parse(
-    fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
-  ) as {
-    packageManager?: string;
-  };
-  return packageJson.packageManager;
-}
-
 vi.mock("node:child_process", async () => {
   const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
   return {
@@ -83,14 +74,14 @@ describe("qa multipass runtime", () => {
     });
 
     expect(plan.outputDir).toBe(outputDir);
-    expect(plan.scenarioIds).toStrictEqual([]);
+    expect(plan.scenarioIds).toEqual([]);
     expect(plan.qaCommand).not.toContain("--scenario");
     expect(plan.guestOutputDir).toBe("/workspace/openclaw-host/.artifacts/qa-e2e/multipass-test");
     expect(plan.reportPath).toBe(path.join(outputDir, "qa-suite-report.md"));
     expect(plan.summaryPath).toBe(path.join(outputDir, "qa-suite-summary.json"));
   });
 
-  it("renders a guest script that runs the live qa suite by default", () => {
+  it("renders a guest script that runs the mock qa suite with explicit scenarios", () => {
     const plan = createQaMultipassPlan({
       repoRoot: process.cwd(),
       outputDir: path.join(process.cwd(), ".artifacts", "qa-e2e", "multipass-test"),
@@ -101,9 +92,8 @@ describe("qa multipass runtime", () => {
 
     expect(script).toContain("pnpm install --frozen-lockfile");
     expect(script).toContain("pnpm build");
-    expect(script).toContain(`corepack prepare '${readRootPackageManager()}' --activate`);
-    expect(script).toContain("'pnpm' 'openclaw' 'qa' 'suite' '--transport' 'qa-channel'");
-    expect(script).toContain("'--provider-mode' 'live-frontier'");
+    expect(script).toContain("corepack prepare 'pnpm@10.32.1' --activate");
+    expect(script).toContain("'pnpm' 'openclaw' 'qa' 'suite' '--provider-mode' 'mock-openai'");
     expect(script).toContain("'--scenario' 'channel-chat-baseline'");
     expect(script).toContain("'--scenario' 'thread-follow-up'");
     expect(script).toContain("/workspace/openclaw-host/.artifacts/qa-e2e/multipass-test");
@@ -115,8 +105,8 @@ describe("qa multipass runtime", () => {
       repoRoot: process.cwd(),
       outputDir: path.join(process.cwd(), ".artifacts", "qa-e2e", "multipass-live-test"),
       providerMode: "live-frontier",
-      primaryModel: "openai/gpt-5.5",
-      alternateModel: "openai/gpt-5.5",
+      primaryModel: "openai/gpt-5.4",
+      alternateModel: "openai/gpt-5.4",
       fastMode: true,
       scenarioIds: ["channel-chat-baseline"],
     });
@@ -128,27 +118,15 @@ describe("qa multipass runtime", () => {
         "--provider-mode",
         "live-frontier",
         "--model",
-        "openai/gpt-5.5",
+        "openai/gpt-5.4",
         "--alt-model",
-        "openai/gpt-5.5",
+        "openai/gpt-5.4",
         "--fast",
       ]),
     );
     expect(plan.forwardedEnv.OPENAI_API_KEY).toBe("test-openai-key");
     expect(script).toContain("OPENAI_API_KEY='test-openai-key'");
-    expect(script).toContain("'pnpm' 'openclaw' 'qa' 'suite' '--transport' 'qa-channel'");
-    expect(script).toContain("'--provider-mode' 'live-frontier'");
-  });
-
-  it("forwards --allow-failures into the guest qa suite command when requested", () => {
-    const plan = createQaMultipassPlan({
-      repoRoot: process.cwd(),
-      outputDir: path.join(process.cwd(), ".artifacts", "qa-e2e", "multipass-allow-failures-test"),
-      allowFailures: true,
-      scenarioIds: ["channel-chat-baseline"],
-    });
-
-    expect(plan.qaCommand).toEqual(expect.arrayContaining(["--allow-failures"]));
+    expect(script).toContain("'pnpm' 'openclaw' 'qa' 'suite' '--provider-mode' 'live-frontier'");
   });
 
   it("redacts forwarded live secrets in the persisted artifact script", () => {
@@ -201,7 +179,6 @@ describe("qa multipass runtime", () => {
     const fakeCodexHome = path.join(fakeHome, ".codex");
     fs.mkdirSync(fakeCodexHome, { recursive: true });
     vi.stubEnv("HOME", "");
-    vi.stubEnv("CODEX_HOME", "");
     vi.spyOn(os, "homedir").mockReturnValue(fakeHome);
 
     try {
@@ -251,7 +228,7 @@ describe("qa multipass runtime", () => {
     const tempEntries = fs
       .readdirSync(resolvePreferredOpenClawTmpDir())
       .filter((entry) => entry.startsWith(path.basename(expectedTransferDir)));
-    expect(tempEntries).toStrictEqual([]);
+    expect(tempEntries).toEqual([]);
     fs.rmSync(outputDir, { recursive: true, force: true });
   });
 

@@ -1,12 +1,8 @@
 import path from "node:path";
 import { buildPluginConfigSchema, type OpenClawPluginConfigSchema } from "openclaw/plugin-sdk/core";
-import {
-  formatPluginConfigIssue,
-  mapPluginConfigIssues,
-} from "openclaw/plugin-sdk/extension-shared";
-import { z } from "zod";
+import { z } from "openclaw/plugin-sdk/zod";
 
-type OpenShellPluginConfig = {
+export type OpenShellPluginConfig = {
   mode?: "mirror" | "remote";
   command?: string;
   gateway?: string;
@@ -95,13 +91,26 @@ const OpenShellPluginConfigSchema = z.strictObject({
     .optional(),
 });
 
+function formatOpenShellConfigIssue(issue: z.ZodIssue | undefined): string {
+  if (!issue) {
+    return "invalid config";
+  }
+  if (issue.code === "unrecognized_keys" && issue.keys.length > 0) {
+    return `unknown config key: ${issue.keys[0]}`;
+  }
+  if (issue.code === "invalid_type" && issue.path.length === 0) {
+    return "expected config object";
+  }
+  return issue.message;
+}
+
 function isManagedOpenShellRemotePath(value: string): boolean {
   return OPEN_SHELL_MANAGED_REMOTE_ROOTS.some(
     (root) => value === root || value.startsWith(`${root}/`),
   );
 }
 
-function normalizeOpenShellRemotePath(
+export function normalizeOpenShellRemotePath(
   value: string | undefined,
   fallback: string,
   fieldName = "remote path",
@@ -132,7 +141,13 @@ export function createOpenShellPluginConfigSchema(): OpenClawPluginConfigSchema 
       return {
         success: false,
         error: {
-          issues: mapPluginConfigIssues(parsed.error.issues),
+          issues: parsed.error.issues.map((issue) => ({
+            path: issue.path.filter((segment): segment is string | number => {
+              const kind = typeof segment;
+              return kind === "string" || kind === "number";
+            }),
+            message: formatOpenShellConfigIssue(issue),
+          })),
         },
       };
     },
@@ -161,7 +176,7 @@ export function resolveOpenShellPluginConfig(value: unknown): ResolvedOpenShellP
 
   const parsed = OpenShellPluginConfigSchema.safeParse(value);
   if (!parsed.success) {
-    const message = formatPluginConfigIssue(parsed.error.issues[0]);
+    const message = formatOpenShellConfigIssue(parsed.error.issues[0]);
     throw new Error(`Invalid openshell plugin config: ${message}`);
   }
   const cfg = parsed.data as OpenShellPluginConfig;

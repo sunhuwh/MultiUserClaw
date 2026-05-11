@@ -14,11 +14,7 @@ export default defineBundledChannelEntry({
     exportName: "channelSecrets",
   },
   runtime: {
-    specifier: "./runtime-setter-api.js",
+    specifier: "./runtime-api.js",
     exportName: "setTelegramRuntime",
-  },
-  accountInspect: {
-    specifier: "./account-inspect-api.js",
-    exportName: "inspectTelegramReadOnlyAccount",
   },
 });

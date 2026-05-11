@@ -352,11 +352,9 @@ describe("exec approvals safe bins", () => {
   it("keeps safe-bin profile fixtures aligned with compiled profiles", () => {
     for (const [name, fixture] of Object.entries(SAFE_BIN_PROFILE_FIXTURES)) {
       const profile = SAFE_BIN_PROFILES[name];
-      if (profile === undefined) {
-        throw new Error(`missing compiled safe-bin profile fixture ${name}`);
-      }
+      expect(profile).toBeDefined();
       const fixtureDeniedFlags = fixture.deniedFlags ?? [];
-      const compiledDeniedFlags = profile.deniedFlags ?? new Set<string>();
+      const compiledDeniedFlags = profile?.deniedFlags ?? new Set<string>();
       for (const deniedFlag of fixtureDeniedFlags) {
         expect(compiledDeniedFlags.has(deniedFlag)).toBe(true);
       }

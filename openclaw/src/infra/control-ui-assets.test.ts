@@ -191,7 +191,7 @@ describe("control UI assets helpers (fs-mocked)", () => {
     expect(resolveControlUiRootOverrideSync(path.join(uiDir, "missing.html"))).toBeNull();
   });
 
-  it("resolves control-ui root for dist bundle argv1 and moduleUrl candidates", () => {
+  it("resolves control-ui root for dist bundle argv1 and moduleUrl candidates", async () => {
     const pkgRoot = abs("fixtures/openclaw-bundle");
     (
       openclawRoot.resolveOpenClawPackageRootSync as unknown as ReturnType<typeof vi.fn>

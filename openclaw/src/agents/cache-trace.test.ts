@@ -5,26 +5,6 @@ import { resolveUserPath } from "../utils.js";
 import { createCacheTrace } from "./cache-trace.js";
 
 describe("createCacheTrace", () => {
-  function createMemoryTraceForTest() {
-    const lines: string[] = [];
-    const trace = createCacheTrace({
-      cfg: {
-        diagnostics: {
-          cacheTrace: {
-            enabled: true,
-          },
-        },
-      },
-      env: {},
-      writer: {
-        filePath: "memory",
-        write: (line) => lines.push(line),
-        flush: async () => undefined,
-      },
-    });
-    return { lines, trace };
-  }
-
   it("returns null when diagnostics cache tracing is disabled", () => {
     const trace = createCacheTrace({
       cfg: {} as OpenClawConfig,
@@ -49,11 +29,10 @@ describe("createCacheTrace", () => {
       writer: {
         filePath: "memory",
         write: (line) => lines.push(line),
-        flush: async () => undefined,
       },
     });
 
-    expect(typeof trace?.recordStage).toBe("function");
+    expect(trace).not.toBeNull();
     expect(trace?.filePath).toBe(resolveUserPath("~/.openclaw/logs/cache-trace.jsonl"));
 
     trace?.recordStage("session:loaded", {
@@ -80,7 +59,6 @@ describe("createCacheTrace", () => {
       writer: {
         filePath: "memory",
         write: (line) => lines.push(line),
-        flush: async () => undefined,
       },
     });
 
@@ -88,19 +66,6 @@ describe("createCacheTrace", () => {
 
     const event = JSON.parse(lines[0]?.trim() ?? "{}") as Record<string, unknown>;
     expect(event.prompt).toBe("");
-    expect(event.system).toBe("");
-  });
-
-  it("records raw model run session stages", () => {
-    const { lines, trace } = createMemoryTraceForTest();
-
-    trace?.recordStage("session:raw-model-run", {
-      messages: [],
-      system: "",
-    });
-
-    const event = JSON.parse(lines[0]?.trim() ?? "{}") as Record<string, unknown>;
-    expect(event.stage).toBe("session:raw-model-run");
     expect(event.system).toBe("");
   });
 
@@ -119,7 +84,6 @@ describe("createCacheTrace", () => {
       writer: {
         filePath: "memory",
         write: (line) => lines.push(line),
-        flush: async () => undefined,
       },
     });
 
@@ -164,7 +128,6 @@ describe("createCacheTrace", () => {
       writer: {
         filePath: "memory",
         write: (line) => lines.push(line),
-        flush: async () => undefined,
       },
     });
 
@@ -172,7 +135,21 @@ describe("createCacheTrace", () => {
   });
 
   it("sanitizes cache-trace payloads before writing", () => {
-    const { lines, trace } = createMemoryTraceForTest();
+    const lines: string[] = [];
+    const trace = createCacheTrace({
+      cfg: {
+        diagnostics: {
+          cacheTrace: {
+            enabled: true,
+          },
+        },
+      },
+      env: {},
+      writer: {
+        filePath: "memory",
+        write: (line) => lines.push(line),
+      },
+    });
 
     trace?.recordStage("stream:context", {
       system: {
@@ -250,9 +227,11 @@ describe("createCacheTrace", () => {
     const firstMessage = ((event.messages as Array<Record<string, unknown>> | undefined) ?? [])[0];
     expect(firstMessage).not.toHaveProperty("token");
     expect(firstMessage).not.toHaveProperty("metadata.secretKey");
-    expect(firstMessage?.role).toBe("user");
-    expect(firstMessage?.metadata).toEqual({
-      label: "preserve-me",
+    expect(firstMessage).toMatchObject({
+      role: "user",
+      metadata: {
+        label: "preserve-me",
+      },
     });
     const source = (((firstMessage?.content as Array<Record<string, unknown>> | undefined) ?? [])[0]
       ?.source ?? {}) as Record<string, unknown>;
@@ -262,7 +241,21 @@ describe("createCacheTrace", () => {
   });
 
   it("handles circular references in messages without stack overflow", () => {
-    const { lines, trace } = createMemoryTraceForTest();
+    const lines: string[] = [];
+    const trace = createCacheTrace({
+      cfg: {
+        diagnostics: {
+          cacheTrace: {
+            enabled: true,
+          },
+        },
+      },
+      env: {},
+      writer: {
+        filePath: "memory",
+        write: (line) => lines.push(line),
+      },
+    });
 
     const parent: Record<string, unknown> = { role: "user", content: "hello" };
     const child: Record<string, unknown> = { ref: parent };

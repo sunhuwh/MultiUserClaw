@@ -1,10 +1,8 @@
-import OpenClawKit
 import SwiftUI
 
 struct RootTabs: View {
     @Environment(NodeAppModel.self) private var appModel
     @Environment(VoiceWakeManager.self) private var voiceWake
-    @Environment(GatewayConnectionController.self) private var gatewayController
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(VoiceWakePreferences.enabledKey) private var voiceWakeEnabled: Bool = false
     @State private var selectedTab: Int = 0
@@ -50,9 +48,9 @@ struct RootTabs: View {
             {
                 GatewayProblemBanner(
                     problem: gatewayProblem,
-                    primaryActionTitle: self.gatewayProblemPrimaryActionTitle(gatewayProblem),
+                    primaryActionTitle: "Open Settings",
                     onPrimaryAction: {
-                        self.handleGatewayProblemPrimaryAction(gatewayProblem)
+                        self.selectedTab = 2
                     },
                     onShowDetails: {
                         self.showGatewayProblemDetails = true
@@ -101,9 +99,9 @@ struct RootTabs: View {
             if let gatewayProblem = self.appModel.lastGatewayProblem {
                 GatewayProblemDetailsSheet(
                     problem: gatewayProblem,
-                    primaryActionTitle: self.gatewayProblemPrimaryActionTitle(gatewayProblem),
+                    primaryActionTitle: "Open Settings",
                     onPrimaryAction: {
-                        self.handleGatewayProblemPrimaryAction(gatewayProblem)
+                        self.selectedTab = 2
                     })
             }
         }
@@ -119,17 +117,5 @@ struct RootTabs: View {
             voiceWakeEnabled: self.voiceWakeEnabled,
             cameraHUDText: self.appModel.cameraHUDText,
             cameraHUDKind: self.appModel.cameraHUDKind)
-    }
-
-    private func gatewayProblemPrimaryActionTitle(_ problem: GatewayConnectionProblem) -> String {
-        problem.canTrustRotatedCertificate ? "Trust certificate" : "Open Settings"
-    }
-
-    private func handleGatewayProblemPrimaryAction(_ problem: GatewayConnectionProblem) {
-        if problem.canTrustRotatedCertificate {
-            Task { await self.gatewayController.trustRotatedGatewayCertificate(from: problem) }
-        } else {
-            self.selectedTab = 2
-        }
     }
 }

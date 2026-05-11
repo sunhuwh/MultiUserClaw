@@ -4,7 +4,7 @@ import {
 } from "./subagent-lifecycle-events.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 
-type DeferredCleanupDecision =
+export type DeferredCleanupDecision =
   | {
       kind: "defer-descendants";
       delayMs: number;
@@ -66,6 +66,9 @@ export function resolveDeferredCleanupDecision(params: {
   return {
     kind: "retry",
     retryCount,
-    resumeDelayMs: params.resolveAnnounceRetryDelayMs(retryCount),
+    resumeDelayMs:
+      params.entry.expectsCompletionMessage === true
+        ? params.resolveAnnounceRetryDelayMs(retryCount)
+        : undefined,
   };
 }

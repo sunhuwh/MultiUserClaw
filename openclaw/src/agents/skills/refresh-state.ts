@@ -1,6 +1,6 @@
 export type SkillsChangeEvent = {
   workspaceDir?: string;
-  reason: "watch" | "manual" | "remote-node" | "config-change";
+  reason: "watch" | "manual" | "remote-node";
   changedPath?: string;
 };
 

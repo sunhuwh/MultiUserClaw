@@ -1,7 +1,7 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
 
-type IMessageAttachment = {
+export type IMessageAttachment = {
   original_path?: string | null;
   mime_type?: string | null;
   missing?: boolean | null;
@@ -19,11 +19,6 @@ export type IMessagePayload = {
   reply_to_text?: string | null;
   reply_to_sender?: string | null;
   created_at?: string | null;
-  is_reaction?: boolean | null;
-  reaction_type?: string | null;
-  reaction_emoji?: string | null;
-  is_reaction_add?: boolean | null;
-  reacted_to_guid?: string | null;
   attachments?: IMessageAttachment[] | null;
   chat_identifier?: string | null;
   chat_guid?: string | null;

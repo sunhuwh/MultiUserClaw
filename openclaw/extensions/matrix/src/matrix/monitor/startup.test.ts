@@ -34,7 +34,6 @@ function createVerificationStatus(
       keyLoadError: null,
     },
     ...overrides,
-    serverDeviceKnown: overrides.serverDeviceKnown ?? true,
   };
 }
 
@@ -127,8 +126,8 @@ describe("runMatrixStartupMaintenance", () => {
         error: vi.fn(),
       },
       logVerboseMessage: vi.fn(),
-      getRuntimeConfig: vi.fn(() => ({ channels: { matrix: {} } })),
-      replaceConfigFile: vi.fn(async () => {}),
+      loadConfig: vi.fn(() => ({ channels: { matrix: {} } })),
+      writeConfigFile: vi.fn(async () => {}),
       loadWebMedia: vi.fn(async () => ({
         buffer: Buffer.from("avatar"),
         contentType: "image/png",
@@ -154,41 +153,20 @@ describe("runMatrixStartupMaintenance", () => {
 
     await runMatrixStartupMaintenance(params, deps);
 
-    expect(deps.syncMatrixOwnProfile).toHaveBeenCalledTimes(1);
-    const [profileSyncParams] = vi.mocked(deps.syncMatrixOwnProfile).mock.calls[0] ?? [];
-    if (!profileSyncParams) {
-      throw new Error("profile sync params missing");
-    }
-    const loadAvatarFromUrl = profileSyncParams.loadAvatarFromUrl;
-    if (!loadAvatarFromUrl) {
-      throw new Error("profile sync params missing loadAvatarFromUrl");
-    }
-    expect(profileSyncParams).toStrictEqual({
-      client: params.client,
-      userId: "@bot:example.org",
-      displayName: "Ops Bot",
-      avatarUrl: "https://example.org/avatar.png",
-      loadAvatarFromUrl,
-    });
-    await expect(
-      loadAvatarFromUrl("https://example.org/new-avatar.png", 123),
-    ).resolves.toStrictEqual({
-      buffer: Buffer.from("avatar"),
-      contentType: "image/png",
-      fileName: "avatar.png",
-    });
-    expect(params.loadWebMedia).toHaveBeenCalledWith("https://example.org/new-avatar.png", 123);
+    expect(deps.syncMatrixOwnProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "@bot:example.org",
+        displayName: "Ops Bot",
+        avatarUrl: "https://example.org/avatar.png",
+      }),
+    );
     expect(deps.updateMatrixAccountConfig).toHaveBeenCalledWith(
       { channels: { matrix: {} } },
       "ops",
       { avatarUrl: "mxc://avatar" },
     );
-    expect(params.replaceConfigFile).toHaveBeenCalledWith(updatedCfg as never);
-    const logVerboseMessage = params.logVerboseMessage;
-    if (!logVerboseMessage) {
-      throw new Error("expected logVerboseMessage");
-    }
-    expect(logVerboseMessage).toHaveBeenCalledWith(
+    expect(params.writeConfigFile).toHaveBeenCalledWith(updatedCfg as never);
+    expect(params.logVerboseMessage).toHaveBeenCalledWith(
       "matrix: persisted converted avatar URL for account ops (mxc://avatar)",
     );
   });

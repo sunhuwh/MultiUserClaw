@@ -1,29 +1,23 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { getModel, type Api, type Model } from "@mariozechner/pi-ai";
+import { getModel } from "@mariozechner/pi-ai";
 import { AuthStorage, ModelRegistry } from "@mariozechner/pi-coding-agent";
 import OpenAI from "openai";
 import type { ResolvedTtsConfig } from "openclaw/plugin-sdk/agent-runtime";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
+import { loadConfig } from "openclaw/plugin-sdk/config-runtime";
 import { encodePngRgba, fillPixel } from "openclaw/plugin-sdk/media-runtime";
+import { describe, expect, it } from "vitest";
 import {
   registerProviderPlugin,
   requireRegisteredProvider,
-} from "openclaw/plugin-sdk/plugin-test-runtime";
-import { runRealtimeSttLiveTest } from "openclaw/plugin-sdk/provider-test-contracts";
-import { getRuntimeConfig } from "openclaw/plugin-sdk/runtime-config-snapshot";
-import {
-  isOverloadedErrorMessage,
-  isServerErrorMessage,
-  isTimeoutErrorMessage,
-} from "openclaw/plugin-sdk/test-env";
-import { describe, expect, it } from "vitest";
+} from "../../test/helpers/plugins/provider-registration.js";
 import plugin from "./index.js";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? "";
-const LIVE_MODEL_ID = process.env.OPENCLAW_LIVE_OPENAI_PLUGIN_MODEL?.trim() || "gpt-5.5";
-const LIVE_IMAGE_MODEL = process.env.OPENCLAW_LIVE_OPENAI_IMAGE_MODEL?.trim() || "gpt-image-2";
+const LIVE_MODEL_ID = process.env.OPENCLAW_LIVE_OPENAI_PLUGIN_MODEL?.trim() || "gpt-5.4-nano";
+const LIVE_IMAGE_MODEL = process.env.OPENCLAW_LIVE_OPENAI_IMAGE_MODEL?.trim() || "gpt-image-1";
 const LIVE_VISION_MODEL = process.env.OPENCLAW_LIVE_OPENAI_VISION_MODEL?.trim() || "gpt-4.1-mini";
 const liveEnabled = OPENAI_API_KEY.trim().length > 0 && process.env.OPENCLAW_LIVE_TEST === "1";
 const describeLive = liveEnabled ? describe : describe.skip;
@@ -32,14 +26,8 @@ const ModelRegistryCtor = ModelRegistry as unknown as {
   new (authStorage: AuthStorage, modelsJsonPath?: string): ModelRegistry;
 };
 
-function findOpenAIModel(modelId: string): Model<Api> | null {
-  return (getModel("openai", modelId as never) as Model<Api> | undefined) ?? null;
-}
-
 function resolveTemplateModelId(modelId: string) {
   switch (modelId) {
-    case "gpt-5.5":
-      return "gpt-5.4";
     case "gpt-5.4":
       return "gpt-5.2";
     case "gpt-5.4-mini":
@@ -51,12 +39,9 @@ function resolveTemplateModelId(modelId: string) {
   }
 }
 
-function createLiveModelRegistry(modelId: string): ModelRegistry {
+function createTemplateModelRegistry(modelId: string): ModelRegistry {
   const registry = new ModelRegistryCtor(AuthStorage.inMemory());
-  const template = findOpenAIModel(modelId) ?? findOpenAIModel(resolveTemplateModelId(modelId));
-  if (!template) {
-    throw new Error(`Unsupported live OpenAI plugin model: ${modelId}`);
-  }
+  const template = getModel("openai", resolveTemplateModelId(modelId));
   registry.registerProvider("openai", {
     apiKey: "test",
     baseUrl: template.baseUrl,
@@ -104,23 +89,8 @@ function createReferencePng(): Buffer {
   return encodePngRgba(buf, width, height);
 }
 
-function formatLiveOpenAIError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function resolveLiveOpenAISkipReason(error: unknown): string | null {
-  const message = formatLiveOpenAIError(error);
-  if (isTimeoutErrorMessage(message) || /timed out|operation was aborted/i.test(message)) {
-    return "provider timeout";
-  }
-  if (isOverloadedErrorMessage(message) || isServerErrorMessage(message)) {
-    return "provider outage";
-  }
-  return null;
-}
-
 function createLiveConfig(): OpenClawConfig {
-  const cfg = getRuntimeConfig();
+  const cfg = loadConfig();
   return {
     ...cfg,
     models: {
@@ -161,7 +131,6 @@ function createLiveTtsConfig(): ResolvedTtsConfig {
         voice: "alloy",
       },
     },
-    personas: {},
     maxTextLength: 4_000,
     timeoutMs: 30_000,
   };
@@ -171,58 +140,16 @@ async function createTempAgentDir(): Promise<string> {
   return await fs.mkdtemp(path.join(os.tmpdir(), "openai-plugin-live-"));
 }
 
-async function removeTempAgentDir(agentDir: string): Promise<void> {
-  await fs.rm(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-}
-
-function normalizeTranscriptForMatch(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
-}
-
-function linearToMulaw(sample: number): number {
-  const bias = 132;
-  const clip = 32635;
-  let next = Math.max(-clip, Math.min(clip, sample));
-  const sign = next < 0 ? 0x80 : 0;
-  if (next < 0) {
-    next = -next;
-  }
-
-  next += bias;
-  let exponent = 7;
-  for (let expMask = 0x4000; (next & expMask) === 0 && exponent > 0; exponent -= 1) {
-    expMask >>= 1;
-  }
-
-  const mantissa = (next >> (exponent + 3)) & 0x0f;
-  return ~(sign | (exponent << 4) | mantissa) & 0xff;
-}
-
-function convertPcm24kToMulaw8k(pcm: Buffer): Buffer {
-  const inputSamples = Math.floor(pcm.length / 2);
-  const outputSamples = Math.floor(inputSamples / 3);
-  const mulaw = Buffer.alloc(outputSamples);
-
-  for (let i = 0; i < outputSamples; i += 1) {
-    mulaw[i] = linearToMulaw(pcm.readInt16LE(i * 3 * 2));
-  }
-
-  return mulaw;
-}
-
 describeLive("openai plugin live", () => {
   it("registers an OpenAI provider that can complete a live request", async () => {
     const { providers } = await registerOpenAIPlugin();
     const provider = requireRegisteredProvider(providers, "openai");
-    const modelRegistry = createLiveModelRegistry(LIVE_MODEL_ID);
 
-    const resolved =
-      modelRegistry.find("openai", LIVE_MODEL_ID) ??
-      provider.resolveDynamicModel?.({
-        provider: "openai",
-        modelId: LIVE_MODEL_ID,
-        modelRegistry,
-      });
+    const resolved = provider.resolveDynamicModel?.({
+      provider: "openai",
+      modelId: LIVE_MODEL_ID,
+      modelRegistry: createTemplateModelRegistry(LIVE_MODEL_ID),
+    });
 
     if (!resolved) {
       throw new Error("openai provider did not resolve the live model");
@@ -247,11 +174,8 @@ describeLive("openai plugin live", () => {
     });
     const response = await client.responses.create({
       model: normalized?.id ?? LIVE_MODEL_ID,
-      instructions: "Return exactly OK and no other text.",
-      input: "Return exactly OK.",
-      max_output_tokens: 64,
-      reasoning: { effort: "none" },
-      text: { verbosity: "low" },
+      input: "Reply with exactly OK.",
+      max_output_tokens: 16,
     });
 
     expect(response.output_text.trim()).toMatch(/^OK[.!]?$/);
@@ -301,7 +225,7 @@ describeLive("openai plugin live", () => {
     const ttsConfig = createLiveTtsConfig();
 
     const synthesized = await speechProvider.synthesize({
-      text: "Speech transcription check okay.",
+      text: "OpenClaw integration test OK.",
       cfg,
       providerConfig: ttsConfig.providerConfigs.openai ?? {},
       target: "audio-file",
@@ -316,75 +240,11 @@ describeLive("openai plugin live", () => {
       timeoutMs: 30_000,
     });
 
-    const text = (transcription?.text ?? "").toLowerCase();
-    const collapsedText = text.replace(/[\s-]+/g, "");
+    const text = String(transcription?.text ?? "").toLowerCase();
     expect(text.length).toBeGreaterThan(0);
-    expect(collapsedText).toContain("speech");
-    expect(collapsedText).toMatch(/(?:check|okay|ok|transcription)/);
+    expect(text).toContain("openclaw");
+    expect(text).toMatch(/\bok\b/);
   }, 45_000);
-
-  it("opens OpenAI realtime STT before sending audio", async () => {
-    const { realtimeTranscriptionProviders } = await registerOpenAIPlugin();
-    const realtimeProvider = requireRegisteredProvider(realtimeTranscriptionProviders, "openai");
-    const errors: Error[] = [];
-    const session = realtimeProvider.createSession({
-      providerConfig: {
-        apiKey: OPENAI_API_KEY,
-        language: "en",
-      },
-      onError: (error) => errors.push(error),
-    });
-
-    try {
-      await session.connect();
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
-      expect(errors).toStrictEqual([]);
-      expect(session.isConnected()).toBe(true);
-    } finally {
-      session.close();
-    }
-  }, 30_000);
-
-  it("streams realtime STT through the registered transcription provider", async () => {
-    const { realtimeTranscriptionProviders, speechProviders } = await registerOpenAIPlugin();
-    const realtimeProvider = requireRegisteredProvider(realtimeTranscriptionProviders, "openai");
-    const speechProvider = requireRegisteredProvider(speechProviders, "openai");
-    const cfg = createLiveConfig();
-    const ttsConfig = createLiveTtsConfig();
-    const phrase = "Testing OpenClaw OpenAI realtime transcription integration test OK.";
-
-    const telephony = await speechProvider.synthesizeTelephony?.({
-      text: phrase,
-      cfg,
-      providerConfig: ttsConfig.providerConfigs.openai ?? {},
-      timeoutMs: ttsConfig.timeoutMs,
-    });
-    if (!telephony) {
-      throw new Error("OpenAI telephony synthesis did not return audio");
-    }
-    expect(telephony.outputFormat).toBe("pcm");
-    expect(telephony.sampleRate).toBe(24_000);
-
-    const speech = convertPcm24kToMulaw8k(telephony.audioBuffer);
-    const silence = Buffer.alloc(8_000, 0xff);
-    const audio = Buffer.concat([silence.subarray(0, 4_000), speech, silence]);
-    const { transcripts, partials } = await runRealtimeSttLiveTest({
-      provider: realtimeProvider,
-      providerConfig: {
-        apiKey: OPENAI_API_KEY,
-        language: "en",
-        silenceDurationMs: 500,
-      },
-      audio,
-      expectedNormalizedText: /openai.*realtime.*transcription/,
-    });
-
-    const normalized = transcripts.join(" ").toLowerCase();
-    const compact = normalizeTranscriptForMatch(normalized);
-    expect(compact).toContain("openai");
-    expect(normalized).toContain("transcription");
-    expect(partials.length + transcripts.length).toBeGreaterThan(0);
-  }, 180_000);
 
   it("generates an image through the registered image provider", async () => {
     const { imageProviders } = await registerOpenAIPlugin();
@@ -401,9 +261,8 @@ describeLive("openai plugin live", () => {
         cfg,
         agentDir,
         authStore: EMPTY_AUTH_STORE,
-        timeoutMs: 180_000,
-        count: 1,
-        size: "1536x1024",
+        timeoutMs: 45_000,
+        size: "1024x1024",
       });
 
       expect(generated.model).toBe(LIVE_IMAGE_MODEL);
@@ -411,9 +270,9 @@ describeLive("openai plugin live", () => {
       expect(generated.images[0]?.mimeType).toBe("image/png");
       expect(generated.images[0]?.buffer.byteLength).toBeGreaterThan(1_000);
     } finally {
-      await removeTempAgentDir(agentDir);
+      await fs.rm(agentDir, { recursive: true, force: true });
     }
-  }, 240_000);
+  }, 60_000);
 
   it("edits a reference image through the registered image provider", async () => {
     const { imageProviders } = await registerOpenAIPlugin();
@@ -431,9 +290,8 @@ describeLive("openai plugin live", () => {
         cfg,
         agentDir,
         authStore: EMPTY_AUTH_STORE,
-        timeoutMs: 180_000,
-        count: 1,
-        size: "1024x1536",
+        timeoutMs: 45_000,
+        size: "1024x1024",
         inputImages: [
           {
             buffer: createReferencePng(),
@@ -448,9 +306,9 @@ describeLive("openai plugin live", () => {
       expect(edited.images[0]?.mimeType).toBe("image/png");
       expect(edited.images[0]?.buffer.byteLength).toBeGreaterThan(1_000);
     } finally {
-      await removeTempAgentDir(agentDir);
+      await fs.rm(agentDir, { recursive: true, force: true });
     }
-  }, 240_000);
+  }, 60_000);
 
   it("describes a deterministic image through the registered media provider", async () => {
     const { mediaProviders } = await registerOpenAIPlugin();
@@ -460,36 +318,21 @@ describeLive("openai plugin live", () => {
     const agentDir = await createTempAgentDir();
 
     try {
-      let description:
-        | Awaited<ReturnType<NonNullable<typeof mediaProvider.describeImage>>>
-        | undefined;
-      try {
-        description = await mediaProvider.describeImage?.({
-          buffer: createReferencePng(),
-          fileName: "reference.png",
-          mime: "image/png",
-          prompt: "Reply with one lowercase word for the dominant center color.",
-          timeoutMs: 45_000,
-          agentDir,
-          cfg,
-          authStore: EMPTY_AUTH_STORE,
-          model: LIVE_VISION_MODEL,
-          provider: "openai",
-        });
-      } catch (err) {
-        const skipReason = resolveLiveOpenAISkipReason(err);
-        if (skipReason) {
-          console.warn(
-            `[live:openai] image description skipped: ${skipReason}: ${formatLiveOpenAIError(err)}`,
-          );
-          return;
-        }
-        throw err;
-      }
+      const description = await mediaProvider.describeImage?.({
+        buffer: createReferencePng(),
+        fileName: "reference.png",
+        mime: "image/png",
+        prompt: "Reply with one lowercase word for the dominant center color.",
+        timeoutMs: 30_000,
+        agentDir,
+        cfg,
+        model: LIVE_VISION_MODEL,
+        provider: "openai",
+      });
 
-      expect((description?.text ?? "").toLowerCase()).toContain("orange");
+      expect(String(description?.text ?? "").toLowerCase()).toContain("orange");
     } finally {
-      await removeTempAgentDir(agentDir);
+      await fs.rm(agentDir, { recursive: true, force: true });
     }
-  }, 240_000);
+  }, 60_000);
 });

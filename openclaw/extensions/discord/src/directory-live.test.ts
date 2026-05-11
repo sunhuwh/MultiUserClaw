@@ -1,4 +1,4 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import type { DirectoryConfigParams } from "openclaw/plugin-sdk/directory-runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { listDiscordDirectoryGroupsLive, listDiscordDirectoryPeersLive } from "./directory-live.js";
@@ -45,7 +45,7 @@ describe("discord directory live lookups", () => {
       query: "general",
     });
 
-    expect(rows).toStrictEqual([]);
+    expect(rows).toEqual([]);
   });
 
   it("returns empty peer directory without query and skips guild listing", async () => {
@@ -53,7 +53,7 @@ describe("discord directory live lookups", () => {
 
     const rows = await listDiscordDirectoryPeersLive(makeParams({ query: "  " }));
 
-    expect(rows).toStrictEqual([]);
+    expect(rows).toEqual([]);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -81,20 +81,8 @@ describe("discord directory live lookups", () => {
     const rows = await listDiscordDirectoryGroupsLive(makeParams({ query: "an", limit: 2 }));
 
     expect(rows).toEqual([
-      {
-        kind: "group",
-        id: "channel:c2",
-        name: "random",
-        handle: "#random",
-        raw: { id: "c2", name: "random" },
-      },
-      {
-        kind: "group",
-        id: "channel:c3",
-        name: "announcements",
-        handle: "#announcements",
-        raw: { id: "c3", name: "announcements" },
-      },
+      expect.objectContaining({ kind: "group", id: "channel:c2", name: "random" }),
+      expect.objectContaining({ kind: "group", id: "channel:c3", name: "announcements" }),
     ]);
   });
 
@@ -120,22 +108,19 @@ describe("discord directory live lookups", () => {
     const rows = await listDiscordDirectoryPeersLive(makeParams({ query: "alice", limit: 2 }));
 
     expect(rows).toEqual([
-      {
+      expect.objectContaining({
         kind: "user",
         id: "user:u1",
         name: "Ali",
         handle: "@alice",
         rank: 1,
-        raw: { user: { id: "u1", username: "alice", bot: false }, nick: "Ali" },
-      },
-      {
+      }),
+      expect.objectContaining({
         kind: "user",
         id: "user:u2",
-        name: "alice-bot",
         handle: "@alice-bot",
         rank: 0,
-        raw: { user: { id: "u2", username: "alice-bot", bot: true }, nick: null },
-      },
+      }),
     ]);
   });
 });

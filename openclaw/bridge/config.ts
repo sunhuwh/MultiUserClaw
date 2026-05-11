@@ -185,7 +185,7 @@ export function writeOpenclawConfig(cfg: BridgeConfig): void {
           repairAgentWorkspace(agent, cfg);
           const agentId = typeof agent.id === "string" ? agent.id : "";
           if (isManagedBuiltInAgent(agentId)) {
-            agent.model = existing.agents.default.model;
+            agent.model = proxyModel;
           } else if (!agent.model) {
             agent.model = proxyModel;
           } else if (typeof agent.model === "string" && !agent.model.startsWith("platform-proxy/")) {

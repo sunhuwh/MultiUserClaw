@@ -90,31 +90,14 @@ describe("doctor exec safe bin helpers", () => {
       },
     } as OpenClawConfig);
 
-    expect(result.changes).toStrictEqual([]);
+    expect(result.changes).toEqual([]);
     expect(result.warnings).toEqual([
       "- tools.exec.safeBins includes 'awk': awk-family interpreters can execute commands, access ENVIRON, and write files, so prefer explicit allowlist entries or approval-gated runs instead of safeBins.",
       "- tools.exec.safeBins includes 'sed': sed scripts can execute commands and write files, so prefer explicit allowlist entries or approval-gated runs instead of safeBins.",
       "- tools.exec.safeBins includes interpreter/runtime 'awk' without profile; remove it from safeBins or use explicit allowlist entries.",
       "- tools.exec.safeBins includes interpreter/runtime 'sed' without profile; remove it from safeBins or use explicit allowlist entries.",
     ]);
-    expect(result.config.tools?.exec?.safeBinProfiles).toStrictEqual({});
-  });
-
-  it("warns on busybox/toybox safeBins instead of scaffolding them", () => {
-    const result = maybeRepairExecSafeBinProfiles({
-      tools: {
-        exec: {
-          safeBins: ["busybox", "toybox"],
-        },
-      },
-    } as OpenClawConfig);
-
-    expect(result.changes).toStrictEqual([]);
-    expect(result.warnings).toEqual([
-      "- tools.exec.safeBins includes interpreter/runtime 'busybox' without profile; remove it from safeBins or use explicit allowlist entries.",
-      "- tools.exec.safeBins includes interpreter/runtime 'toybox' without profile; remove it from safeBins or use explicit allowlist entries.",
-    ]);
-    expect(result.config.tools?.exec?.safeBinProfiles).toStrictEqual({});
+    expect(result.config.tools?.exec?.safeBinProfiles).toEqual({});
   });
 
   it("flags safeBins that resolve outside trusted directories", () => {
@@ -134,20 +117,17 @@ describe("doctor exec safe bin helpers", () => {
     } as OpenClawConfig);
 
     expect(hits).toHaveLength(1);
-    const hit = hits[0];
-    if (!hit) {
-      throw new Error("expected trusted-dir hint hit");
-    }
-    expect(hit.scopePath).toBe("tools.exec");
-    expect(hit.bin).toBe("custom-safe-bin");
-    expect(hit.resolvedPath).toBe(binPath);
+    expect(hits[0]).toMatchObject({
+      scopePath: "tools.exec",
+      bin: "custom-safe-bin",
+      resolvedPath: binPath,
+    });
 
-    const warnings = collectExecSafeBinTrustedDirHintWarnings(hits);
-    expect(
-      warnings.some((warning) => warning.includes("tools.exec.safeBins entry 'custom-safe-bin'")),
-    ).toBe(true);
-    expect(warnings.some((warning) => warning.includes("tools.exec.safeBinTrustedDirs"))).toBe(
-      true,
+    expect(collectExecSafeBinTrustedDirHintWarnings(hits)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("tools.exec.safeBins entry 'custom-safe-bin'"),
+        expect.stringContaining("tools.exec.safeBinTrustedDirs"),
+      ]),
     );
 
     rmSync(tempDir, { recursive: true, force: true });

@@ -1,12 +1,10 @@
-import { createNonExitingRuntimeEnv } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createNonExitingRuntimeEnv } from "../../../test/helpers/plugins/runtime-env.js";
 
 const resolveMatrixTargetsMock = vi.hoisted(() => vi.fn(async () => []));
 
-vi.mock("./resolver.runtime.js", () => ({
-  matrixResolverRuntime: {
-    resolveMatrixTargets: resolveMatrixTargetsMock,
-  },
+vi.mock("./resolve-targets.js", () => ({
+  resolveMatrixTargets: resolveMatrixTargetsMock,
 }));
 
 import { matrixResolverAdapter } from "./resolver.js";

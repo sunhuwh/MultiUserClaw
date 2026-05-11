@@ -191,6 +191,10 @@ describe("pw-tools-core", () => {
       timeoutMs: 999_999,
     });
 
-    expect(click).toHaveBeenCalledWith({ timeout: 60_000 });
+    expect(click).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timeout: 60_000,
+      }),
+    );
   });
 });

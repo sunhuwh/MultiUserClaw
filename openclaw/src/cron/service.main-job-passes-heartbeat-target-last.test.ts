@@ -33,35 +33,23 @@ describe("cron main job passes heartbeat target=last", () => {
 
   function createCronWithSpies(params: { storePath: string; runHeartbeatOnce: RunHeartbeatOnce }) {
     const enqueueSystemEvent = vi.fn();
-    const requestHeartbeat = vi.fn();
+    const requestHeartbeatNow = vi.fn();
     const cron = new CronService({
       storePath: params.storePath,
       cronEnabled: true,
       log: logger,
       enqueueSystemEvent,
-      requestHeartbeat,
+      requestHeartbeatNow,
       runHeartbeatOnce: params.runHeartbeatOnce,
       runIsolatedAgentJob: vi.fn(async () => ({ status: "ok" as const })),
     });
-    return { cron, requestHeartbeat };
-  }
-
-  function requireRunHeartbeatOnceCall(
-    runHeartbeatOnce: ReturnType<typeof vi.fn<RunHeartbeatOnce>>,
-  ) {
-    const callArgs = runHeartbeatOnce.mock.calls[0]?.[0];
-    const heartbeat = callArgs?.heartbeat;
-    if (!callArgs || !heartbeat) {
-      throw new Error("expected runHeartbeatOnce call with heartbeat config");
-    }
-    return { ...callArgs, heartbeat };
+    return { cron, requestHeartbeatNow };
   }
 
   async function runSingleTick(cron: CronService) {
-    const startPromise = cron.start();
+    await cron.start();
     await vi.advanceTimersByTimeAsync(2_000);
     await vi.advanceTimersByTimeAsync(1_000);
-    await startPromise;
     cron.stop();
   }
 
@@ -94,46 +82,13 @@ describe("cron main job passes heartbeat target=last", () => {
 
     // The heartbeat config passed should include target: "last" so the
     // heartbeat runner delivers the response to the last active channel.
-    const callArgs = requireRunHeartbeatOnceCall(runHeartbeatOnce);
-    expect(callArgs.heartbeat.target).toBe("last");
+    const callArgs = runHeartbeatOnce.mock.calls[0]?.[0];
+    expect(callArgs).toBeDefined();
+    expect(callArgs?.heartbeat).toBeDefined();
+    expect(callArgs?.heartbeat?.target).toBe("last");
   });
 
-  it("should preserve heartbeat.target=last when wakeMode=now falls back to requestHeartbeat", async () => {
-    const { storePath } = await makeStorePath();
-    const now = Date.now();
-
-    const job = createMainCronJob({
-      now,
-      id: "test-main-delivery-busy",
-      wakeMode: "now",
-    });
-
-    await writeCronStoreSnapshot({ storePath, jobs: [job] });
-
-    const runHeartbeatOnce = vi.fn<RunHeartbeatOnce>(async () => ({
-      status: "skipped" as const,
-      reason: "cron-in-progress",
-    }));
-
-    const { cron, requestHeartbeat } = createCronWithSpies({
-      storePath,
-      runHeartbeatOnce,
-    });
-
-    await runSingleTick(cron);
-
-    expect(runHeartbeatOnce).toHaveBeenCalled();
-    expect(requestHeartbeat).toHaveBeenCalledWith(
-      expect.objectContaining({
-        source: "cron",
-        intent: "immediate",
-        reason: "cron:test-main-delivery-busy",
-        heartbeat: { target: "last" },
-      }),
-    );
-  });
-
-  it("should preserve heartbeat.target=last for wakeMode=next-heartbeat main jobs", async () => {
+  it("should not pass heartbeat target for wakeMode=next-heartbeat main jobs", async () => {
     const { storePath } = await makeStorePath();
     const now = Date.now();
 
@@ -150,22 +105,16 @@ describe("cron main job passes heartbeat target=last", () => {
       durationMs: 50,
     }));
 
-    const { cron, requestHeartbeat } = createCronWithSpies({
+    const { cron, requestHeartbeatNow } = createCronWithSpies({
       storePath,
       runHeartbeatOnce,
     });
 
     await runSingleTick(cron);
 
-    expect(requestHeartbeat).toHaveBeenCalled();
-    expect(requestHeartbeat).toHaveBeenCalledWith(
-      expect.objectContaining({
-        source: "cron",
-        intent: "event",
-        reason: "cron:test-next-heartbeat",
-        heartbeat: { target: "last" },
-      }),
-    );
+    // wakeMode=next-heartbeat uses requestHeartbeatNow, not runHeartbeatOnce
+    expect(requestHeartbeatNow).toHaveBeenCalled();
+    // runHeartbeatOnce should NOT have been called for next-heartbeat mode
     expect(runHeartbeatOnce).not.toHaveBeenCalled();
   });
 });

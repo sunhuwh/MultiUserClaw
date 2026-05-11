@@ -1,4 +1,4 @@
-import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { OpenClawConfig } from "../config/config.js";
 import { DEFAULT_AGENT_ID } from "../routing/session-key.js";
 import {
   DEFAULT_EXEC_APPROVAL_ASK_FALLBACK,
@@ -26,12 +26,12 @@ type ExecPolicyConfig = {
   ask?: ExecAsk;
 };
 
-type ExecPolicyHostSummary = {
+export type ExecPolicyHostSummary = {
   requested: ExecTarget;
   requestedSource: string;
 };
 
-type ExecPolicyFieldSummary<TValue extends ExecSecurity | ExecAsk> = {
+export type ExecPolicyFieldSummary<TValue extends ExecSecurity | ExecAsk> = {
   requested: TValue;
   requestedSource: string;
   host: TValue;
@@ -54,7 +54,7 @@ export type ExecPolicyScopeSnapshot = {
   allowedDecisions: readonly ExecApprovalDecision[];
 };
 
-type ExecPolicyScopeSummary = Omit<ExecPolicyScopeSnapshot, "allowedDecisions">;
+export type ExecPolicyScopeSummary = Omit<ExecPolicyScopeSnapshot, "allowedDecisions">;
 
 type ExecPolicyRequestedField = "security" | "ask";
 
@@ -94,10 +94,7 @@ function formatRequestedSource(params: {
 
 type ExecPolicyField = "security" | "ask" | "askFallback";
 
-function resolveRequestedField<
-  // oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- Field-specific callers narrow the shared requested policy value.
-  TValue extends ExecSecurity | ExecAsk,
->(params: {
+function resolveRequestedField<TValue extends ExecSecurity | ExecAsk>(params: {
   field: ExecPolicyRequestedField;
   scopeExecConfig?: ExecPolicyConfig;
   globalExecConfig?: ExecPolicyConfig;

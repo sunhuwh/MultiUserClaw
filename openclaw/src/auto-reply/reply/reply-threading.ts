@@ -1,10 +1,8 @@
-import { getChannelPlugin } from "../../channels/plugins/index.js";
+import { normalizeChannelId as normalizePluginChannelId } from "../../channels/plugins/index.js";
 import type { ChannelThreadingAdapter } from "../../channels/plugins/types.core.js";
-import { normalizeAnyChannelId } from "../../channels/registry.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import type { ReplyToMode } from "../../config/types.js";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { normalizeOptionalLowercaseString } from "../../shared/string-coerce.js";
-import { copyReplyPayloadMetadata } from "../reply-payload.js";
 import type { OriginatingChannelType } from "../templating.js";
 import type { ReplyPayload, ReplyThreadingPolicy } from "../types.js";
 import { isSingleUseReplyToMode } from "./reply-reference.js";
@@ -30,7 +28,7 @@ export function resolveConfiguredReplyToMode(
   channel?: OriginatingChannelType,
   chatType?: string | null,
 ): ReplyToMode {
-  const provider = normalizeAnyChannelId(channel) ?? normalizeOptionalLowercaseString(channel);
+  const provider = normalizePluginChannelId(channel) ?? normalizeOptionalLowercaseString(channel);
   if (!provider) {
     return "all";
   }
@@ -76,17 +74,8 @@ export function resolveReplyToMode(
   accountId?: string | null,
   chatType?: string | null,
 ): ReplyToMode {
-  const normalizedAccountId = normalizeOptionalLowercaseString(accountId);
-  if (!normalizedAccountId) {
-    return resolveConfiguredReplyToMode(cfg, channel, chatType);
-  }
-  const provider = normalizeAnyChannelId(channel) ?? normalizeOptionalLowercaseString(channel);
-  const threading = provider ? getChannelPlugin(provider)?.threading : undefined;
-  return resolveReplyToModeWithThreading(cfg, threading, {
-    channel,
-    accountId: normalizedAccountId,
-    chatType,
-  });
+  void accountId;
+  return resolveConfiguredReplyToMode(cfg, channel, chatType);
 }
 
 export function createReplyToModeFilter(
@@ -108,7 +97,7 @@ export function createReplyToModeFilter(
       if (opts.allowExplicitReplyTagsWhenOff && isExplicit && !payload.isCompactionNotice) {
         return payload;
       }
-      return copyReplyPayloadMetadata(payload, { ...payload, replyToId: undefined });
+      return { ...payload, replyToId: undefined };
     }
     if (mode === "all") {
       return payload;
@@ -120,7 +109,7 @@ export function createReplyToModeFilter(
       if (payload.isCompactionNotice) {
         return payload;
       }
-      return copyReplyPayloadMetadata(payload, { ...payload, replyToId: undefined });
+      return { ...payload, replyToId: undefined };
     }
     // Compaction notices are transient status messages — they should be
     // threaded (so they appear in-context), but they must not consume the

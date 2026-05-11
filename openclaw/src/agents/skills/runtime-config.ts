@@ -1,5 +1,4 @@
-import { getRuntimeConfigSnapshot } from "../../config/runtime-snapshot.js";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { getRuntimeConfigSnapshot, type OpenClawConfig } from "../../config/config.js";
 import { coerceSecretRef } from "../../config/types.secrets.js";
 
 function hasConfiguredSkillApiKeyRef(config?: OpenClawConfig): boolean {

@@ -3,12 +3,6 @@ import Foundation
 enum CommandResolver {
     private static let projectRootDefaultsKey = "openclaw.gatewayProjectRootPath"
     private static let helperName = "openclaw"
-    static let strictHostKeyCheckingSSHOptions = [
-        "-o", "StrictHostKeyChecking=yes",
-    ]
-    static let updateHostKeysSSHOptions = [
-        "-o", "UpdateHostKeys=yes",
-    ]
 
     static func gatewayEntrypoint(in root: URL) -> String? {
         let distEntry = root.appendingPathComponent("dist/index.js").path
@@ -403,7 +397,9 @@ enum CommandResolver {
         """
         let options: [String] = [
             "-o", "BatchMode=yes",
-        ] + self.strictHostKeyCheckingSSHOptions + self.updateHostKeysSSHOptions
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "UpdateHostKeys=yes",
+        ]
         let args = self.sshArguments(
             target: parsed,
             identity: settings.identity,

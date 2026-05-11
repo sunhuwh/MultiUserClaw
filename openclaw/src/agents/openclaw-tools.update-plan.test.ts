@@ -1,86 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
-import { createOpenClawTools } from "./openclaw-tools.js";
 import { isUpdatePlanToolEnabledForOpenClawTools } from "./openclaw-tools.registration.js";
-import { isToolWrappedWithBeforeToolCallHook } from "./pi-tools.before-tool-call.js";
 import { createUpdatePlanTool } from "./tools/update-plan-tool.js";
-
-type UpdatePlanGatingParams = Parameters<typeof isUpdatePlanToolEnabledForOpenClawTools>[0];
-
-function expectUpdatePlanEnabled(params: UpdatePlanGatingParams, expected: boolean): void {
-  expect(isUpdatePlanToolEnabledForOpenClawTools(params)).toBe(expected);
-}
-
-function toolNames(tools: ReturnType<typeof createOpenClawTools>): string[] {
-  return tools.map((tool) => tool.name);
-}
-
-function expectToolNamed(
-  tools: ReturnType<typeof createOpenClawTools>,
-  name: string,
-): ReturnType<typeof createOpenClawTools>[number] {
-  const tool = tools.find((candidate) => candidate.name === name);
-  if (!tool) {
-    throw new Error(`Expected tool ${name} to be registered`);
-  }
-  return tool;
-}
-
-function openAiGpt5Params(
-  config: OpenClawConfig,
-  overrides: Partial<UpdatePlanGatingParams> = {},
-): UpdatePlanGatingParams {
-  const params: UpdatePlanGatingParams = {
-    config,
-    agentSessionKey: "agent:main:main",
-    modelProvider: "openai",
-    modelId: "gpt-5.4",
-    ...overrides,
-  };
-  if ("agentId" in overrides && !("agentSessionKey" in overrides)) {
-    delete params.agentSessionKey;
-  }
-  return params;
-}
 
 describe("openclaw-tools update_plan gating", () => {
   it("keeps update_plan disabled by default", () => {
-    expectUpdatePlanEnabled({ config: {} as OpenClawConfig }, false);
-  });
-
-  it("does not expose update_plan from default tool construction", () => {
-    const defaultTools = createOpenClawTools({
-      config: {} as OpenClawConfig,
-      disablePluginTools: true,
-      modelProvider: "anthropic",
-      modelId: "claude-sonnet-4-6",
-    });
-    const emptyAllowlistTools = createOpenClawTools({
-      config: {} as OpenClawConfig,
-      disablePluginTools: true,
-      pluginToolAllowlist: [],
-      modelProvider: "anthropic",
-      modelId: "claude-sonnet-4-6",
-    });
-
-    expect(toolNames(defaultTools)).not.toContain("update_plan");
-    expect(toolNames(emptyAllowlistTools)).not.toContain("update_plan");
-  });
-
-  it("wraps constructed tools with before-tool-call hooks by default", () => {
-    const tools = createOpenClawTools({
-      config: {} as OpenClawConfig,
-      disablePluginTools: true,
-    });
-    const unwrappedTools = createOpenClawTools({
-      config: {} as OpenClawConfig,
-      disablePluginTools: true,
-      wrapBeforeToolCallHook: false,
-    });
-
-    expect(isToolWrappedWithBeforeToolCallHook(expectToolNamed(tools, "sessions_list"))).toBe(true);
     expect(
-      isToolWrappedWithBeforeToolCallHook(expectToolNamed(unwrappedTools, "sessions_list")),
+      isUpdatePlanToolEnabledForOpenClawTools({
+        config: {} as OpenClawConfig,
+      }),
     ).toBe(false);
   });
 
@@ -93,103 +21,29 @@ describe("openclaw-tools update_plan gating", () => {
       },
     } as OpenClawConfig;
 
-    expectUpdatePlanEnabled({ config }, true);
+    expect(
+      isUpdatePlanToolEnabledForOpenClawTools({
+        config,
+      }),
+    ).toBe(true);
     expect(createUpdatePlanTool().displaySummary).toBe("Track a short structured work plan.");
   });
 
-  it("registers update_plan when the runtime allowlist explicitly requests it", () => {
-    const tools = createOpenClawTools({
-      config: {} as OpenClawConfig,
-      disablePluginTools: true,
-      pluginToolAllowlist: ["update_plan"],
-      modelProvider: "anthropic",
-      modelId: "claude-sonnet-4-6",
-    });
-
-    expect(toolNames(tools)).toContain("update_plan");
-  });
-
-  it("registers update_plan when a config allowlist group includes it", () => {
-    const tools = createOpenClawTools({
-      config: { tools: { allow: ["group:agents"] } } as OpenClawConfig,
-      disablePluginTools: true,
-      modelProvider: "anthropic",
-      modelId: "claude-sonnet-4-6",
-    });
-
-    expect(toolNames(tools)).toContain("update_plan");
-  });
-
-  it("registers update_plan when a runtime allowlist group includes it", () => {
-    const tools = createOpenClawTools({
-      config: {} as OpenClawConfig,
-      disablePluginTools: true,
-      pluginToolAllowlist: ["group:agents"],
-      modelProvider: "anthropic",
-      modelId: "claude-sonnet-4-6",
-    });
-
-    expect(toolNames(tools)).toContain("update_plan");
-  });
-
-  it("respects deny policy while constructing update_plan for grouped allowlists", () => {
-    const tools = createOpenClawTools({
-      config: {} as OpenClawConfig,
-      disablePluginTools: true,
-      pluginToolAllowlist: ["group:agents"],
-      pluginToolDenylist: ["update_plan"],
-      modelProvider: "anthropic",
-      modelId: "claude-sonnet-4-6",
-    });
-
-    expect(toolNames(tools)).not.toContain("update_plan");
-  });
-
-  it("auto-enables update_plan for unconfigured GPT-5 openai runs", () => {
-    // Criterion 1 of the GPT-5.4 parity gate ("no stalls after planning") is
-    // universal, not opt-in. Unspecified executionContract on a supported
-    // provider/model auto-activates strict-agentic so unconfigured installs
-    // get the same behavior as explicit opt-in. Explicit "default" still
-    // opts out (see "respects explicit default contract opt-out" below).
+  it("does not auto-enable update_plan outside strict-agentic mode", () => {
     const cfg = {
       agents: {
         list: [{ id: "main" }],
       },
     } as OpenClawConfig;
 
-    expectUpdatePlanEnabled(openAiGpt5Params(cfg), true);
-    expectUpdatePlanEnabled(openAiGpt5Params(cfg, { modelProvider: "openai-codex" }), true);
-  });
-
-  it("respects explicit default contract opt-out on GPT-5 runs", () => {
-    // Users who explicitly set executionContract: "default" are saying they
-    // want the old pre-parity-program behavior. Honor that opt-out.
-    const cfg = {
-      agents: {
-        defaults: {
-          embeddedPi: {
-            executionContract: "default",
-          },
-        },
-        list: [{ id: "main" }],
-      },
-    } as OpenClawConfig;
-
-    expectUpdatePlanEnabled(openAiGpt5Params(cfg), false);
-  });
-
-  it("does not auto-enable update_plan for non-openai providers even when unconfigured", () => {
-    const cfg = {
-      agents: {
-        list: [{ id: "main" }],
-      },
-    } as OpenClawConfig;
-
-    expectUpdatePlanEnabled(
-      openAiGpt5Params(cfg, { modelProvider: "anthropic", modelId: "claude-sonnet-4-6" }),
-      false,
-    );
-    expectUpdatePlanEnabled(openAiGpt5Params(cfg, { modelId: "gpt-4.1" }), false);
+    expect(
+      isUpdatePlanToolEnabledForOpenClawTools({
+        config: cfg,
+        agentSessionKey: "agent:main:main",
+        modelProvider: "openai",
+        modelId: "gpt-5.4",
+      }),
+    ).toBe(false);
   });
 
   it("auto-enables update_plan for strict-agentic GPT-5 agents", () => {
@@ -204,7 +58,14 @@ describe("openclaw-tools update_plan gating", () => {
       },
     } as OpenClawConfig;
 
-    expectUpdatePlanEnabled(openAiGpt5Params(cfg), true);
+    expect(
+      isUpdatePlanToolEnabledForOpenClawTools({
+        config: cfg,
+        agentSessionKey: "agent:main:main",
+        modelProvider: "openai",
+        modelId: "gpt-5.4",
+      }),
+    ).toBe(true);
   });
 
   it("does not auto-enable update_plan for unsupported providers or models", () => {
@@ -219,11 +80,22 @@ describe("openclaw-tools update_plan gating", () => {
       },
     } as OpenClawConfig;
 
-    expectUpdatePlanEnabled(
-      openAiGpt5Params(cfg, { modelProvider: "anthropic", modelId: "claude-sonnet-4-6" }),
-      false,
-    );
-    expectUpdatePlanEnabled(openAiGpt5Params(cfg, { modelId: "gpt-4.1" }), false);
+    expect(
+      isUpdatePlanToolEnabledForOpenClawTools({
+        config: cfg,
+        agentSessionKey: "agent:main:main",
+        modelProvider: "anthropic",
+        modelId: "claude-opus-4-6",
+      }),
+    ).toBe(false);
+    expect(
+      isUpdatePlanToolEnabledForOpenClawTools({
+        config: cfg,
+        agentSessionKey: "agent:main:main",
+        modelProvider: "openai",
+        modelId: "gpt-4.1",
+      }),
+    ).toBe(false);
   });
 
   it("lets explicit planTool false override strict-agentic auto-enable", () => {
@@ -243,7 +115,14 @@ describe("openclaw-tools update_plan gating", () => {
       },
     } as OpenClawConfig;
 
-    expectUpdatePlanEnabled(openAiGpt5Params(cfg), false);
+    expect(
+      isUpdatePlanToolEnabledForOpenClawTools({
+        config: cfg,
+        agentSessionKey: "agent:main:main",
+        modelProvider: "openai",
+        modelId: "gpt-5.4",
+      }),
+    ).toBe(false);
   });
 
   it("resolves strict-agentic gating from explicit agentId when no session key is available", () => {
@@ -266,7 +145,14 @@ describe("openclaw-tools update_plan gating", () => {
       },
     } as OpenClawConfig;
 
-    expectUpdatePlanEnabled(openAiGpt5Params(cfg, { agentId: "research" }), true);
+    expect(
+      isUpdatePlanToolEnabledForOpenClawTools({
+        config: cfg,
+        agentId: "research",
+        modelProvider: "openai",
+        modelId: "gpt-5.4",
+      }),
+    ).toBe(true);
   });
 
   it("applies per-agent overrides without leaking the contract to other agents", () => {
@@ -291,7 +177,21 @@ describe("openclaw-tools update_plan gating", () => {
       },
     } as OpenClawConfig;
 
-    expectUpdatePlanEnabled(openAiGpt5Params(cfg, { agentId: "main" }), false);
-    expectUpdatePlanEnabled(openAiGpt5Params(cfg, { agentId: "research" }), true);
+    expect(
+      isUpdatePlanToolEnabledForOpenClawTools({
+        config: cfg,
+        agentId: "main",
+        modelProvider: "openai",
+        modelId: "gpt-5.4",
+      }),
+    ).toBe(false);
+    expect(
+      isUpdatePlanToolEnabledForOpenClawTools({
+        config: cfg,
+        agentId: "research",
+        modelProvider: "openai",
+        modelId: "gpt-5.4",
+      }),
+    ).toBe(true);
   });
 });

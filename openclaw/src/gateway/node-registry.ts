@@ -24,14 +24,13 @@ export type NodeSession = {
 
 type PendingInvoke = {
   nodeId: string;
-  connId: string;
   command: string;
   resolve: (value: NodeInvokeResult) => void;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
 };
 
-type NodeInvokeResult = {
+export type NodeInvokeResult = {
   ok: boolean;
   payload?: unknown;
   payloadJSON?: string | null;
@@ -89,19 +88,16 @@ export class NodeRegistry {
       return null;
     }
     this.nodesByConn.delete(connId);
-    const unregistersCurrentNode = this.nodesById.get(nodeId)?.connId === connId;
-    if (unregistersCurrentNode) {
-      this.nodesById.delete(nodeId);
-    }
+    this.nodesById.delete(nodeId);
     for (const [id, pending] of this.pendingInvokes.entries()) {
-      if (pending.connId !== connId) {
+      if (pending.nodeId !== nodeId) {
         continue;
       }
       clearTimeout(pending.timer);
       pending.reject(new Error(`node disconnected (${pending.command})`));
       this.pendingInvokes.delete(id);
     }
-    return unregistersCurrentNode ? nodeId : null;
+    return nodeId;
   }
 
   listConnected(): NodeSession[] {
@@ -154,7 +150,6 @@ export class NodeRegistry {
       }, timeoutMs);
       this.pendingInvokes.set(requestId, {
         nodeId: params.nodeId,
-        connId: node.connId,
         command: params.command,
         resolve,
         reject,
@@ -166,7 +161,6 @@ export class NodeRegistry {
   handleInvokeResult(params: {
     id: string;
     nodeId: string;
-    connId: string | undefined;
     ok: boolean;
     payload?: unknown;
     payloadJSON?: string | null;
@@ -176,7 +170,7 @@ export class NodeRegistry {
     if (!pending) {
       return false;
     }
-    if (pending.nodeId !== params.nodeId || pending.connId !== params.connId) {
+    if (pending.nodeId !== params.nodeId) {
       return false;
     }
     clearTimeout(pending.timer);

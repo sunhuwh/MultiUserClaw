@@ -4,7 +4,6 @@ import {
   isMattermostConfigured,
   mattermostConfigAdapter,
   mattermostMeta,
-  resolveMattermostGatewayAuthBypassPaths,
 } from "./channel-config-shared.js";
 import { MattermostChannelConfigSchema } from "./config-surface.js";
 import { type ResolvedMattermostAccount } from "./mattermost/accounts.js";
@@ -29,9 +28,6 @@ export const mattermostSetupPlugin: ChannelPlugin<ResolvedMattermostAccount> = {
     ...mattermostConfigAdapter,
     isConfigured: isMattermostConfigured,
     describeAccount: describeMattermostAccount,
-  },
-  gateway: {
-    resolveGatewayAuthBypassPaths: ({ cfg }) => resolveMattermostGatewayAuthBypassPaths(cfg),
   },
   setup: mattermostSetupAdapter,
   setupWizard: mattermostSetupWizard,

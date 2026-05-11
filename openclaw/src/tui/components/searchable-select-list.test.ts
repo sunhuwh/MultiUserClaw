@@ -169,10 +169,8 @@ describe("SearchableSelectList", () => {
     typeInput(list, "gpt m");
 
     const renderedLine = list.render(80).find((line) => stripAnsi(line).includes("gpt-model"));
-    if (!renderedLine) {
-      throw new Error("expected rendered gpt-model line");
-    }
-    const highlightOpens = renderedLine.split("\u001b[31m").length - 1;
+    expect(renderedLine).toBeDefined();
+    const highlightOpens = renderedLine ? renderedLine.split("\u001b[31m").length - 1 : 0;
     expect(highlightOpens).toBe(2);
   });
 

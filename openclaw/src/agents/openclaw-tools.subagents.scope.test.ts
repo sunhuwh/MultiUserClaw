@@ -8,6 +8,7 @@ import {
   setSubagentsConfigOverride,
 } from "./openclaw-tools.subagents.test-harness.js";
 import { addSubagentRunForTests, resetSubagentRegistryForTests } from "./subagent-registry.js";
+import "./test-helpers/fast-core-tools.js";
 import { createPerSenderSessionConfig } from "./test-helpers/session-config.js";
 import { createSubagentsTool } from "./tools/subagents-tool.js";
 
@@ -66,9 +67,10 @@ async function expectLeafSubagentControlForbidden(params: {
     ...(params.message ? { message: params.message } : {}),
   });
 
-  const details = result.details as { status?: string; error?: string };
-  expect(details.status).toBe("forbidden");
-  expect(details.error).toBe("Leaf subagents cannot control other sessions.");
+  expect(result.details).toMatchObject({
+    status: "forbidden",
+    error: "Leaf subagents cannot control other sessions.",
+  });
   expect(callGatewayMock).not.toHaveBeenCalled();
 }
 
@@ -130,22 +132,15 @@ describe("openclaw-tools: subagents scope isolation", () => {
     const tool = createSubagentsTool({ agentSessionKey: leafKey });
     const result = await tool.execute("call-leaf-list", { action: "list" });
 
-    const details = result.details as {
-      status?: string;
-      requesterSessionKey?: string;
-      callerSessionKey?: string;
-      callerIsSubagent?: boolean;
-      total?: number;
-      active?: unknown[];
-      recent?: unknown[];
-    };
-    expect(details.status).toBe("ok");
-    expect(details.requesterSessionKey).toBe(leafKey);
-    expect(details.callerSessionKey).toBe(leafKey);
-    expect(details.callerIsSubagent).toBe(true);
-    expect(details.total).toBe(0);
-    expect(details.active).toEqual([]);
-    expect(details.recent).toEqual([]);
+    expect(result.details).toMatchObject({
+      status: "ok",
+      requesterSessionKey: leafKey,
+      callerSessionKey: leafKey,
+      callerIsSubagent: true,
+      total: 0,
+      active: [],
+      recent: [],
+    });
     expect(callGatewayMock).not.toHaveBeenCalled();
   });
 
@@ -205,8 +200,11 @@ describe("openclaw-tools: subagents scope isolation", () => {
     expect(details.status).toBe("ok");
     expect(details.requesterSessionKey).toBe(orchestratorKey);
     expect(details.total).toBe(1);
-    expect(details.active).toHaveLength(1);
-    expect(details.active?.[0]?.sessionKey).toBe(workerKey);
+    expect(details.active).toEqual([
+      expect.objectContaining({
+        sessionKey: workerKey,
+      }),
+    ]);
   });
 
   it("leaf subagents cannot kill even explicitly-owned child sessions", async () => {

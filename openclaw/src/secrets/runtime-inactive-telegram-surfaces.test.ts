@@ -1,30 +1,55 @@
-import { describe, expect, it } from "vitest";
-import "./runtime-telegram.test-support.ts";
-import { asConfig, setupSecretsRuntimeSnapshotTestHooks } from "./runtime.test-support.ts";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import type { OpenClawConfig } from "../config/config.js";
+import { createEmptyPluginRegistry } from "../plugins/registry.js";
+import { setActivePluginRegistry } from "../plugins/runtime.js";
+import { loadBundledChannelSecretContractApi } from "./channel-contract-api.js";
 
-const { prepareSecretsRuntimeSnapshot } = setupSecretsRuntimeSnapshotTestHooks();
-
-function expectWarningPaths(
-  snapshot: Awaited<ReturnType<typeof prepareSecretsRuntimeSnapshot>>,
-  expectedPaths: string[],
-): void {
-  const warningPaths = new Set(snapshot.warnings.map((warning) => warning.path));
-  for (const expectedPath of expectedPaths) {
-    expect(warningPaths.has(expectedPath)).toBe(true);
-  }
+const telegramSecrets = loadBundledChannelSecretContractApi("telegram");
+if (!telegramSecrets?.collectRuntimeConfigAssignments) {
+  throw new Error("Missing Telegram secret contract api");
 }
 
-function requireTelegramConfig(
-  snapshot: Awaited<ReturnType<typeof prepareSecretsRuntimeSnapshot>>,
-) {
-  const config = snapshot.config.channels?.telegram;
-  if (!config) {
-    throw new Error("expected Telegram runtime config");
-  }
-  return config;
+vi.mock("../channels/plugins/bootstrap-registry.js", () => {
+  return {
+    getBootstrapChannelPlugin: (id: string) =>
+      id === "telegram"
+        ? {
+            secrets: {
+              collectRuntimeConfigAssignments: telegramSecrets.collectRuntimeConfigAssignments,
+            },
+          }
+        : undefined,
+    getBootstrapChannelSecrets: (id: string) =>
+      id === "telegram"
+        ? {
+            collectRuntimeConfigAssignments: telegramSecrets.collectRuntimeConfigAssignments,
+          }
+        : undefined,
+  };
+});
+
+function asConfig(value: unknown): OpenClawConfig {
+  return value as OpenClawConfig;
 }
+
+let clearConfigCache: typeof import("../config/config.js").clearConfigCache;
+let clearRuntimeConfigSnapshot: typeof import("../config/config.js").clearRuntimeConfigSnapshot;
+let clearSecretsRuntimeSnapshot: typeof import("./runtime.js").clearSecretsRuntimeSnapshot;
+let prepareSecretsRuntimeSnapshot: typeof import("./runtime.js").prepareSecretsRuntimeSnapshot;
 
 describe("secrets runtime snapshot inactive telegram surfaces", () => {
+  beforeAll(async () => {
+    ({ clearConfigCache, clearRuntimeConfigSnapshot } = await import("../config/config.js"));
+    ({ clearSecretsRuntimeSnapshot, prepareSecretsRuntimeSnapshot } = await import("./runtime.js"));
+  });
+
+  afterEach(() => {
+    setActivePluginRegistry(createEmptyPluginRegistry());
+    clearSecretsRuntimeSnapshot();
+    clearRuntimeConfigSnapshot();
+    clearConfigCache();
+  });
+
   it("skips inactive Telegram refs and emits diagnostics", async () => {
     const snapshot = await prepareSecretsRuntimeSnapshot({
       config: asConfig({
@@ -49,14 +74,16 @@ describe("secrets runtime snapshot inactive telegram surfaces", () => {
       loadablePluginOrigins: new Map(),
     });
 
-    expect(requireTelegramConfig(snapshot).botToken).toEqual({
+    expect(snapshot.config.channels?.telegram?.botToken).toEqual({
       source: "env",
       provider: "default",
       id: "DISABLED_TELEGRAM_BASE_TOKEN",
     });
-    expectWarningPaths(snapshot, [
-      "channels.telegram.botToken",
-      "channels.telegram.accounts.disabled.botToken",
-    ]);
+    expect(snapshot.warnings.map((warning) => warning.path)).toEqual(
+      expect.arrayContaining([
+        "channels.telegram.botToken",
+        "channels.telegram.accounts.disabled.botToken",
+      ]),
+    );
   });
 });

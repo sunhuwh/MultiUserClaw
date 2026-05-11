@@ -1,7 +1,7 @@
+import type { AuthProfileStore } from "../agents/auth-profiles.js";
 import { describeFailoverError, isFailoverError } from "../agents/failover-error.js";
 import type { FallbackAttempt } from "../agents/model-fallback.types.js";
-import { resolveAgentModelTimeoutMsValue } from "../config/model-input.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { OpenClawConfig } from "../config/config.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import {
@@ -10,72 +10,75 @@ import {
   resolveCapabilityModelCandidates,
   throwCapabilityGenerationFailure,
 } from "../media-generation/runtime-shared.js";
-import { getProviderEnvVars } from "../secrets/provider-env-vars.js";
 import { parseImageGenerationModelRef } from "./model-ref.js";
 import { resolveImageGenerationOverrides } from "./normalization.js";
 import { getImageGenerationProvider, listImageGenerationProviders } from "./provider-registry.js";
-import type { GenerateImageParams, GenerateImageRuntimeResult } from "./runtime-types.js";
-import type { ImageGenerationResult } from "./types.js";
+import type {
+  GeneratedImageAsset,
+  ImageGenerationIgnoredOverride,
+  ImageGenerationNormalization,
+  ImageGenerationResolution,
+  ImageGenerationResult,
+  ImageGenerationSourceImage,
+} from "./types.js";
 
 const log = createSubsystemLogger("image-generation");
 
-export type ImageGenerationRuntimeDeps = {
-  getProvider?: typeof getImageGenerationProvider;
-  listProviders?: typeof listImageGenerationProviders;
-  getProviderEnvVars?: typeof getProviderEnvVars;
-  log?: Pick<typeof log, "warn">;
+export type GenerateImageParams = {
+  cfg: OpenClawConfig;
+  prompt: string;
+  agentDir?: string;
+  authStore?: AuthProfileStore;
+  modelOverride?: string;
+  count?: number;
+  size?: string;
+  aspectRatio?: string;
+  resolution?: ImageGenerationResolution;
+  inputImages?: ImageGenerationSourceImage[];
 };
 
-export type { GenerateImageParams, GenerateImageRuntimeResult } from "./runtime-types.js";
+export type GenerateImageRuntimeResult = {
+  images: GeneratedImageAsset[];
+  provider: string;
+  model: string;
+  attempts: FallbackAttempt[];
+  normalization?: ImageGenerationNormalization;
+  metadata?: Record<string, unknown>;
+  ignoredOverrides: ImageGenerationIgnoredOverride[];
+};
 
-function buildNoImageGenerationModelConfiguredMessage(
-  cfg: OpenClawConfig,
-  deps: ImageGenerationRuntimeDeps,
-): string {
-  const listProviders = deps.listProviders ?? listImageGenerationProviders;
+function buildNoImageGenerationModelConfiguredMessage(cfg: OpenClawConfig): string {
   return buildNoCapabilityModelConfiguredMessage({
     capabilityLabel: "image-generation",
     modelConfigKey: "imageGenerationModel",
-    providers: listProviders(cfg),
-    getProviderEnvVars: deps.getProviderEnvVars,
+    providers: listImageGenerationProviders(cfg),
   });
 }
 
-export function listRuntimeImageGenerationProviders(
-  params?: { config?: OpenClawConfig },
-  deps: ImageGenerationRuntimeDeps = {},
-) {
-  return (deps.listProviders ?? listImageGenerationProviders)(params?.config);
+export function listRuntimeImageGenerationProviders(params?: { config?: OpenClawConfig }) {
+  return listImageGenerationProviders(params?.config);
 }
 
 export async function generateImage(
   params: GenerateImageParams,
-  deps: ImageGenerationRuntimeDeps = {},
 ): Promise<GenerateImageRuntimeResult> {
-  const getProvider = deps.getProvider ?? getImageGenerationProvider;
-  const listProviders = deps.listProviders ?? listImageGenerationProviders;
-  const logger = deps.log ?? log;
-  const timeoutMs =
-    params.timeoutMs ??
-    resolveAgentModelTimeoutMsValue(params.cfg.agents?.defaults?.imageGenerationModel);
   const candidates = resolveCapabilityModelCandidates({
     cfg: params.cfg,
     modelConfig: params.cfg.agents?.defaults?.imageGenerationModel,
     modelOverride: params.modelOverride,
     parseModelRef: parseImageGenerationModelRef,
     agentDir: params.agentDir,
-    listProviders,
-    autoProviderFallback: params.autoProviderFallback,
+    listProviders: listImageGenerationProviders,
   });
   if (candidates.length === 0) {
-    throw new Error(buildNoImageGenerationModelConfiguredMessage(params.cfg, deps));
+    throw new Error(buildNoImageGenerationModelConfiguredMessage(params.cfg));
   }
 
   const attempts: FallbackAttempt[] = [];
   let lastError: unknown;
 
   for (const candidate of candidates) {
-    const provider = getProvider(candidate.provider, params.cfg);
+    const provider = getImageGenerationProvider(candidate.provider, params.cfg);
     if (!provider) {
       const error = `No image-generation provider registered for ${candidate.provider}`;
       attempts.push({
@@ -84,9 +87,6 @@ export async function generateImage(
         error,
       });
       lastError = new Error(error);
-      logger.warn(
-        `image-generation candidate failed: ${candidate.provider}/${candidate.model}: ${error}`,
-      );
       continue;
     }
 
@@ -96,9 +96,6 @@ export async function generateImage(
         size: params.size,
         aspectRatio: params.aspectRatio,
         resolution: params.resolution,
-        quality: params.quality,
-        outputFormat: params.outputFormat,
-        background: params.background,
         inputImages: params.inputImages,
       });
       const result: ImageGenerationResult = await provider.generateImage({
@@ -112,13 +109,7 @@ export async function generateImage(
         size: sanitized.size,
         aspectRatio: sanitized.aspectRatio,
         resolution: sanitized.resolution,
-        quality: sanitized.quality,
-        outputFormat: sanitized.outputFormat,
-        background: sanitized.background,
         inputImages: params.inputImages,
-        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-        providerOptions: params.providerOptions,
-        ssrfPolicy: params.ssrfPolicy,
       });
       if (!Array.isArray(result.images) || result.images.length === 0) {
         throw new Error("Image generation provider returned no images.");
@@ -149,11 +140,7 @@ export async function generateImage(
         status: described?.status,
         code: described?.code,
       });
-      logger.warn(
-        `image-generation candidate failed: ${candidate.provider}/${candidate.model}: ${
-          described?.message ?? formatErrorMessage(err)
-        }`,
-      );
+      log.debug(`image-generation candidate failed: ${candidate.provider}/${candidate.model}`);
     }
   }
 

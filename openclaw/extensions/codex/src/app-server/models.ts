@@ -1,8 +1,7 @@
-import type { resolveCodexAppServerAuthProfileIdForAgent } from "./auth-bridge.js";
-import type { CodexAppServerClient } from "./client.js";
 import type { CodexAppServerStartOptions } from "./config.js";
-import { readCodexModelListResponse } from "./protocol-validators.js";
-import type { CodexModel, CodexReasoningEffortOption } from "./protocol.js";
+import { type JsonObject, type JsonValue } from "./protocol.js";
+import { getSharedCodexAppServerClient } from "./shared-client.js";
+import { withTimeout } from "./timeout.js";
 
 export type CodexAppServerModel = {
   id: string;
@@ -19,7 +18,6 @@ export type CodexAppServerModel = {
 export type CodexAppServerModelListResult = {
   models: CodexAppServerModel[];
   nextCursor?: string;
-  truncated?: boolean;
 };
 
 export type CodexAppServerListModelsOptions = {
@@ -28,106 +26,42 @@ export type CodexAppServerListModelsOptions = {
   includeHidden?: boolean;
   timeoutMs?: number;
   startOptions?: CodexAppServerStartOptions;
-  authProfileId?: string;
-  agentDir?: string;
-  config?: Parameters<typeof resolveCodexAppServerAuthProfileIdForAgent>[0]["config"];
-  sharedClient?: boolean;
 };
 
 export async function listCodexAppServerModels(
   options: CodexAppServerListModelsOptions = {},
 ): Promise<CodexAppServerModelListResult> {
-  return await withCodexAppServerModelClient(options, async ({ client, timeoutMs }) =>
-    requestModelListPage(client, { ...options, timeoutMs }),
-  );
-}
-
-export async function listAllCodexAppServerModels(
-  options: CodexAppServerListModelsOptions & { maxPages?: number } = {},
-): Promise<CodexAppServerModelListResult> {
-  const maxPages = normalizeMaxPages(options.maxPages);
-  return await withCodexAppServerModelClient(options, async ({ client, timeoutMs }) => {
-    const models: CodexAppServerModel[] = [];
-    let cursor = options.cursor;
-    let nextCursor: string | undefined;
-    for (let page = 0; page < maxPages; page += 1) {
-      const result = await requestModelListPage(client, {
-        ...options,
-        timeoutMs,
-        cursor,
-      });
-      models.push(...result.models);
-      nextCursor = result.nextCursor;
-      if (!nextCursor) {
-        return { models };
-      }
-      cursor = nextCursor;
-    }
-    return { models, nextCursor, truncated: true };
-  });
-}
-
-async function withCodexAppServerModelClient<T>(
-  options: CodexAppServerListModelsOptions,
-  run: (params: { client: CodexAppServerClient; timeoutMs: number }) => Promise<T>,
-): Promise<T> {
   const timeoutMs = options.timeoutMs ?? 2500;
-  const useSharedClient = options.sharedClient !== false;
-  const { createIsolatedCodexAppServerClient, getSharedCodexAppServerClient } =
-    await import("./shared-client.js");
-  const client = useSharedClient
-    ? await getSharedCodexAppServerClient({
-        startOptions: options.startOptions,
-        timeoutMs,
-        authProfileId: options.authProfileId,
-        agentDir: options.agentDir,
-        config: options.config,
-      })
-    : await createIsolatedCodexAppServerClient({
-        startOptions: options.startOptions,
-        timeoutMs,
-        authProfileId: options.authProfileId,
-        agentDir: options.agentDir,
-        config: options.config,
+  return await withTimeout(
+    (async () => {
+      const client = await getSharedCodexAppServerClient({ startOptions: options.startOptions });
+      const response = await client.request<JsonObject>("model/list", {
+        limit: options.limit ?? null,
+        cursor: options.cursor ?? null,
+        includeHidden: options.includeHidden ?? null,
       });
-  try {
-    return await run({ client, timeoutMs });
-  } finally {
-    if (!useSharedClient) {
-      client.close();
-    }
-  }
-}
-
-async function requestModelListPage(
-  client: CodexAppServerClient,
-  options: CodexAppServerListModelsOptions & { timeoutMs: number },
-): Promise<CodexAppServerModelListResult> {
-  const response = await client.request(
-    "model/list",
-    {
-      limit: options.limit ?? null,
-      cursor: options.cursor ?? null,
-      includeHidden: options.includeHidden ?? null,
-    },
-    { timeoutMs: options.timeoutMs },
+      return readModelListResult(response);
+    })(),
+    timeoutMs,
+    "codex app-server model/list timed out",
   );
-  return readModelListResult(response);
 }
 
-export function readModelListResult(value: unknown): CodexAppServerModelListResult {
-  const response = readCodexModelListResponse(value);
-  if (!response) {
+function readModelListResult(value: JsonValue | undefined): CodexAppServerModelListResult {
+  if (!isJsonObjectValue(value) || !Array.isArray(value.data)) {
     return { models: [] };
   }
-  const models = response.data
+  const models = value.data
     .map((entry) => readCodexModel(entry))
     .filter((entry): entry is CodexAppServerModel => entry !== undefined);
-  const nextCursor = response.nextCursor ?? undefined;
+  const nextCursor = typeof value.nextCursor === "string" ? value.nextCursor : undefined;
   return { models, ...(nextCursor ? { nextCursor } : {}) };
 }
 
-function readCodexModel(value: CodexModel): CodexAppServerModel | undefined {
+function readCodexModel(value: unknown): CodexAppServerModel | undefined {
+  if (!isJsonObjectValue(value)) {
+    return undefined;
+  }
   const id = readNonEmptyString(value.id);
   const model = readNonEmptyString(value.model) ?? id;
   if (!id || !model) {
@@ -142,9 +76,9 @@ function readCodexModel(value: CodexModel): CodexAppServerModel | undefined {
     ...(readNonEmptyString(value.description)
       ? { description: readNonEmptyString(value.description) }
       : {}),
-    hidden: value.hidden,
-    isDefault: value.isDefault,
-    inputModalities: value.inputModalities,
+    ...(typeof value.hidden === "boolean" ? { hidden: value.hidden } : {}),
+    ...(typeof value.isDefault === "boolean" ? { isDefault: value.isDefault } : {}),
+    inputModalities: readStringArray(value.inputModalities),
     supportedReasoningEfforts: readReasoningEfforts(value.supportedReasoningEfforts),
     ...(readNonEmptyString(value.defaultReasoningEffort)
       ? { defaultReasoningEffort: readNonEmptyString(value.defaultReasoningEffort) }
@@ -152,11 +86,32 @@ function readCodexModel(value: CodexModel): CodexAppServerModel | undefined {
   };
 }
 
-function readReasoningEfforts(value: CodexReasoningEffortOption[]): string[] {
+function readReasoningEfforts(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
   const efforts = value
-    .map((entry) => readNonEmptyString(entry.reasoningEffort))
+    .map((entry) => {
+      if (!isJsonObjectValue(entry)) {
+        return undefined;
+      }
+      return readNonEmptyString(entry.reasoningEffort);
+    })
     .filter((entry): entry is string => entry !== undefined);
   return [...new Set(efforts)];
+}
+
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return [
+    ...new Set(
+      value
+        .map((entry) => readNonEmptyString(entry))
+        .filter((entry): entry is string => entry !== undefined),
+    ),
+  ];
 }
 
 function readNonEmptyString(value: unknown): string | undefined {
@@ -167,6 +122,6 @@ function readNonEmptyString(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
-function normalizeMaxPages(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 20;
+function isJsonObjectValue(value: unknown): value is JsonObject {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }

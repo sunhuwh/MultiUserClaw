@@ -3,7 +3,6 @@ import path from "node:path";
 import { isKnownCoreToolId } from "../agents/tool-catalog.js";
 import { isMutatingToolCall } from "../agents/tool-mutation.js";
 import { resolveOwnerOnlyToolApprovalClass } from "../agents/tool-policy.js";
-import { isPathInside } from "../infra/path-guards.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
@@ -32,7 +31,7 @@ export type AcpApprovalClass =
   | "other"
   | "unknown";
 
-type AcpApprovalClassification = {
+export type AcpApprovalClassification = {
   toolName?: string;
   approvalClass: AcpApprovalClass;
   autoApprove: boolean;
@@ -70,7 +69,7 @@ function parseToolNameFromTitle(title: string | undefined | null): string | unde
   return head ? normalizeToolName(head) : undefined;
 }
 
-function resolveToolNameForPermission(params: {
+export function resolveToolNameForPermission(params: {
   toolCall?: {
     title?: string | null;
     _meta?: unknown;
@@ -176,7 +175,9 @@ function isReadToolCallScopedToCwd(
   if (!absolutePath) {
     return false;
   }
-  return isPathInside(path.resolve(cwd), absolutePath);
+  const root = path.resolve(cwd);
+  const relative = path.relative(root, absolutePath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 export function classifyAcpToolApproval(params: {

@@ -10,12 +10,8 @@ export type OutboundMediaAccess = {
 export type OutboundMediaLoadParams = {
   maxBytes?: number;
   mediaAccess?: OutboundMediaAccess;
-  mediaLocalRoots?: readonly string[] | "any";
+  mediaLocalRoots?: readonly string[];
   mediaReadFile?: OutboundMediaReadFile;
-  proxyUrl?: string;
-  fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-  requestInit?: RequestInit;
-  trustExplicitProxyDns?: boolean;
   optimizeImages?: boolean;
   /** Agent workspace directory for resolving relative MEDIA: paths. */
   workspaceDir?: string;
@@ -25,10 +21,6 @@ export type OutboundMediaLoadOptions = {
   maxBytes?: number;
   localRoots?: readonly string[] | "any";
   readFile?: (filePath: string) => Promise<Buffer>;
-  proxyUrl?: string;
-  fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-  requestInit?: RequestInit;
-  trustExplicitProxyDns?: boolean;
   hostReadCapability?: boolean;
   optimizeImages?: boolean;
   /** Agent workspace directory for resolving relative MEDIA: paths. */
@@ -36,11 +28,8 @@ export type OutboundMediaLoadOptions = {
 };
 
 export function resolveOutboundMediaLocalRoots(
-  mediaLocalRoots?: readonly string[] | "any",
-): readonly string[] | "any" | undefined {
-  if (mediaLocalRoots === "any") {
-    return mediaLocalRoots;
-  }
+  mediaLocalRoots?: readonly string[],
+): readonly string[] | undefined {
   return mediaLocalRoots && mediaLocalRoots.length > 0 ? mediaLocalRoots : undefined;
 }
 
@@ -51,10 +40,9 @@ export function resolveOutboundMediaAccess(
     mediaReadFile?: OutboundMediaReadFile;
   } = {},
 ): OutboundMediaAccess | undefined {
-  const resolvedLocalRoots = resolveOutboundMediaLocalRoots(
+  const localRoots = resolveOutboundMediaLocalRoots(
     params.mediaAccess?.localRoots ?? params.mediaLocalRoots,
   );
-  const localRoots = resolvedLocalRoots === "any" ? undefined : resolvedLocalRoots;
   const readFile = params.mediaAccess?.readFile ?? params.mediaReadFile;
   const workspaceDir = params.mediaAccess?.workspaceDir;
   if (!localRoots && !readFile && !workspaceDir) {
@@ -70,45 +58,22 @@ export function resolveOutboundMediaAccess(
 export function buildOutboundMediaLoadOptions(
   params: OutboundMediaLoadParams = {},
 ): OutboundMediaLoadOptions {
-  const explicitLocalRoots = resolveOutboundMediaLocalRoots(params.mediaLocalRoots);
-  const mediaAccess = resolveOutboundMediaAccess({
-    mediaAccess: params.mediaAccess,
-    mediaLocalRoots: explicitLocalRoots === "any" ? undefined : explicitLocalRoots,
-    mediaReadFile: params.mediaAccess?.readFile ? undefined : params.mediaReadFile,
-  });
+  const mediaAccess = resolveOutboundMediaAccess(params);
   const workspaceDir = mediaAccess?.workspaceDir ?? params.workspaceDir;
-  const readFile = mediaAccess?.readFile ?? params.mediaReadFile;
-  const localRoots = mediaAccess?.localRoots ?? explicitLocalRoots;
-  if (readFile) {
-    if (!localRoots) {
-      throw new Error(
-        'Host media read requires explicit localRoots. Pass mediaAccess.localRoots or opt in with localRoots: "any".',
-      );
-    }
+  if (mediaAccess?.readFile) {
     return {
       ...(params.maxBytes !== undefined ? { maxBytes: params.maxBytes } : {}),
-      localRoots,
-      readFile,
-      ...(params.fetchImpl ? { fetchImpl: params.fetchImpl } : {}),
-      ...(params.proxyUrl ? { proxyUrl: params.proxyUrl } : {}),
-      ...(params.requestInit ? { requestInit: params.requestInit } : {}),
-      ...(params.trustExplicitProxyDns !== undefined
-        ? { trustExplicitProxyDns: params.trustExplicitProxyDns }
-        : {}),
+      localRoots: "any",
+      readFile: mediaAccess.readFile,
       hostReadCapability: true,
       ...(params.optimizeImages !== undefined ? { optimizeImages: params.optimizeImages } : {}),
       ...(workspaceDir ? { workspaceDir } : {}),
     };
   }
+  const localRoots = mediaAccess?.localRoots;
   return {
     ...(params.maxBytes !== undefined ? { maxBytes: params.maxBytes } : {}),
     ...(localRoots ? { localRoots } : {}),
-    ...(params.proxyUrl ? { proxyUrl: params.proxyUrl } : {}),
-    ...(params.fetchImpl ? { fetchImpl: params.fetchImpl } : {}),
-    ...(params.requestInit ? { requestInit: params.requestInit } : {}),
-    ...(params.trustExplicitProxyDns !== undefined
-      ? { trustExplicitProxyDns: params.trustExplicitProxyDns }
-      : {}),
     ...(params.optimizeImages !== undefined ? { optimizeImages: params.optimizeImages } : {}),
     ...(workspaceDir ? { workspaceDir } : {}),
   };

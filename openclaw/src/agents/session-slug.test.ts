@@ -1,5 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createSessionSlug } from "./session-slug.js";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const randomMocks = vi.hoisted(() => ({
   generateSecureInt: vi.fn(),
@@ -8,6 +7,12 @@ const randomMocks = vi.hoisted(() => ({
 vi.mock("../infra/secure-random.js", () => ({
   generateSecureInt: randomMocks.generateSecureInt,
 }));
+
+let createSessionSlug: typeof import("./session-slug.js").createSessionSlug;
+
+beforeAll(async () => {
+  ({ createSessionSlug } = await import("./session-slug.js"));
+});
 
 describe("session slug", () => {
   beforeEach(() => {

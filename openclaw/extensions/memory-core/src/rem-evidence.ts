@@ -63,16 +63,16 @@ const REM_SUMMARY_FACT_LIMIT = 4;
 const REM_SUMMARY_REFLECTION_LIMIT = 4;
 const REM_SUMMARY_MEMORY_LIMIT = 3;
 
-type GroundedRemPreviewItem = {
+export type GroundedRemPreviewItem = {
   text: string;
   refs: string[];
 };
 
-type GroundedRemCandidate = GroundedRemPreviewItem & {
+export type GroundedRemCandidate = GroundedRemPreviewItem & {
   lean: "likely_durable" | "unclear" | "likely_situational";
 };
 
-type GroundedRemFilePreview = {
+export type GroundedRemFilePreview = {
   path: string;
   facts: GroundedRemPreviewItem[];
   reflections: GroundedRemPreviewItem[];
@@ -677,22 +677,6 @@ function isRoutingSummary(summary: SectionSummary): boolean {
   return summary.scores.routing > 0 || REM_ROUTING_SIGNAL_RE.test(summary.text);
 }
 
-function findStrongestSummary(
-  summaries: SectionSummary[],
-  predicate: (summary: SectionSummary) => boolean,
-): SectionSummary | undefined {
-  let strongest: SectionSummary | undefined;
-  for (const summary of summaries) {
-    if (!predicate(summary)) {
-      continue;
-    }
-    if (!strongest || summary.scores.overall > strongest.scores.overall) {
-      strongest = summary;
-    }
-  }
-  return strongest;
-}
-
 function previewGroundedRemForFile(params: {
   relPath: string;
   content: string;
@@ -863,15 +847,15 @@ function previewGroundedRemForFile(params: {
     (sum, { section, snippets }) => sum + scoreSection(section, snippets).tasks,
     0,
   );
-  const strongestRoutingSummary = findStrongestSummary(summaries, isRoutingSummary);
-  const strongestIncidentSummary = findStrongestSummary(
-    summaries,
-    (summary) => summary.scores.incident > 0,
-  );
-  const strongestExternalizationSummary = findStrongestSummary(
-    summaries,
-    (summary) => summary.scores.externalization > 0,
-  );
+  const strongestRoutingSummary = summaries
+    .filter((summary) => isRoutingSummary(summary))
+    .toSorted((left, right) => right.scores.overall - left.scores.overall)[0];
+  const strongestIncidentSummary = summaries
+    .filter((summary) => summary.scores.incident > 0)
+    .toSorted((left, right) => right.scores.overall - left.scores.overall)[0];
+  const strongestExternalizationSummary = summaries
+    .filter((summary) => summary.scores.externalization > 0)
+    .toSorted((left, right) => right.scores.overall - left.scores.overall)[0];
 
   if (facts.length === 0 && monitoringSignal >= 3) {
     addReflection(

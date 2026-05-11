@@ -47,12 +47,6 @@ function registerBaseMemoryEmbeddingProviders(options?: { includeGemini?: boolea
     create: async () => ({ provider: null }),
   });
   registerMemoryEmbeddingProvider({
-    id: "lmstudio",
-    defaultModel: "text-embedding-nomic-embed-text-v1.5",
-    transport: "remote",
-    create: async () => ({ provider: null }),
-  });
-  registerMemoryEmbeddingProvider({
     id: "ollama",
     defaultModel: "nomic-embed-text",
     transport: "remote",
@@ -127,15 +121,11 @@ describe("memory search config", () => {
   function expectMergedRemoteConfig(
     resolved: ReturnType<typeof resolveMemorySearchConfig>,
     apiKey: unknown,
-    extras?: { nonBatchConcurrency?: number },
   ) {
     expect(resolved?.remote).toEqual({
       baseUrl: "https://agent.example/v1",
       apiKey,
       headers: { "X-Default": "on" },
-      ...(typeof extras?.nonBatchConcurrency === "number"
-        ? { nonBatchConcurrency: extras.nonBatchConcurrency }
-        : {}),
       batch: {
         enabled: false,
         wait: true,
@@ -199,33 +189,6 @@ describe("memory search config", () => {
     expect(resolved?.fallback).toBe("none");
   });
 
-  it("resolves custom provider ids through their configured api owner", () => {
-    const cfg = asConfig({
-      models: {
-        providers: {
-          "ollama-5080": {
-            api: "ollama",
-            baseUrl: "http://10.0.0.8:11435",
-            models: [],
-          },
-        },
-      },
-      agents: {
-        defaults: {
-          memorySearch: {
-            provider: "ollama-5080",
-          },
-        },
-      },
-    });
-
-    const resolved = resolveMemorySearchConfig(cfg, "main");
-
-    expect(resolved?.provider).toBe("ollama-5080");
-    expect(resolved?.model).toBe("nomic-embed-text");
-    expectDefaultRemoteBatch(resolved);
-  });
-
   it("resolves sync config without consulting embedding providers", () => {
     clearMemoryEmbeddingProviders();
     const cfg = asConfig({
@@ -256,30 +219,12 @@ describe("memory search config", () => {
       watch: false,
       watchDebounceMs: 25,
       intervalMinutes: 3,
-      embeddingBatchTimeoutSeconds: undefined,
       sessions: {
         deltaBytes: 321,
         deltaMessages: 7,
         postCompactionForce: false,
       },
     });
-  });
-
-  it("uses configured embeddingBatchTimeoutSeconds when set", () => {
-    const cfg = asConfig({
-      agents: {
-        defaults: {
-          memorySearch: {
-            provider: "openai",
-            sync: {
-              embeddingBatchTimeoutSeconds: 600,
-            },
-          },
-        },
-      },
-    });
-
-    expect(resolveMemorySearchSyncConfig(cfg, "main")?.embeddingBatchTimeoutSeconds).toBe(600);
   });
 
   it("merges defaults and overrides", () => {
@@ -497,45 +442,11 @@ describe("memory search config", () => {
     expect(resolved?.model).toBe("mistral-embed");
   });
 
-  it("includes remote defaults and model default for lmstudio without overrides", () => {
-    const cfg = configWithDefaultProvider("lmstudio");
-    const resolved = resolveMemorySearchConfig(cfg, "main");
-    expectDefaultRemoteBatch(resolved);
-    expect(resolved?.model).toBe("text-embedding-nomic-embed-text-v1.5");
-  });
-
   it("includes remote defaults and model default for ollama without overrides", () => {
     const cfg = configWithDefaultProvider("ollama");
     const resolved = resolveMemorySearchConfig(cfg, "main");
     expectDefaultRemoteBatch(resolved);
     expect(resolved?.model).toBe("nomic-embed-text");
-  });
-
-  it("merges memory search input_type overrides", () => {
-    const cfg = asConfig({
-      agents: {
-        defaults: {
-          memorySearch: {
-            provider: "openai",
-            inputType: "passage",
-            queryInputType: "query",
-          },
-        },
-        list: [
-          {
-            id: "main",
-            default: true,
-            memorySearch: {
-              documentInputType: "document",
-            },
-          },
-        ],
-      },
-    });
-    const resolved = resolveMemorySearchConfig(cfg, "main");
-    expect(resolved?.inputType).toBe("passage");
-    expect(resolved?.queryInputType).toBe("query");
-    expect(resolved?.documentInputType).toBe("document");
   });
 
   it("defaults session delta thresholds", () => {
@@ -564,18 +475,6 @@ describe("memory search config", () => {
     });
     const resolved = resolveMemorySearchConfig(cfg, "main");
     expectMergedRemoteConfig(resolved, "default-key"); // pragma: allowlist secret
-  });
-
-  it("merges remote non-batch concurrency from defaults with agent overrides", () => {
-    const cfg = configWithRemoteDefaults({
-      apiKey: "default-key", // pragma: allowlist secret
-      headers: { "X-Default": "on" },
-      nonBatchConcurrency: 1,
-    });
-
-    const resolved = resolveMemorySearchConfig(cfg, "main");
-
-    expectMergedRemoteConfig(resolved, "default-key", { nonBatchConcurrency: 1 }); // pragma: allowlist secret
   });
 
   it("preserves SecretRef remote apiKey when merging defaults with agent overrides", () => {

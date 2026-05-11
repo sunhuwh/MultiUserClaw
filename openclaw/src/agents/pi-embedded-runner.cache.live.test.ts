@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { AssistantMessage, Message, Tool } from "@mariozechner/pi-ai";
-import { Type } from "typebox";
+import { Type } from "@sinclair/typebox";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import {
@@ -121,17 +121,12 @@ async function readCacheTraceEvents(sessionId: string): Promise<CacheTraceEvent[
     throw new Error("live cache trace file not initialized");
   }
   const raw = await fs.readFile(liveCacheTraceFile, "utf8").catch(() => "");
-  const events: CacheTraceEvent[] = [];
-  for (const rawLine of raw.split("\n")) {
-    const line = rawLine.trim();
-    if (line.length > 0) {
-      const event = JSON.parse(line) as CacheTraceEvent;
-      if (event.sessionId === sessionId) {
-        events.push(event);
-      }
-    }
-  }
-  return events;
+  return raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as CacheTraceEvent)
+    .filter((event) => event.sessionId === sessionId);
 }
 
 async function expectCacheTraceStages(
@@ -462,11 +457,11 @@ async function runToolOnlyTurn(params: {
     text = extractAssistantText(response);
   }
 
+  expect(toolCall).toBeTruthy();
   expect(text.length).toBe(0);
   if (!toolCall || toolCall.type !== "toolCall") {
     throw new Error("expected tool call");
   }
-  expect(toolCall.name).toBe(params.tool.name);
 
   return {
     prompt,
@@ -810,7 +805,7 @@ describeCacheLive("pi embedded runner prompt caching (live)", () => {
         provider: "openai",
         api: "openai-responses",
         envVar: "OPENCLAW_LIVE_OPENAI_CACHE_MODEL",
-        preferredModelIds: ["gpt-5.5", "gpt-5.4-mini", "gpt-5.4"],
+        preferredModelIds: ["gpt-5.4-mini", "gpt-5.4", "gpt-5.4"],
       });
       logLiveCache(`openai model=${fixture.model.provider}/${fixture.model.id}`);
     }, 120_000);
@@ -922,7 +917,7 @@ describeCacheLive("pi embedded runner prompt caching (live)", () => {
     );
 
     it(
-      "keeps high OpenAI cache-read rates across repeated embedded-runner turns",
+      "keeps high cache-read rates across repeated embedded-runner turns",
       async () => {
         const sessionId = `${OPENAI_SESSION_ID}-embedded`;
         const warmup = await runEmbeddedCacheProbe({
@@ -1013,7 +1008,7 @@ describeCacheLive("pi embedded runner prompt caching (live)", () => {
     );
 
     it(
-      "keeps OpenAI cache reuse when structured system context only changes by whitespace and line endings",
+      "keeps cache reuse when structured system context only changes by whitespace and line endings",
       async () => {
         const sessionId = `${OPENAI_SESSION_ID}-structured-normalization`;
         const warmup = await runEmbeddedCacheProbe({
@@ -1206,7 +1201,7 @@ describeCacheLive("pi embedded runner prompt caching (live)", () => {
     );
 
     it(
-      "keeps high Anthropic cache-read rates across repeated embedded-runner turns",
+      "keeps high cache-read rates across repeated embedded-runner turns",
       async () => {
         const sessionId = `${ANTHROPIC_SESSION_ID}-embedded`;
         const warmup = await runEmbeddedCacheProbe({
@@ -1305,7 +1300,7 @@ describeCacheLive("pi embedded runner prompt caching (live)", () => {
     );
 
     it(
-      "keeps Anthropic cache reuse when structured system context only changes by whitespace and line endings",
+      "keeps cache reuse when structured system context only changes by whitespace and line endings",
       async () => {
         const sessionId = `${ANTHROPIC_SESSION_ID}-structured-normalization`;
         const warmup = await runEmbeddedCacheProbe({

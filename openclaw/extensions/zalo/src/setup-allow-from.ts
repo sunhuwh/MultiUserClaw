@@ -41,7 +41,7 @@ export async function promptZaloAllowFrom(params: {
     placeholder: "123456789",
     initialValue: existingAllowFrom[0] ? String(existingAllowFrom[0]) : undefined,
     validate: (value) => {
-      const raw = (value ?? "").trim();
+      const raw = String(value ?? "").trim();
       if (!raw) {
         return "Required";
       }
@@ -51,7 +51,7 @@ export async function promptZaloAllowFrom(params: {
       return undefined;
     },
   });
-  const normalized = entry.trim();
+  const normalized = String(entry).trim();
   const unique = mergeAllowFromEntries(existingAllowFrom, [normalized]);
 
   if (accountId === DEFAULT_ACCOUNT_ID) {

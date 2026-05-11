@@ -1,9 +1,7 @@
 import { createRequire } from "node:module";
 import type { ErrorObject, ValidateFunction } from "ajv";
 import { appendAllowedValuesHint, summarizeAllowedValues } from "../config/allowed-values.js";
-import type { JsonSchemaObject } from "../shared/json-schema.types.js";
 import { sanitizeTerminalText } from "../terminal/safe-text.js";
-import { PluginLruCache } from "./plugin-cache-primitives.js";
 
 const require = createRequire(import.meta.url);
 type AjvLike = {
@@ -16,11 +14,15 @@ type AjvLike = {
           validate: (value: string) => boolean;
         },
   ) => AjvLike;
-  compile: (schema: JsonSchemaValue) => ValidateFunction;
+  compile: (schema: Record<string, unknown>) => ValidateFunction;
 };
 const ajvSingletons = new Map<"default" | "defaults", AjvLike>();
 
-function createAjv(mode: "default" | "defaults"): AjvLike {
+function getAjv(mode: "default" | "defaults"): AjvLike {
+  const cached = ajvSingletons.get(mode);
+  if (cached) {
+    return cached;
+  }
   const ajvModule = require("ajv") as { default?: new (opts?: object) => AjvLike };
   const AjvCtor =
     typeof ajvModule.default === "function"
@@ -35,52 +37,26 @@ function createAjv(mode: "default" | "defaults"): AjvLike {
   instance.addFormat("uri", {
     type: "string",
     validate: (value: string) => {
-      // Accept absolute URIs so generated config schemas can keep JSON Schema
-      // `format: "uri"` without noisy AJV warnings during validation/build.
-      return URL.canParse(value);
+      try {
+        // Accept absolute URIs so generated config schemas can keep JSON Schema
+        // `format: "uri"` without noisy AJV warnings during validation/build.
+        new URL(value);
+        return true;
+      } catch {
+        return false;
+      }
     },
   });
-  return instance;
-}
-
-function getAjv(mode: "default" | "defaults"): AjvLike {
-  const cached = ajvSingletons.get(mode);
-  if (cached) {
-    return cached;
-  }
-  const instance = createAjv(mode);
   ajvSingletons.set(mode, instance);
   return instance;
 }
 
 type CachedValidator = {
-  hasDefaults: boolean;
   validate: ValidateFunction;
-  schema: JsonSchemaValue;
-  schemaFingerprint: string;
+  schema: Record<string, unknown>;
 };
 
-export type JsonSchemaValue = JsonSchemaObject | boolean;
-
-const schemaCache = new PluginLruCache<CachedValidator>(512);
-
-function fingerprintSchema(schema: JsonSchemaValue): string {
-  return JSON.stringify(schema);
-}
-
-function schemaHasDefaults(schema: unknown): boolean {
-  if (!schema || typeof schema !== "object") {
-    return false;
-  }
-  if (Array.isArray(schema)) {
-    return schema.some((item) => schemaHasDefaults(item));
-  }
-  const record = schema as Record<string, unknown>;
-  if (Object.prototype.hasOwnProperty.call(record, "default")) {
-    return true;
-  }
-  return Object.values(record).some((value) => schemaHasDefaults(value));
-}
+const schemaCache = new Map<string, CachedValidator>();
 
 function cloneValidationValue<T>(value: T): T {
   if (value === undefined || value === null) {
@@ -93,7 +69,6 @@ export type JsonSchemaValidationError = {
   path: string;
   message: string;
   text: string;
-  additionalProperty?: string;
   allowedValues?: string[];
   allowedValuesHiddenCount?: number;
 };
@@ -160,16 +135,6 @@ function getAjvAllowedValuesSummary(error: ErrorObject): ReturnType<typeof summa
   return summarizeAllowedValues(allowedValues);
 }
 
-function resolveAdditionalProperty(error: ErrorObject): string | undefined {
-  if (error.keyword !== "additionalProperties") {
-    return undefined;
-  }
-  const additionalProperty = (error.params as { additionalProperty?: unknown }).additionalProperty;
-  return typeof additionalProperty === "string" && additionalProperty.trim()
-    ? additionalProperty
-    : undefined;
-}
-
 function formatAjvErrors(errors: ErrorObject[] | null | undefined): JsonSchemaValidationError[] {
   if (!errors || errors.length === 0) {
     return [{ path: "<root>", message: "invalid config", text: "<root>: invalid config" }];
@@ -178,7 +143,6 @@ function formatAjvErrors(errors: ErrorObject[] | null | undefined): JsonSchemaVa
     const path = resolveAjvErrorPath(error);
     const baseMessage = error.message ?? "invalid";
     const allowedValuesSummary = getAjvAllowedValuesSummary(error);
-    const additionalProperty = resolveAdditionalProperty(error);
     const message = allowedValuesSummary
       ? appendAllowedValuesHint(baseMessage, allowedValuesSummary)
       : baseMessage;
@@ -188,7 +152,6 @@ function formatAjvErrors(errors: ErrorObject[] | null | undefined): JsonSchemaVa
       path,
       message,
       text: `${safePath}: ${safeMessage}`,
-      ...(additionalProperty ? { additionalProperty } : {}),
       ...(allowedValuesSummary
         ? {
             allowedValues: allowedValuesSummary.values,
@@ -200,50 +163,20 @@ function formatAjvErrors(errors: ErrorObject[] | null | undefined): JsonSchemaVa
 }
 
 export function validateJsonSchemaValue(params: {
-  schema: JsonSchemaValue;
+  schema: Record<string, unknown>;
   cacheKey: string;
   value: unknown;
   applyDefaults?: boolean;
-  cache?: boolean;
 }): { ok: true; value: unknown } | { ok: false; errors: JsonSchemaValidationError[] } {
-  const useCache = params.cache !== false;
-  if (!useCache) {
-    const validate = createAjv(params.applyDefaults ? "defaults" : "default").compile(
-      params.schema,
-    );
-    const value =
-      params.applyDefaults && schemaHasDefaults(params.schema)
-        ? cloneValidationValue(params.value)
-        : params.value;
-    const ok = validate(value);
-    if (ok) {
-      return { ok: true, value };
-    }
-    return { ok: false, errors: formatAjvErrors(validate.errors) };
-  }
-
   const cacheKey = params.applyDefaults ? `${params.cacheKey}::defaults` : params.cacheKey;
   let cached = schemaCache.get(cacheKey);
-  const schemaFingerprint =
-    !cached || cached.schema !== params.schema ? fingerprintSchema(params.schema) : undefined;
-  if (
-    !cached ||
-    (cached.schema !== params.schema && cached.schemaFingerprint !== schemaFingerprint)
-  ) {
+  if (!cached || cached.schema !== params.schema) {
     const validate = getAjv(params.applyDefaults ? "defaults" : "default").compile(params.schema);
-    cached = {
-      hasDefaults: params.applyDefaults ? schemaHasDefaults(params.schema) : false,
-      validate,
-      schema: params.schema,
-      schemaFingerprint: schemaFingerprint ?? fingerprintSchema(params.schema),
-    };
+    cached = { validate, schema: params.schema };
     schemaCache.set(cacheKey, cached);
-  } else if (cached.schema !== params.schema) {
-    cached.schema = params.schema;
   }
 
-  const value =
-    params.applyDefaults && cached.hasDefaults ? cloneValidationValue(params.value) : params.value;
+  const value = params.applyDefaults ? cloneValidationValue(params.value) : params.value;
   const ok = cached.validate(value);
   if (ok) {
     return { ok: true, value };

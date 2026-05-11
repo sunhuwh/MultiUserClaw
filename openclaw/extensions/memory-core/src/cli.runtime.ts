@@ -2,7 +2,6 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { MemoryEmbeddingProbeResult } from "openclaw/plugin-sdk/memory-core-host-engine-storage";
 import { resolveMemoryRemDreamingConfig } from "openclaw/plugin-sdk/memory-core-host-status";
 import { buildAgentSessionKey } from "openclaw/plugin-sdk/routing";
 import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
@@ -10,10 +9,10 @@ import {
   colorize,
   defaultRuntime,
   formatErrorMessage,
-  getRuntimeConfig,
   getMemorySearchManager,
   isRich,
   listMemoryFiles,
+  loadConfig,
   normalizeExtraMemoryPaths,
   resolveCommandSecretRefsViaGateway,
   resolveDefaultAgentId,
@@ -37,22 +36,16 @@ import type {
   MemorySearchCommandOptions,
 } from "./cli.types.js";
 import { removeBackfillDiaryEntries, writeBackfillDiaryEntries } from "./dreaming-narrative.js";
-import { seedHistoricalDailyMemorySignals } from "./dreaming-phases.js";
-import {
-  auditDreamingArtifacts,
-  repairDreamingArtifacts,
-  type DreamingArtifactsAuditSummary,
-  type RepairDreamingArtifactsResult,
-} from "./dreaming-repair.js";
+import { previewRemDreaming, seedHistoricalDailyMemorySignals } from "./dreaming-phases.js";
 import { asRecord } from "./dreaming-shared.js";
 import { resolveShortTermPromotionDreamingConfig } from "./dreaming.js";
 import { previewGroundedRemMarkdown } from "./rem-evidence.js";
-import { previewRemHarness } from "./rem-harness.js";
 import {
   applyShortTermPromotions,
   auditShortTermPromotionArtifacts,
   removeGroundedShortTermCandidates,
   repairShortTermPromotionArtifacts,
+  readShortTermRecallEntries,
   recordGroundedShortTermCandidates,
   recordShortTermRecalls,
   rankShortTermPromotionCandidates,
@@ -93,7 +86,7 @@ function getMemoryCommandSecretTargetIds(): Set<string> {
 
 async function loadMemoryCommandConfig(commandName: string): Promise<LoadedMemoryCommandConfig> {
   const { resolvedConfig, diagnostics } = await resolveCommandSecretRefsViaGateway({
-    config: getRuntimeConfig(),
+    config: loadConfig(),
     commandName,
     targetIds: getMemoryCommandSecretTargetIds(),
   });
@@ -194,6 +187,22 @@ async function createHistoricalRemHarnessWorkspace(params: {
   };
 }
 
+async function listWorkspaceDailyFiles(workspaceDir: string, limit: number): Promise<string[]> {
+  const memoryDir = path.join(workspaceDir, "memory");
+  try {
+    const files = await listHistoricalDailyFiles(memoryDir);
+    if (!Number.isFinite(limit) || limit <= 0 || files.length <= limit) {
+      return files;
+    }
+    return files.slice(-limit);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw err;
+  }
+}
+
 function formatDreamingSummary(cfg: OpenClawConfig): string {
   const pluginConfig = resolveMemoryPluginConfig(cfg);
   const dreaming = resolveShortTermPromotionDreamingConfig({ pluginConfig, cfg });
@@ -236,35 +245,6 @@ function formatRepairSummary(repair: RepairShortTermPromotionArtifactsResult): s
   }
   if (repair.removedStaleLock) {
     actions.push("removed stale lock");
-  }
-  return actions.length > 0 ? actions.join(" · ") : "no changes";
-}
-
-function formatDreamingAuditSummary(audit: DreamingArtifactsAuditSummary): string {
-  const bits = [
-    audit.dreamsPath ? "diary present" : "diary absent",
-    `${audit.sessionCorpusFileCount} corpus files`,
-    audit.sessionIngestionExists ? "ingestion state present" : "ingestion state absent",
-    audit.suspiciousSessionCorpusLineCount > 0
-      ? `${audit.suspiciousSessionCorpusLineCount} suspicious lines`
-      : null,
-  ].filter(Boolean);
-  return bits.join(" · ");
-}
-
-function formatDreamingRepairSummary(repair: RepairDreamingArtifactsResult): string {
-  const actions: string[] = [];
-  if (repair.archivedSessionCorpus) {
-    actions.push("archived session corpus");
-  }
-  if (repair.archivedSessionIngestion) {
-    actions.push("archived ingestion state");
-  }
-  if (repair.archivedDreamsDiary) {
-    actions.push("archived diary");
-  }
-  if (repair.warnings.length > 0) {
-    actions.push(`${repair.warnings.length} warning${repair.warnings.length === 1 ? "" : "s"}`);
   }
   return actions.length > 0 ? actions.join(" · ") : "no changes";
 }
@@ -512,11 +492,16 @@ async function scanMemoryFiles(
 ): Promise<SourceScan> {
   const issues: string[] = [];
   const memoryFile = path.join(workspaceDir, "MEMORY.md");
+  const altMemoryFile = path.join(workspaceDir, "memory.md");
   const memoryDir = path.join(workspaceDir, "memory");
 
   const primary = await checkReadableFile(memoryFile);
+  const alt = await checkReadableFile(altMemoryFile);
   if (primary.issue) {
     issues.push(primary.issue);
+  }
+  if (alt.issue) {
+    issues.push(alt.issue);
   }
 
   const resolvedExtraPaths = normalizeExtraMemoryPaths(workspaceDir, extraPaths);
@@ -582,6 +567,9 @@ async function scanMemoryFiles(
     if (!listedOk) {
       if (primary.exists) {
         files.add(memoryFile);
+      }
+      if (alt.exists) {
+        files.add(altMemoryFile);
       }
     }
     totalFiles = files.size;
@@ -655,51 +643,35 @@ export async function runMemoryStatus(opts: MemoryCommandOptions) {
   const allResults: Array<{
     agentId: string;
     status: ReturnType<MemoryManager["status"]>;
-    embeddingProbe?: MemoryEmbeddingProbeResult;
+    embeddingProbe?: Awaited<ReturnType<MemoryManager["probeEmbeddingAvailability"]>>;
     indexError?: string;
     scan?: MemorySourceScan;
     audit?: ShortTermAuditSummary;
     repair?: RepairShortTermPromotionArtifactsResult;
-    dreamingAudit?: DreamingArtifactsAuditSummary;
-    dreamingRepair?: RepairDreamingArtifactsResult;
   }> = [];
 
   for (const agentId of agentIds) {
-    const managerPurpose = opts.index ? "cli" : "status";
+    const managerPurpose = opts.index ? "default" : "status";
     await withMemoryManagerForAgent({
       cfg,
       agentId,
       purpose: managerPurpose,
       run: async (manager) => {
         const deep = Boolean(opts.deep || opts.index);
-        let embeddingProbe: MemoryEmbeddingProbeResult | undefined;
+        let embeddingProbe:
+          | Awaited<ReturnType<MemoryManager["probeEmbeddingAvailability"]>>
+          | undefined;
         let indexError: string | undefined;
         const syncFn = manager.sync ? manager.sync.bind(manager) : undefined;
         if (deep) {
-          const initialStatus = manager.status();
-          const hasVectorStoreProbe =
-            initialStatus.backend === "builtin" &&
-            typeof manager.probeVectorStoreAvailability === "function";
-          await withProgress(
-            { label: "Checking memory…", total: hasVectorStoreProbe ? 3 : 2 },
-            async (progress) => {
-              progress.setLabel(hasVectorStoreProbe ? "Probing vector store…" : "Probing vectors…");
-              if (hasVectorStoreProbe) {
-                await manager.probeVectorStoreAvailability?.();
-              } else {
-                await manager.probeVectorAvailability();
-              }
-              progress.tick();
-              progress.setLabel("Probing embeddings…");
-              embeddingProbe = await manager.probeEmbeddingAvailability();
-              progress.tick();
-              if (hasVectorStoreProbe) {
-                progress.setLabel("Checking semantic vectors…");
-                await manager.probeVectorAvailability();
-                progress.tick();
-              }
-            },
-          );
+          await withProgress({ label: "Checking memory…", total: 2 }, async (progress) => {
+            progress.setLabel("Probing vector…");
+            await manager.probeVectorAvailability();
+            progress.tick();
+            progress.setLabel("Probing embeddings…");
+            embeddingProbe = await manager.probeEmbeddingAvailability();
+            progress.tick();
+          });
           if (opts.index && syncFn) {
             await withProgressTotals(
               {
@@ -733,6 +705,8 @@ export async function runMemoryStatus(opts: MemoryCommandOptions) {
           } else if (opts.index && !syncFn) {
             defaultRuntime.log("Memory backend does not support manual reindex.");
           }
+        } else {
+          await manager.probeVectorAvailability();
         }
         const status = manager.status();
         const sources = (
@@ -749,14 +723,7 @@ export async function runMemoryStatus(opts: MemoryCommandOptions) {
           : undefined;
         let audit: ShortTermAuditSummary | undefined;
         let repair: RepairShortTermPromotionArtifactsResult | undefined;
-        let dreamingAudit: DreamingArtifactsAuditSummary | undefined;
-        let dreamingRepair: RepairDreamingArtifactsResult | undefined;
         if (workspaceDir) {
-          dreamingAudit = await auditDreamingArtifacts({ workspaceDir });
-          if (opts.fix && dreamingAudit.issues.some((issue) => issue.fixable)) {
-            dreamingRepair = await repairDreamingArtifacts({ workspaceDir });
-            dreamingAudit = await auditDreamingArtifacts({ workspaceDir });
-          }
           if (opts.fix) {
             repair = await repairShortTermPromotionArtifacts({ workspaceDir });
           }
@@ -775,17 +742,7 @@ export async function runMemoryStatus(opts: MemoryCommandOptions) {
                 : undefined,
           });
         }
-        allResults.push({
-          agentId,
-          status,
-          embeddingProbe,
-          indexError,
-          scan,
-          audit,
-          repair,
-          dreamingAudit,
-          dreamingRepair,
-        });
+        allResults.push({ agentId, status, embeddingProbe, indexError, scan, audit, repair });
       },
     });
   }
@@ -805,17 +762,7 @@ export async function runMemoryStatus(opts: MemoryCommandOptions) {
   const label = (text: string) => muted(`${text}:`);
 
   for (const result of allResults) {
-    const {
-      agentId,
-      status,
-      embeddingProbe,
-      indexError,
-      scan,
-      audit,
-      repair,
-      dreamingAudit,
-      dreamingRepair,
-    } = result;
+    const { agentId, status, embeddingProbe, indexError, scan, audit, repair } = result;
     const filesIndexed = status.files ?? 0;
     const chunksIndexed = status.chunks ?? 0;
     const totalFiles = scan?.totalFiles ?? null;
@@ -872,31 +819,20 @@ export async function runMemoryStatus(opts: MemoryCommandOptions) {
       lines.push(`${label("Fallback")} ${warn(status.fallback.from)}`);
     }
     if (status.vector) {
-      const formatVectorState = (available: boolean | undefined) =>
-        status.vector?.enabled
-          ? available === undefined
-            ? "unknown"
-            : available
-              ? "ready"
-              : "unavailable"
-          : "disabled";
-      const formatVectorLine = (lineLabel: string, state: string) => {
-        const vectorColor =
-          state === "ready" ? theme.success : state === "unavailable" ? theme.warn : theme.muted;
-        lines.push(`${label(lineLabel)} ${colorize(rich, vectorColor, state)}`);
-      };
-      if (status.backend === "builtin") {
-        const storeState = formatVectorState(status.vector.storeAvailable);
-        formatVectorLine("Vector store", storeState);
-        if (status.vector.semanticAvailable !== undefined) {
-          formatVectorLine("Semantic vectors", formatVectorState(status.vector.semanticAvailable));
-        }
-      } else {
-        const vectorState = formatVectorState(
-          status.vector.semanticAvailable ?? status.vector.available,
-        );
-        formatVectorLine("Vector", vectorState);
-      }
+      const vectorState = status.vector.enabled
+        ? status.vector.available === undefined
+          ? "unknown"
+          : status.vector.available
+            ? "ready"
+            : "unavailable"
+        : "disabled";
+      const vectorColor =
+        vectorState === "ready"
+          ? theme.success
+          : vectorState === "unavailable"
+            ? theme.warn
+            : theme.muted;
+      lines.push(`${label("Vector")} ${colorize(rich, vectorColor, vectorState)}`);
       if (status.vector.dims) {
         lines.push(`${label("Vector dims")} ${info(String(status.vector.dims))}`);
       }
@@ -962,28 +898,8 @@ export async function runMemoryStatus(opts: MemoryCommandOptions) {
         lines.push(`${label("QMD audit")} ${info(qmdBits.join(" · "))}`);
       }
     }
-    if (dreamingAudit) {
-      lines.push(
-        `${label("Dreaming artifacts")} ${info(formatDreamingAuditSummary(dreamingAudit))}`,
-      );
-      lines.push(
-        `${label("Dream corpus")} ${info(shortenHomePath(dreamingAudit.sessionCorpusDir))}`,
-      );
-      lines.push(
-        `${label("Dream ingestion")} ${info(shortenHomePath(dreamingAudit.sessionIngestionPath))}`,
-      );
-      if (dreamingAudit.dreamsPath) {
-        lines.push(`${label("Dream diary")} ${info(shortenHomePath(dreamingAudit.dreamsPath))}`);
-      }
-    }
     if (repair) {
       lines.push(`${label("Repair")} ${info(formatRepairSummary(repair))}`);
-    }
-    if (dreamingRepair) {
-      lines.push(`${label("Dream repair")} ${info(formatDreamingRepairSummary(dreamingRepair))}`);
-      if (dreamingRepair.archiveDir) {
-        lines.push(`${label("Dream archive")} ${info(shortenHomePath(dreamingRepair.archiveDir))}`);
-      }
     }
     if (status.fallback?.reason) {
       lines.push(muted(status.fallback.reason));
@@ -1008,17 +924,6 @@ export async function runMemoryStatus(opts: MemoryCommandOptions) {
         lines.push(`  ${muted(`Fix: openclaw memory status --fix --agent ${agentId}`)}`);
       }
     }
-    if (dreamingAudit?.issues.length) {
-      if (!scan?.issues.length && !audit?.issues.length) {
-        lines.push(label("Issues"));
-      }
-      for (const issue of dreamingAudit.issues) {
-        lines.push(`  ${issue.severity === "error" ? warn(issue.message) : muted(issue.message)}`);
-      }
-      if (!opts.fix) {
-        lines.push(`  ${muted(`Fix: openclaw memory status --fix --agent ${agentId}`)}`);
-      }
-    }
     defaultRuntime.log(lines.join("\n"));
     defaultRuntime.log("");
   }
@@ -1033,7 +938,6 @@ export async function runMemoryIndex(opts: MemoryCommandOptions) {
     await withMemoryManagerForAgent({
       cfg,
       agentId,
-      purpose: "cli",
       run: async (manager) => {
         try {
           const syncFn = manager.sync ? manager.sync.bind(manager) : undefined;
@@ -1144,8 +1048,7 @@ export async function runMemoryIndex(opts: MemoryCommandOptions) {
           }
           const postIndexStatus = manager.status();
           const vectorEnabled = postIndexStatus.vector?.enabled ?? false;
-          const vectorAvailable =
-            postIndexStatus.vector?.storeAvailable ?? postIndexStatus.vector?.available;
+          const vectorAvailable = postIndexStatus.vector?.available;
           const vectorLoadErr = postIndexStatus.vector?.loadError;
           if (vectorEnabled && vectorAvailable === false) {
             const errDetail = vectorLoadErr ? `: ${vectorLoadErr}` : "";
@@ -1187,7 +1090,6 @@ export async function runMemorySearch(
   await withMemoryManagerForAgent({
     cfg,
     agentId,
-    purpose: "cli",
     run: async (manager) => {
       const sessionKey = buildCliMemorySearchSessionKey(agentId);
       let results: Awaited<ReturnType<typeof manager.search>>;
@@ -1499,7 +1401,7 @@ export async function runMemoryPromoteExplain(
         `${colorize(rich, theme.heading, "Promotion Explain")} ${colorize(
           rich,
           theme.muted,
-          "(" + agentId + ")",
+          "(" + String(agentId) + ")",
         )}`,
         colorize(rich, theme.accent, candidate.key),
         colorize(
@@ -1545,6 +1447,10 @@ export async function runMemoryRemHarness(opts: MemoryRemHarnessOptions) {
       const status = manager.status();
       const managerWorkspaceDir = status.workspaceDir?.trim();
       const pluginConfig = resolveMemoryPluginConfig(cfg);
+      const deep = resolveShortTermPromotionDreamingConfig({
+        pluginConfig,
+        cfg,
+      });
       if (!managerWorkspaceDir && !opts.path) {
         defaultRuntime.error("Memory rem-harness requires a resolvable workspace directory.");
         process.exitCode = 1;
@@ -1591,19 +1497,34 @@ export async function runMemoryRemHarness(opts: MemoryRemHarnessOptions) {
         return;
       }
       try {
-        const preview = await previewRemHarness({
-          workspaceDir,
-          cfg,
-          pluginConfig,
-          grounded: Boolean(opts.grounded),
-          groundedInputPaths,
-          includePromoted: Boolean(opts.includePromoted),
-          nowMs,
+        if (groundedInputPaths.length === 0 && opts.grounded) {
+          groundedInputPaths = await listWorkspaceDailyFiles(workspaceDir, remConfig.limit);
+        }
+        const cutoffMs = nowMs - Math.max(0, remConfig.lookbackDays) * 24 * 60 * 60 * 1000;
+        const recallEntries = (await readShortTermRecallEntries({ workspaceDir, nowMs })).filter(
+          (entry) => Date.parse(entry.lastRecalledAt) >= cutoffMs,
+        );
+        const remPreview = previewRemDreaming({
+          entries: recallEntries,
+          limit: remConfig.limit,
+          minPatternStrength: remConfig.minPatternStrength,
         });
-        groundedInputPaths = preview.groundedInputPaths;
-        const remPreview = preview.rem;
-        const groundedPreview = preview.grounded;
-        const deepCandidates = preview.deep.candidates;
+        const groundedPreview =
+          opts.grounded && groundedInputPaths.length > 0
+            ? await previewGroundedRemMarkdown({
+                workspaceDir,
+                inputPaths: groundedInputPaths,
+              })
+            : null;
+        const deepCandidates = await rankShortTermPromotionCandidates({
+          workspaceDir,
+          minScore: 0,
+          minRecallCount: 0,
+          minUniqueQueries: 0,
+          includePromoted: Boolean(opts.includePromoted),
+          recencyHalfLifeDays: deep.recencyHalfLifeDays,
+          maxAgeDays: deep.maxAgeDays,
+        });
 
         if (opts.json) {
           defaultRuntime.writeJson({
@@ -1617,18 +1538,18 @@ export async function runMemoryRemHarness(opts: MemoryRemHarnessOptions) {
                   skippedPaths,
                 }
               : null,
-            remConfig: preview.remConfig,
+            remConfig,
             deepConfig: {
-              minScore: preview.deepConfig.minScore,
-              minRecallCount: preview.deepConfig.minRecallCount,
-              minUniqueQueries: preview.deepConfig.minUniqueQueries,
-              recencyHalfLifeDays: preview.deepConfig.recencyHalfLifeDays,
-              maxAgeDays: preview.deepConfig.maxAgeDays ?? null,
+              minScore: deep.minScore,
+              minRecallCount: deep.minRecallCount,
+              minUniqueQueries: deep.minUniqueQueries,
+              recencyHalfLifeDays: deep.recencyHalfLifeDays,
+              maxAgeDays: deep.maxAgeDays ?? null,
             },
-            rem: { skipped: preview.remSkipped, ...remPreview },
+            rem: remPreview,
             grounded: groundedPreview,
             deep: {
-              candidateCount: preview.deep.candidateCount,
+              candidateCount: deepCandidates.length,
               candidates: deepCandidates,
             },
           });
@@ -1674,7 +1595,7 @@ export async function runMemoryRemHarness(opts: MemoryRemHarnessOptions) {
           colorize(
             rich,
             theme.muted,
-            `recentRecallEntries=${preview.recallEntryCount} deepCandidates=${deepCandidates.length}`,
+            `recentRecallEntries=${recallEntries.length} deepCandidates=${deepCandidates.length}`,
           ),
           "",
           colorize(rich, theme.heading, "REM Preview"),

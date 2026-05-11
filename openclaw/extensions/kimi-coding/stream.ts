@@ -1,8 +1,6 @@
 import type { StreamFn } from "@mariozechner/pi-agent-core";
 import { streamSimple } from "@mariozechner/pi-ai";
 import type { ProviderWrapStreamFnContext } from "openclaw/plugin-sdk/plugin-entry";
-import { streamWithPayloadPatch } from "openclaw/plugin-sdk/provider-stream-shared";
-import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/string-coerce-runtime";
 
 const TOOL_CALLS_SECTION_BEGIN = "<|tool_calls_section_begin|>";
 const TOOL_CALLS_SECTION_END = "<|tool_calls_section_end|>";
@@ -16,54 +14,6 @@ type KimiToolCallBlock = {
   name: string;
   arguments: Record<string, unknown>;
 };
-
-type KimiThinkingType = "enabled" | "disabled";
-type KimiThinkingLevel =
-  | "off"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | "adaptive"
-  | "max";
-
-function normalizeKimiThinkingType(value: unknown): KimiThinkingType | undefined {
-  if (typeof value === "boolean") {
-    return value ? "enabled" : "disabled";
-  }
-  if (typeof value === "string") {
-    const normalized = normalizeOptionalLowercaseString(value);
-    if (!normalized) {
-      return undefined;
-    }
-    if (["enabled", "enable", "on", "true"].includes(normalized)) {
-      return "enabled";
-    }
-    if (["disabled", "disable", "off", "false"].includes(normalized)) {
-      return "disabled";
-    }
-    return undefined;
-  }
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    return normalizeKimiThinkingType((value as Record<string, unknown>).type);
-  }
-  return undefined;
-}
-
-export function resolveKimiThinkingType(params: {
-  configuredThinking: unknown;
-  thinkingLevel?: KimiThinkingLevel;
-}): KimiThinkingType {
-  const configured = normalizeKimiThinkingType(params.configuredThinking);
-  if (configured) {
-    return configured;
-  }
-  if (!params.thinkingLevel || params.thinkingLevel === "off") {
-    return "disabled";
-  }
-  return "enabled";
-}
 
 function stripTaggedToolCallCounter(value: string): string {
   return value.trim().replace(/:\d+$/, "");
@@ -181,14 +131,13 @@ function rewriteKimiTaggedToolCallsInMessage(message: unknown): void {
   }
 }
 
-function wrapStreamMessageObjects(
+function wrapKimiTaggedToolCalls(
   stream: ReturnType<typeof streamSimple>,
-  transformMessage: (message: unknown) => void,
 ): ReturnType<typeof streamSimple> {
   const originalResult = stream.result.bind(stream);
   stream.result = async () => {
     const message = await originalResult();
-    transformMessage(message);
+    rewriteKimiTaggedToolCallsInMessage(message);
     return message;
   };
 
@@ -200,9 +149,12 @@ function wrapStreamMessageObjects(
         async next() {
           const result = await iterator.next();
           if (!result.done && result.value && typeof result.value === "object") {
-            const event = result.value as { partial?: unknown; message?: unknown };
-            transformMessage(event.partial);
-            transformMessage(event.message);
+            const event = result.value as {
+              partial?: unknown;
+              message?: unknown;
+            };
+            rewriteKimiTaggedToolCallsInMessage(event.partial);
+            rewriteKimiTaggedToolCallsInMessage(event.message);
           }
           return result;
         },
@@ -214,6 +166,7 @@ function wrapStreamMessageObjects(
         },
       };
     };
+
   return stream;
 }
 
@@ -222,32 +175,12 @@ export function createKimiToolCallMarkupWrapper(baseStreamFn: StreamFn | undefin
   return (model, context, options) => {
     const maybeStream = underlying(model, context, options);
     if (maybeStream && typeof maybeStream === "object" && "then" in maybeStream) {
-      return Promise.resolve(maybeStream).then((stream) =>
-        wrapStreamMessageObjects(stream, rewriteKimiTaggedToolCallsInMessage),
-      );
+      return Promise.resolve(maybeStream).then((stream) => wrapKimiTaggedToolCalls(stream));
     }
-    return wrapStreamMessageObjects(maybeStream, rewriteKimiTaggedToolCallsInMessage);
+    return wrapKimiTaggedToolCalls(maybeStream);
   };
 }
 
-export function createKimiThinkingWrapper(
-  baseStreamFn: StreamFn | undefined,
-  thinkingType: KimiThinkingType,
-): StreamFn {
-  const underlying = baseStreamFn ?? streamSimple;
-  return (model, context, options) =>
-    streamWithPayloadPatch(underlying, model, context, options, (payloadObj) => {
-      payloadObj.thinking = { type: thinkingType };
-      delete payloadObj.reasoning;
-      delete payloadObj.reasoning_effort;
-      delete payloadObj.reasoningEffort;
-    });
-}
-
 export function wrapKimiProviderStream(ctx: ProviderWrapStreamFnContext): StreamFn {
-  const thinkingType = resolveKimiThinkingType({
-    configuredThinking: ctx.extraParams?.thinking,
-    thinkingLevel: ctx.thinkingLevel,
-  });
-  return createKimiToolCallMarkupWrapper(createKimiThinkingWrapper(ctx.streamFn, thinkingType));
+  return createKimiToolCallMarkupWrapper(ctx.streamFn);
 }

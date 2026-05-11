@@ -7,12 +7,9 @@ import {
 
 export type ConfigSetOptions = {
   strictJson?: boolean;
-  /** @deprecated Use strictJson. */
   json?: boolean;
   dryRun?: boolean;
   allowExec?: boolean;
-  merge?: boolean;
-  replace?: boolean;
   refProvider?: string;
   refSource?: string;
   refId?: string;

@@ -32,7 +32,7 @@ describe("buildProgram version alias handling", () => {
       throw new Error(`unexpected process.exit:${String(code)}`);
     }) as typeof process.exit);
 
-    buildProgram();
+    expect(() => buildProgram()).not.toThrow();
     expect(exitSpy).not.toHaveBeenCalled();
   });
 });

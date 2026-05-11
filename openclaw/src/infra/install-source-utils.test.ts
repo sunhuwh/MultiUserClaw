@@ -20,10 +20,6 @@ async function createTempDir(prefix: string) {
   return await tempDirs.make(prefix);
 }
 
-async function expectPathMissing(targetPath: string): Promise<void> {
-  await expect(fs.stat(targetPath)).rejects.toMatchObject({ code: "ENOENT" });
-}
-
 async function createFixtureDir() {
   return await createTempDir(TEMP_DIR_PREFIX);
 }
@@ -111,12 +107,12 @@ describe("withTempDir", () => {
     const value = await withTempDir("openclaw-install-source-utils-", async (tmpDir) => {
       observedDir = tmpDir;
       await fs.writeFile(path.join(tmpDir, markerFile), "ok", "utf-8");
-      await expect(fs.readFile(path.join(tmpDir, markerFile), "utf8")).resolves.toBe("ok");
+      await expect(fs.stat(path.join(tmpDir, markerFile))).resolves.toBeDefined();
       return "done";
     });
 
     expect(value).toBe("done");
-    await expectPathMissing(observedDir);
+    await expect(fs.stat(observedDir)).rejects.toThrow();
   });
 });
 

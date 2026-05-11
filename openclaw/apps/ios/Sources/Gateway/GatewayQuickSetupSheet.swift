@@ -1,4 +1,3 @@
-import OpenClawKit
 import SwiftUI
 
 struct GatewayQuickSetupSheet: View {
@@ -20,10 +19,6 @@ struct GatewayQuickSetupSheet: View {
                 if let gatewayProblem = self.appModel.lastGatewayProblem {
                     GatewayProblemBanner(
                         problem: gatewayProblem,
-                        primaryActionTitle: self.gatewayProblemPrimaryActionTitle(gatewayProblem),
-                        onPrimaryAction: {
-                            Task { await self.handleGatewayProblemPrimaryAction(gatewayProblem) }
-                        },
                         onShowDetails: {
                             self.showGatewayProblemDetails = true
                         })
@@ -120,12 +115,7 @@ struct GatewayQuickSetupSheet: View {
         }
         .sheet(isPresented: self.$showGatewayProblemDetails) {
             if let gatewayProblem = self.appModel.lastGatewayProblem {
-                GatewayProblemDetailsSheet(
-                    problem: gatewayProblem,
-                    primaryActionTitle: self.gatewayProblemPrimaryActionTitle(gatewayProblem),
-                    onPrimaryAction: {
-                        Task { await self.handleGatewayProblemPrimaryAction(gatewayProblem) }
-                    })
+                GatewayProblemDetailsSheet(problem: gatewayProblem)
             }
         }
     }
@@ -133,22 +123,5 @@ struct GatewayQuickSetupSheet: View {
     private var bestCandidate: GatewayDiscoveryModel.DiscoveredGateway? {
         // Prefer whatever discovery says is first; the list is already name-sorted.
         self.gatewayController.gateways.first
-    }
-
-    private func gatewayProblemPrimaryActionTitle(_ problem: GatewayConnectionProblem) -> String {
-        problem.canTrustRotatedCertificate ? "Trust certificate" : "Connect"
-    }
-
-    private func handleGatewayProblemPrimaryAction(_ problem: GatewayConnectionProblem) async {
-        if problem.canTrustRotatedCertificate {
-            _ = await self.gatewayController.trustRotatedGatewayCertificate(from: problem)
-            return
-        }
-        guard let candidate = self.bestCandidate else { return }
-        self.connectError = nil
-        self.connecting = true
-        let err = await self.gatewayController.connectWithDiagnostics(candidate)
-        self.connecting = false
-        self.connectError = err
     }
 }

@@ -1,19 +1,16 @@
 import crypto from "node:crypto";
+import path from "node:path";
 import { normalizeChatType } from "../../channels/chat-type.js";
 import { normalizeAnyChannelId } from "../../channels/registry.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import { applyMergePatch } from "../../config/merge-patch.js";
-import { resolveSessionTranscriptPath, resolveStorePath } from "../../config/sessions/paths.js";
-import { resolveSessionKey } from "../../config/sessions/session-key.js";
-import { loadSessionStore } from "../../config/sessions/store.js";
-import type { SessionEntry, SessionScope } from "../../config/sessions/types.js";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import type { SessionEntry } from "../../config/sessions/types.js";
 import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
 } from "../../shared/string-coerce.js";
 import { normalizeCommandBody } from "../commands-registry.js";
 import type { MsgContext, TemplateContext } from "../templating.js";
-import { parseSoftResetCommand } from "./commands-reset-mode.js";
 import type { CommandContext } from "./commands-types.js";
 import { stripMentions, stripStructuralPrefixes } from "./mentions.js";
 import type { SessionInitResult } from "./session.js";
@@ -32,18 +29,21 @@ function isSlowReplyTestAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
   );
 }
 
-function resolveFastSessionKey(params: {
-  ctx: MsgContext;
-  sessionScope: SessionScope;
-  mainKey?: string;
-}): string {
-  const { ctx } = params;
+function resolveFastSessionKey(ctx: MsgContext): string {
   const nativeCommandTarget =
     ctx.CommandSource === "native" ? normalizeOptionalString(ctx.CommandTargetSessionKey) : "";
   if (nativeCommandTarget) {
     return nativeCommandTarget;
   }
-  return resolveSessionKey(params.sessionScope, ctx, params.mainKey);
+  const existing = normalizeOptionalString(ctx.SessionKey);
+  if (existing) {
+    return existing;
+  }
+  const provider =
+    normalizeOptionalString(ctx.Provider) ?? normalizeOptionalString(ctx.Surface) ?? "main";
+  const destination =
+    normalizeOptionalString(ctx.To) ?? normalizeOptionalString(ctx.From) ?? "default";
+  return `agent:main:${provider}:${destination}`;
 }
 
 function markReplyConfigRuntimeMode(
@@ -78,7 +78,7 @@ export function withFullRuntimeReplyConfig<T extends OpenClawConfig>(config: T):
   return markCompleteReplyConfig(config, { runtimeMode: "full" });
 }
 
-function isCompleteReplyConfig(config: unknown): config is OpenClawConfig {
+export function isCompleteReplyConfig(config: unknown): config is OpenClawConfig {
   return Boolean(
     config &&
     typeof config === "object" &&
@@ -86,7 +86,7 @@ function isCompleteReplyConfig(config: unknown): config is OpenClawConfig {
   );
 }
 
-function usesFullReplyRuntime(config: unknown): boolean {
+export function usesFullReplyRuntime(config: unknown): boolean {
   return Boolean(
     config &&
     typeof config === "object" &&
@@ -95,13 +95,13 @@ function usesFullReplyRuntime(config: unknown): boolean {
 }
 
 export function resolveGetReplyConfig(params: {
-  getRuntimeConfig: () => OpenClawConfig;
+  loadConfig: () => OpenClawConfig;
   isFastTestEnv: boolean;
   configOverride?: OpenClawConfig;
 }): OpenClawConfig {
   const { configOverride } = params;
   if (configOverride == null) {
-    return params.getRuntimeConfig();
+    return params.loadConfig();
   }
   if (params.isFastTestEnv && !isCompleteReplyConfig(configOverride) && !isSlowReplyTestAllowed()) {
     throw new Error(
@@ -111,10 +111,7 @@ export function resolveGetReplyConfig(params: {
   if (params.isFastTestEnv && isCompleteReplyConfig(configOverride)) {
     return configOverride;
   }
-  if (isCompleteReplyConfig(configOverride)) {
-    return configOverride;
-  }
-  return applyMergePatch(params.getRuntimeConfig(), configOverride) as OpenClawConfig;
+  return applyMergePatch(params.loadConfig(), configOverride) as OpenClawConfig;
 }
 
 export function shouldUseReplyFastTestBootstrap(params: {
@@ -166,12 +163,10 @@ export function buildFastReplyCommandContext(params: {
 }): CommandContext {
   const { ctx, cfg, agentId, sessionKey, isGroup, triggerBodyNormalized, commandAuthorized } =
     params;
-  const originatingChannel = normalizeOptionalLowercaseString(ctx.OriginatingChannel);
   const surface = normalizeOptionalLowercaseString(ctx.Surface ?? ctx.Provider) ?? "";
-  const channel =
-    originatingChannel ?? normalizeOptionalLowercaseString(ctx.Provider ?? surface) ?? "";
-  const from = normalizeOptionalString(ctx.From ?? ctx.SenderId);
-  const to = normalizeOptionalString(ctx.To ?? ctx.OriginatingTo);
+  const channel = normalizeOptionalLowercaseString(ctx.Provider ?? surface) ?? "";
+  const from = normalizeOptionalString(ctx.From);
+  const to = normalizeOptionalString(ctx.To);
   return {
     surface,
     channel,
@@ -205,18 +200,10 @@ export function initFastReplySessionState(params: {
   commandAuthorized: boolean;
   workspaceDir: string;
 }): SessionInitResult {
-  const { ctx, cfg, agentId, commandAuthorized } = params;
+  const { ctx, cfg, agentId, commandAuthorized, workspaceDir } = params;
   const sessionScope = cfg.session?.scope ?? "per-sender";
-  const sessionKey = resolveFastSessionKey({
-    ctx,
-    sessionScope,
-    mainKey: cfg.session?.mainKey,
-  });
-  const storePath = resolveStorePath(cfg.session?.store, { agentId });
-  const sessionStore: Record<string, SessionEntry> = loadSessionStore(storePath, {
-    skipCache: true,
-  });
-  const existingEntry = sessionStore[sessionKey];
+  const sessionKey = resolveFastSessionKey(ctx);
+  const sessionId = crypto.randomUUID();
   const commandSource = ctx.BodyForCommands ?? ctx.CommandBody ?? ctx.RawBody ?? ctx.Body ?? "";
   const triggerBodyNormalized = stripStructuralPrefixes(commandSource).trim();
   const normalizedChatType = normalizeChatType(ctx.ChatType);
@@ -224,48 +211,17 @@ export function initFastReplySessionState(params: {
   const strippedForReset = isGroup
     ? stripMentions(triggerBodyNormalized, ctx, cfg, agentId)
     : triggerBodyNormalized;
-  const normalizedResetBody = normalizeCommandBody(strippedForReset, {
-    botUsername: ctx.BotUsername,
-  });
-  const softReset = parseSoftResetCommand(normalizedResetBody);
-  const resetMatch = normalizedResetBody.match(/^\/(new|reset)(?:\s|$)/i);
-  const resetTriggered = Boolean(resetMatch) && !softReset.matched;
-  const previousSessionEntry = resetTriggered && existingEntry ? { ...existingEntry } : undefined;
-  const sessionId =
-    !resetTriggered && existingEntry ? existingEntry.sessionId : crypto.randomUUID();
+  const resetMatch = strippedForReset.match(/^\/(new|reset)(?:\s|$)/i);
+  const resetTriggered = Boolean(resetMatch);
   const bodyStripped = resetTriggered
-    ? normalizedResetBody.slice(resetMatch?.[0].length ?? 0).trimStart()
+    ? strippedForReset.slice(resetMatch?.[0].length ?? 0).trimStart()
     : (ctx.BodyForAgent ?? ctx.Body ?? "");
   const now = Date.now();
-  const sessionFile =
-    !resetTriggered && existingEntry?.sessionFile
-      ? existingEntry.sessionFile
-      : resolveSessionTranscriptPath(sessionId, agentId);
+  const sessionFile = path.join(workspaceDir, ".openclaw", "sessions", `${sessionId}.jsonl`);
   const sessionEntry: SessionEntry = {
-    ...(!resetTriggered ? existingEntry : undefined),
     sessionId,
     sessionFile,
     updatedAt: now,
-    sessionStartedAt: resetTriggered ? now : (existingEntry?.sessionStartedAt ?? now),
-    lastInteractionAt: now,
-    thinkingLevel: resetTriggered ? existingEntry?.thinkingLevel : existingEntry?.thinkingLevel,
-    verboseLevel: resetTriggered ? existingEntry?.verboseLevel : existingEntry?.verboseLevel,
-    reasoningLevel: resetTriggered ? existingEntry?.reasoningLevel : existingEntry?.reasoningLevel,
-    ttsAuto: resetTriggered ? existingEntry?.ttsAuto : existingEntry?.ttsAuto,
-    responseUsage: !resetTriggered ? existingEntry?.responseUsage : undefined,
-    modelOverride: resetTriggered ? existingEntry?.modelOverride : existingEntry?.modelOverride,
-    providerOverride: resetTriggered
-      ? existingEntry?.providerOverride
-      : existingEntry?.providerOverride,
-    authProfileOverride: resetTriggered
-      ? existingEntry?.authProfileOverride
-      : existingEntry?.authProfileOverride,
-    authProfileOverrideSource: resetTriggered
-      ? existingEntry?.authProfileOverrideSource
-      : existingEntry?.authProfileOverrideSource,
-    authProfileOverrideCompactionCount: resetTriggered
-      ? existingEntry?.authProfileOverrideCompactionCount
-      : existingEntry?.authProfileOverrideCompactionCount,
     ...(normalizedChatType ? { chatType: normalizedChatType } : {}),
     ...(normalizeOptionalString(ctx.Provider)
       ? { channel: normalizeOptionalString(ctx.Provider) }
@@ -277,7 +233,7 @@ export function initFastReplySessionState(params: {
       ? { groupChannel: normalizeOptionalString(ctx.GroupChannel) }
       : {}),
   };
-  sessionStore[sessionKey] = sessionEntry;
+  const sessionStore: Record<string, SessionEntry> = { [sessionKey]: sessionEntry };
   const sessionCtx: TemplateContext = {
     ...ctx,
     SessionKey: sessionKey,
@@ -288,19 +244,19 @@ export function initFastReplySessionState(params: {
   return {
     sessionCtx,
     sessionEntry,
+    previousSessionEntry: undefined,
     sessionStore,
     sessionKey,
     sessionId,
-    isNewSession: resetTriggered || !existingEntry,
+    isNewSession: resetTriggered || !ctx.SessionKey,
     resetTriggered,
     systemSent: false,
     abortedLastRun: false,
-    storePath,
+    storePath: normalizeOptionalString(cfg.session?.store) ?? "",
     sessionScope,
     groupResolution: undefined,
     isGroup,
     bodyStripped,
     triggerBodyNormalized,
-    previousSessionEntry,
   };
 }

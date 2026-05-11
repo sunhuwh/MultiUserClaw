@@ -1,8 +1,6 @@
 import { z } from "zod";
-import {
-  normalizeOptionalLowercaseString,
-  normalizeOptionalString as toText,
-} from "../shared/string-coerce.js";
+import { normalizeOptionalString as toText } from "../shared/string-coerce.js";
+import { normalizeMessageChannel } from "../utils/message-channel.js";
 
 export type ClaudeChannelMode = "off" | "on" | "auto";
 
@@ -19,7 +17,7 @@ export type ConversationDescriptor = {
   updatedAt?: number | null;
 };
 
-type SessionRow = {
+export type SessionRow = {
   key: string;
   channel?: string;
   lastChannel?: string;
@@ -46,10 +44,6 @@ type SessionRow = {
 
 export type SessionListResult = {
   sessions?: SessionRow[];
-};
-
-export type SessionDescribeResult = {
-  session?: SessionRow | null;
 };
 
 export type ChatHistoryResult = {
@@ -151,18 +145,8 @@ export function summarizeResult(
   };
 }
 
-export function summarizeStructuredResult(
-  label: string,
-  count: number,
-  payload: unknown,
-): { content: Array<{ type: "text"; text: string }> } {
-  return {
-    content: [{ type: "text", text: `${label}: ${count}\n\n${JSON.stringify(payload, null, 2)}` }],
-  };
-}
-
-function resolveConversationChannel(row: SessionRow): string | undefined {
-  return normalizeOptionalLowercaseString(
+export function resolveConversationChannel(row: SessionRow): string | undefined {
+  return normalizeMessageChannel(
     toText(row.deliveryContext?.channel) ??
       toText(row.lastChannel) ??
       toText(row.channel) ??

@@ -24,27 +24,18 @@ type TeamCandidate = {
 };
 
 function parseTeamCandidateRows(raw: string): TeamCandidate[] {
-  const candidates: TeamCandidate[] = [];
-  for (const rawLine of raw.split("\n")) {
-    const line = rawLine.replace(/\r/g, "").trim();
-    if (!line) {
-      continue;
-    }
-    const parts = line.split("\t");
-    if (parts.length < 3) {
-      continue;
-    }
-    const teamId = parts[0] ?? "";
-    if (!teamId) {
-      continue;
-    }
-    candidates.push({
-      teamId,
+  return raw
+    .split("\n")
+    .map((line) => line.replace(/\r/g, "").trim())
+    .filter(Boolean)
+    .map((line) => line.split("\t"))
+    .filter((parts) => parts.length >= 3)
+    .map((parts) => ({
+      teamId: parts[0] ?? "",
       isFree: (parts[1] ?? "0") === "1",
       teamName: parts[2] ?? "",
-    });
-  }
-  return candidates;
+    }))
+    .filter((candidate) => candidate.teamId.length > 0);
 }
 
 function pickTeamIdFromCandidates(params: {
@@ -224,13 +215,13 @@ printf 'BBBBB22222\\t0\\tBeta Team\\r\\n'`,
     expect(fallback).toBe("BBBBB22222");
   });
 
-  it("resolves a fallback team ID from Xcode team listings (smoke)", () => {
+  it("resolves a fallback team ID from Xcode team listings (smoke)", async () => {
     const fallbackResult = runScript(sharedHomeDir, { IOS_PYTHON_BIN: sharedFakePythonPath });
     expect(fallbackResult.ok).toBe(true);
     expect(fallbackResult.stdout).toBe("AAAAA11111");
   });
 
-  it("prints actionable guidance when Xcode account exists but no Team ID is resolvable", () => {
+  it("prints actionable guidance when Xcode account exists but no Team ID is resolvable", async () => {
     const result = runScript(sharedHomeDir);
     expect(result.ok).toBe(false);
     expect(

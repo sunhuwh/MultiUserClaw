@@ -3,7 +3,7 @@ import type { SessionManager } from "@mariozechner/pi-coding-agent";
 import { expect, vi } from "vitest";
 import type { TranscriptPolicy } from "./transcript-policy.js";
 
-type SessionEntry = { type: string; customType: string; data: unknown };
+export type SessionEntry = { type: string; customType: string; data: unknown };
 export type SanitizeSessionHistoryFn = (params: {
   messages: AgentMessage[];
   modelApi: string;
@@ -14,7 +14,7 @@ export type SanitizeSessionHistoryFn = (params: {
   modelId?: string;
   policy?: TranscriptPolicy;
 }) => Promise<AgentMessage[]>;
-type SanitizeSessionHistoryMockedHelpers = typeof import("./pi-embedded-helpers.js");
+export type SanitizeSessionHistoryMockedHelpers = typeof import("./pi-embedded-helpers.js");
 export type SanitizeSessionHistoryHarness = {
   sanitizeSessionHistory: SanitizeSessionHistoryFn;
   mockedHelpers: SanitizeSessionHistoryMockedHelpers;
@@ -60,43 +60,6 @@ export function makeSimpleUserMessages(): AgentMessage[] {
   return messages as unknown as AgentMessage[];
 }
 
-export async function createSanitizeSessionHistoryHelpersMock(extra: Record<string, unknown> = {}) {
-  return {
-    ...(await vi.importActual("./pi-embedded-helpers.js")),
-    sanitizeSessionMessagesImages: vi.fn(async (msgs) => msgs),
-    ...extra,
-  };
-}
-
-export async function createSanitizeSessionHistoryProviderRuntimeMock(
-  extra: Record<string, unknown> = {},
-) {
-  const actual = await vi.importActual<typeof import("../plugins/provider-runtime.js")>(
-    "../plugins/provider-runtime.js",
-  );
-  return {
-    ...actual,
-    resolveProviderRuntimePlugin: vi.fn(() => undefined),
-    sanitizeProviderReplayHistoryWithPlugin: vi.fn(() => undefined),
-    validateProviderReplayTurnsWithPlugin: vi.fn(() => undefined),
-    ...extra,
-  };
-}
-
-export function createSanitizeSessionHistoryProviderHookRuntimeMock(
-  extra: Record<string, unknown> = {},
-) {
-  return {
-    resolveProviderRuntimePlugin: vi.fn(() => undefined),
-    resolveProviderHookPlugin: vi.fn(() => undefined),
-    resolveProviderPluginsForHooks: vi.fn(() => []),
-    prepareProviderExtraParams: vi.fn(() => undefined),
-    wrapProviderStreamFn: vi.fn(() => undefined),
-    __testing: {},
-    ...extra,
-  };
-}
-
 export async function loadSanitizeSessionHistoryWithCleanMocks(): Promise<SanitizeSessionHistoryHarness> {
   vi.resetModules();
   vi.resetAllMocks();
@@ -111,29 +74,24 @@ export async function loadSanitizeSessionHistoryWithCleanMocks(): Promise<Saniti
 
 export function makeReasoningAssistantMessages(opts?: {
   thinkingSignature?: "object" | "json";
-  includeText?: boolean;
 }): AgentMessage[] {
   const thinkingSignature: unknown =
     opts?.thinkingSignature === "json"
       ? JSON.stringify({ id: "rs_test", type: "reasoning" })
       : { id: "rs_test", type: "reasoning" };
-  const content: Array<Record<string, unknown>> = [
-    {
-      type: "thinking",
-      thinking: "reasoning",
-      thinkingSignature,
-    },
-  ];
-  if (opts?.includeText) {
-    content.push({ type: "text", text: "answer" });
-  }
 
   // Intentional: we want to build message payloads that can carry non-string
   // signatures, but core typing currently expects a string.
   const messages = [
     {
       role: "assistant",
-      content,
+      content: [
+        {
+          type: "thinking",
+          thinking: "reasoning",
+          thinkingSignature,
+        },
+      ],
     },
   ];
 
@@ -160,18 +118,18 @@ export function expectOpenAIResponsesStrictSanitizeCall(
   sanitizeSessionMessagesImagesMock: unknown,
   messages: AgentMessage[],
 ) {
-  const mock = sanitizeSessionMessagesImagesMock as {
-    mock?: { calls: Array<[AgentMessage[], string, Record<string, unknown>]> };
-  };
-  const call = mock.mock?.calls[0];
-  expect(call?.[0]).toBe(messages);
-  expect(call?.[1]).toBe("session:history");
-  expect(call?.[2]?.sanitizeMode).toBe("images-only");
-  expect(call?.[2]?.sanitizeToolCallIds).toBe(false);
-  expect(call?.[2]?.toolCallIdMode).toBe("strict");
+  expect(sanitizeSessionMessagesImagesMock).toHaveBeenCalledWith(
+    messages,
+    "session:history",
+    expect.objectContaining({
+      sanitizeMode: "images-only",
+      sanitizeToolCallIds: true,
+      toolCallIdMode: "strict",
+    }),
+  );
 }
 
-function makeSnapshotChangedOpenAIReasoningScenario() {
+export function makeSnapshotChangedOpenAIReasoningScenario() {
   const sessionEntries = [
     makeModelSnapshotEntry({
       provider: "anthropic",
@@ -181,7 +139,7 @@ function makeSnapshotChangedOpenAIReasoningScenario() {
   ];
   return {
     sessionManager: makeInMemorySessionManager(sessionEntries),
-    messages: makeReasoningAssistantMessages({ thinkingSignature: "object", includeText: true }),
+    messages: makeReasoningAssistantMessages({ thinkingSignature: "object" }),
     modelId: "gpt-5.4",
   };
 }

@@ -1,8 +1,5 @@
 import fs from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import AjvPkg from "ajv";
-import type { JsonSchemaObject } from "openclaw/plugin-sdk/config-schema";
 import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_DIFFS_PLUGIN_SECURITY,
@@ -37,29 +34,15 @@ const FULL_DEFAULTS = {
   fileScale: 2.6,
   fileMaxWidth: 1280,
   mode: "file",
-  ttlSeconds: 21_600,
 } as const;
 
 function compileManifestConfigSchema() {
   const manifest = JSON.parse(
     fs.readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf8"),
-  ) as { configSchema: JsonSchemaObject };
+  ) as { configSchema: Record<string, unknown> };
   const Ajv = AjvPkg as unknown as new (opts?: object) => import("ajv").default;
   const ajv = new Ajv({ allErrors: true, strict: false, useDefaults: true });
   return ajv.compile(manifest.configSchema);
-}
-
-function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  expect(value, label).toBeTypeOf("object");
-  expect(value, label).not.toBeNull();
-  return value as Record<string, unknown>;
-}
-
-function expectFields(value: unknown, fields: Record<string, unknown>) {
-  const record = requireRecord(value, "record");
-  for (const [key, expected] of Object.entries(fields)) {
-    expect(record[key]).toEqual(expected);
-  }
 }
 
 describe("resolveDiffsPluginDefaults", () => {
@@ -76,57 +59,53 @@ describe("resolveDiffsPluginDefaults", () => {
   });
 
   it("clamps and falls back for invalid line spacing and indicators", () => {
-    expectFields(
+    expect(
       resolveDiffsPluginDefaults({
         defaults: {
           lineSpacing: -5,
           diffIndicators: "unknown",
         },
       }),
-      {
-        lineSpacing: 1,
-        diffIndicators: "bars",
-      },
-    );
+    ).toMatchObject({
+      lineSpacing: 1,
+      diffIndicators: "bars",
+    });
 
-    expectFields(
+    expect(
       resolveDiffsPluginDefaults({
         defaults: {
           lineSpacing: 9,
         },
       }),
-      {
-        lineSpacing: 3,
-      },
-    );
+    ).toMatchObject({
+      lineSpacing: 3,
+    });
 
-    expectFields(
+    expect(
       resolveDiffsPluginDefaults({
         defaults: {
           lineSpacing: Number.NaN,
         },
       }),
-      {
-        lineSpacing: DEFAULT_DIFFS_TOOL_DEFAULTS.lineSpacing,
-      },
-    );
+    ).toMatchObject({
+      lineSpacing: DEFAULT_DIFFS_TOOL_DEFAULTS.lineSpacing,
+    });
   });
 
   it("derives file defaults from quality preset and clamps explicit overrides", () => {
-    expectFields(
+    expect(
       resolveDiffsPluginDefaults({
         defaults: {
           fileQuality: "print",
         },
       }),
-      {
-        fileQuality: "print",
-        fileScale: 3,
-        fileMaxWidth: 1400,
-      },
-    );
+    ).toMatchObject({
+      fileQuality: "print",
+      fileScale: 3,
+      fileMaxWidth: 1400,
+    });
 
-    expectFields(
+    expect(
       resolveDiffsPluginDefaults({
         defaults: {
           fileQuality: "hq",
@@ -134,25 +113,23 @@ describe("resolveDiffsPluginDefaults", () => {
           fileMaxWidth: 99999,
         },
       }),
-      {
-        fileQuality: "hq",
-        fileScale: 4,
-        fileMaxWidth: 2400,
-      },
-    );
+    ).toMatchObject({
+      fileQuality: "hq",
+      fileScale: 4,
+      fileMaxWidth: 2400,
+    });
   });
 
   it("falls back to png for invalid file format defaults", () => {
-    expectFields(
+    expect(
       resolveDiffsPluginDefaults({
         defaults: {
           fileFormat: "invalid" as "png",
         },
       }),
-      {
-        fileFormat: "png",
-      },
-    );
+    ).toMatchObject({
+      fileFormat: "png",
+    });
   });
 
   it("resolves file render format from defaults and explicit overrides", () => {
@@ -168,20 +145,19 @@ describe("resolveDiffsPluginDefaults", () => {
   });
 
   it("accepts format as a config alias for fileFormat", () => {
-    expectFields(
+    expect(
       resolveDiffsPluginDefaults({
         defaults: {
           format: "pdf",
         },
       }),
-      {
-        fileFormat: "pdf",
-      },
-    );
+    ).toMatchObject({
+      fileFormat: "pdf",
+    });
   });
 
   it("accepts image* config aliases for backward compatibility", () => {
-    expectFields(
+    expect(
       resolveDiffsPluginDefaults({
         defaults: {
           imageFormat: "pdf",
@@ -190,37 +166,12 @@ describe("resolveDiffsPluginDefaults", () => {
           imageMaxWidth: 1024,
         },
       }),
-      {
-        fileFormat: "pdf",
-        fileQuality: "hq",
-        fileScale: 2.2,
-        fileMaxWidth: 1024,
-      },
-    );
-  });
-
-  it("accepts plugin-wide artifact TTL defaults", () => {
-    expectFields(
-      resolveDiffsPluginDefaults({
-        defaults: {
-          ttlSeconds: 21_600,
-        },
-      }),
-      {
-        ttlSeconds: 21_600,
-      },
-    );
-
-    expectFields(
-      resolveDiffsPluginDefaults({
-        defaults: {
-          ttlSeconds: 99_999,
-        },
-      }),
-      {
-        ttlSeconds: 21_600,
-      },
-    );
+    ).toMatchObject({
+      fileFormat: "pdf",
+      fileQuality: "hq",
+      fileScale: 2.2,
+      fileMaxWidth: 1024,
+    });
   });
 
   it("keeps loader-applied schema defaults from shadowing aliases and quality-derived defaults", () => {
@@ -233,7 +184,7 @@ describe("resolveDiffsPluginDefaults", () => {
       },
     };
     expect(validate(aliasOnly)).toBe(true);
-    expectFields(resolveDiffsPluginDefaults(aliasOnly), {
+    expect(resolveDiffsPluginDefaults(aliasOnly)).toMatchObject({
       fileFormat: "pdf",
       fileQuality: "hq",
       fileScale: 2.5,
@@ -246,7 +197,7 @@ describe("resolveDiffsPluginDefaults", () => {
       },
     };
     expect(validate(qualityOnly)).toBe(true);
-    expectFields(resolveDiffsPluginDefaults(qualityOnly), {
+    expect(resolveDiffsPluginDefaults(qualityOnly)).toMatchObject({
       fileQuality: "hq",
       fileScale: 2.5,
       fileMaxWidth: 1200,
@@ -291,75 +242,80 @@ describe("diffs plugin schema surfaces", () => {
   });
 
   it("preserves defaults and security for direct safeParse callers", () => {
-    const parsed = requireRecord(
+    expect(
       diffsPluginConfigSchema.safeParse?.({
         viewerBaseUrl: "https://example.com/openclaw/",
         defaults: {
           theme: "light",
-          ttlSeconds: 21_600,
         },
         security: {
           allowRemoteViewer: true,
         },
       }),
-      "parse result",
-    );
-    expect(parsed.success).toBe(true);
-    const data = requireRecord(parsed.data, "parse data");
-    expect(data.viewerBaseUrl).toBe("https://example.com/openclaw");
-    expectFields(data.defaults, {
-      fontFamily: "Fira Code",
-      fontSize: 15,
-      lineSpacing: 1.6,
-      layout: "unified",
-      showLineNumbers: true,
-      diffIndicators: "bars",
-      wordWrap: true,
-      background: true,
-      theme: "light",
-      fileFormat: "png",
-      fileQuality: "standard",
-      fileScale: 2,
-      fileMaxWidth: 960,
-      mode: "both",
-      ttlSeconds: 21_600,
+    ).toMatchObject({
+      success: true,
+      data: {
+        viewerBaseUrl: "https://example.com/openclaw",
+        defaults: {
+          fontFamily: "Fira Code",
+          fontSize: 15,
+          lineSpacing: 1.6,
+          layout: "unified",
+          showLineNumbers: true,
+          diffIndicators: "bars",
+          wordWrap: true,
+          background: true,
+          theme: "light",
+          fileFormat: "png",
+          fileQuality: "standard",
+          fileScale: 2,
+          fileMaxWidth: 960,
+          mode: "both",
+        },
+        security: {
+          allowRemoteViewer: true,
+        },
+      },
     });
-    expectFields(data.security, { allowRemoteViewer: true });
   });
 
   it("canonicalizes alias-driven defaults for direct safeParse callers", () => {
-    const parsed = requireRecord(
+    expect(
       diffsPluginConfigSchema.safeParse?.({
         defaults: {
           format: "pdf",
           imageQuality: "hq",
         },
       }),
-      "parse result",
-    );
-    expect(parsed.success).toBe(true);
-    const data = requireRecord(parsed.data, "parse data");
-    expectFields(data.defaults, {
-      fileFormat: "pdf",
-      fileQuality: "hq",
-      fileScale: 2.5,
-      fileMaxWidth: 1200,
+    ).toMatchObject({
+      success: true,
+      data: {
+        defaults: {
+          fileFormat: "pdf",
+          fileQuality: "hq",
+          fileScale: 2.5,
+          fileMaxWidth: 1200,
+        },
+      },
     });
   });
 
   it("rejects invalid viewerBaseUrl config values", () => {
-    const parsed = requireRecord(
+    expect(
       diffsPluginConfigSchema.safeParse?.({
         viewerBaseUrl: "javascript:alert(1)",
       }),
-      "parse result",
-    );
-    expect(parsed.success).toBe(false);
-    const error = requireRecord(parsed.error, "parse error");
-    const issues = error.issues as Array<{ path?: unknown; message?: unknown }>;
-    expect(issues).toHaveLength(1);
-    expect(issues[0]?.path).toEqual(["viewerBaseUrl"]);
-    expect(issues[0]?.message).toBe("viewerBaseUrl must use http or https: javascript:alert(1)");
+    ).toMatchObject({
+      success: false,
+      error: {
+        issues: [
+          {
+            path: ["viewerBaseUrl"],
+            message: "viewerBaseUrl must use http or https: javascript:alert(1)",
+          },
+        ],
+      },
+    });
   });
 
   it("keeps the runtime json schema in sync with the manifest config schema", () => {
@@ -442,59 +398,44 @@ describe("diffs viewer URL helpers", () => {
 
 describe("viewer assets", () => {
   it("prefers the built plugin asset layout when present", async () => {
-    const repoRoot = join(process.cwd(), "tmp", "diffs-viewer-assets-test-repo");
-    const builtRuntimePath = join(
-      repoRoot,
-      "dist",
-      "extensions",
-      "diffs",
-      "assets",
-      "viewer-runtime.js",
-    );
     const stat = vi.fn(async (path: string) => {
-      if (path === builtRuntimePath) {
+      if (path === "/repo/dist/extensions/diffs/assets/viewer-runtime.js") {
         return { mtimeMs: 1 };
       }
       const error = Object.assign(new Error(`missing: ${path}`), { code: "ENOENT" });
       throw error;
     });
 
-    const runtimeUrl = await resolveViewerRuntimeFileUrl({
-      baseUrl: pathToFileURL(join(repoRoot, "dist", "extensions", "diffs", "index.js")),
-      stat,
+    await expect(
+      resolveViewerRuntimeFileUrl({
+        baseUrl: "file:///repo/dist/extensions/diffs/index.js",
+        stat,
+      }),
+    ).resolves.toMatchObject({
+      pathname: "/repo/dist/extensions/diffs/assets/viewer-runtime.js",
     });
-
-    expect(fileURLToPath(runtimeUrl)).toBe(builtRuntimePath);
     expect(stat).toHaveBeenCalledTimes(1);
   });
 
   it("falls back to the source asset layout when the built artifact is absent", async () => {
-    const repoRoot = join(process.cwd(), "tmp", "diffs-viewer-assets-test-repo");
-    const sourceCandidatePath = join(
-      repoRoot,
-      "extensions",
-      "diffs",
-      "src",
-      "assets",
-      "viewer-runtime.js",
-    );
-    const sourceRuntimePath = join(repoRoot, "extensions", "diffs", "assets", "viewer-runtime.js");
     const stat = vi.fn(async (path: string) => {
-      if (path === sourceRuntimePath) {
+      if (path === "/repo/extensions/diffs/assets/viewer-runtime.js") {
         return { mtimeMs: 1 };
       }
       const error = Object.assign(new Error(`missing: ${path}`), { code: "ENOENT" });
       throw error;
     });
 
-    const runtimeUrl = await resolveViewerRuntimeFileUrl({
-      baseUrl: pathToFileURL(join(repoRoot, "extensions", "diffs", "src", "viewer-assets.js")),
-      stat,
+    await expect(
+      resolveViewerRuntimeFileUrl({
+        baseUrl: "file:///repo/extensions/diffs/src/viewer-assets.js",
+        stat,
+      }),
+    ).resolves.toMatchObject({
+      pathname: "/repo/extensions/diffs/assets/viewer-runtime.js",
     });
-
-    expect(fileURLToPath(runtimeUrl)).toBe(sourceRuntimePath);
-    expect(stat).toHaveBeenNthCalledWith(1, sourceCandidatePath);
-    expect(stat).toHaveBeenNthCalledWith(2, sourceRuntimePath);
+    expect(stat).toHaveBeenNthCalledWith(1, "/repo/extensions/diffs/src/assets/viewer-runtime.js");
+    expect(stat).toHaveBeenNthCalledWith(2, "/repo/extensions/diffs/assets/viewer-runtime.js");
   });
 
   it("serves a stable loader that points at the current runtime bundle", async () => {

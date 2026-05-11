@@ -1,6 +1,6 @@
-type SubagentDeliveryPath = "queued" | "steered" | "direct" | "none";
+export type SubagentDeliveryPath = "queued" | "steered" | "direct" | "none";
 
-type SubagentAnnounceQueueOutcome = "steered" | "queued" | "none" | "dropped";
+export type SubagentAnnounceQueueOutcome = "steered" | "queued" | "none" | "dropped";
 
 export type SubagentAnnounceDeliveryResult = {
   delivered: boolean;
@@ -9,9 +9,9 @@ export type SubagentAnnounceDeliveryResult = {
   phases?: SubagentAnnounceDispatchPhaseResult[];
 };
 
-type SubagentAnnounceDispatchPhase = "queue-primary" | "direct-primary" | "queue-fallback";
+export type SubagentAnnounceDispatchPhase = "queue-primary" | "direct-primary" | "queue-fallback";
 
-type SubagentAnnounceDispatchPhaseResult = {
+export type SubagentAnnounceDispatchPhaseResult = {
   phase: SubagentAnnounceDispatchPhase;
   delivered: boolean;
   path: SubagentDeliveryPath;

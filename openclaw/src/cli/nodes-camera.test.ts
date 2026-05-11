@@ -34,16 +34,6 @@ async function withCameraTempDir<T>(run: (dir: string) => Promise<T>): Promise<T
   return await withTempDir("openclaw-test-", run);
 }
 
-async function expectPathMissing(targetPath: string): Promise<void> {
-  try {
-    await fs.stat(targetPath);
-  } catch (error) {
-    expect((error as NodeJS.ErrnoException).code).toBe("ENOENT");
-    return;
-  }
-  throw new Error(`expected missing path: ${targetPath}`);
-}
-
 describe("nodes camera helpers", () => {
   beforeAll(async () => {
     ({
@@ -250,7 +240,7 @@ describe("nodes camera helpers", () => {
       await expect(
         writeUrlToFile(out, "https://198.51.100.42/broken.bin", { expectedHost: "198.51.100.42" }),
       ).rejects.toThrow(/stream exploded/i);
-      await expectPathMissing(out);
+      await expect(fs.stat(out)).rejects.toThrow();
     });
   });
 });

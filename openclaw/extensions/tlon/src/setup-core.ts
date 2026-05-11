@@ -13,8 +13,8 @@ import {
 import {
   normalizeOptionalString,
   normalizeStringifiedOptionalString,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
-import { buildTlonAccountFields, type TlonAccountFieldsInput } from "./account-fields.js";
+} from "openclaw/plugin-sdk/text-runtime";
+import { buildTlonAccountFields } from "./account-fields.js";
 import { normalizeShip } from "./targets.js";
 import { listTlonAccountIds, resolveTlonAccount, type TlonResolvedAccount } from "./types.js";
 import { validateUrbitBaseUrl } from "./urbit/base-url.js";
@@ -23,7 +23,16 @@ function tlonChannelId() {
   return "tlon" as const;
 }
 
-type TlonSetupInput = ChannelSetupInput & TlonAccountFieldsInput;
+export type TlonSetupInput = ChannelSetupInput & {
+  ship?: string;
+  url?: string;
+  code?: string;
+  dangerouslyAllowPrivateNetwork?: boolean;
+  groupChannels?: string[];
+  dmAllowlist?: string[];
+  autoDiscoverChannels?: boolean;
+  ownerShip?: string;
+};
 
 function isConfigured(account: TlonResolvedAccount): boolean {
   return Boolean(account.ship && account.url && account.code);
@@ -90,7 +99,7 @@ export function createTlonSetupWizardBase(params: TlonSetupWizardBaseParams): Ch
         placeholder: "https://your-ship-host",
         currentValue: ({ cfg, accountId }) => resolveTlonAccount(cfg, accountId).url ?? undefined,
         validate: ({ value }) => {
-          const next = validateUrbitBaseUrl(value ?? "");
+          const next = validateUrbitBaseUrl(String(value ?? ""));
           if (!next.ok) {
             return next.error;
           }

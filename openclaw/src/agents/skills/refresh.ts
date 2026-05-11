@@ -1,15 +1,19 @@
 import os from "node:os";
 import path from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { CONFIG_DIR, resolveUserPath } from "../../utils.js";
 import { resolvePluginSkillDirs } from "./plugin-skills.js";
 import {
+  type SkillsChangeEvent,
   bumpSkillsSnapshotVersion,
+  getSkillsSnapshotVersion,
+  registerSkillsChangeListener,
   resetSkillsRefreshStateForTest,
   setSkillsChangeListenerErrorHandler,
+  shouldRefreshSnapshotForVersion,
 } from "./refresh-state.js";
 export {
   bumpSkillsSnapshotVersion,
@@ -68,34 +72,24 @@ function resolveWatchPaths(workspaceDir: string, config?: OpenClawConfig): strin
   return paths;
 }
 
-function toWatchRoot(raw: string): string {
-  const normalized = raw.replaceAll("\\", "/");
-  return normalized.replace(/\/+$/, "") || normalized;
+function toWatchGlobRoot(raw: string): string {
+  // Chokidar treats globs as POSIX-ish patterns. Normalize Windows separators
+  // so `*` works consistently across platforms.
+  return raw.replaceAll("\\", "/").replace(/\/+$/, "");
 }
 
 function resolveWatchTargets(workspaceDir: string, config?: OpenClawConfig): string[] {
+  // Skills are defined by SKILL.md; watch only those files to avoid traversing
+  // or watching unrelated large trees (e.g. datasets) that can exhaust FDs.
   const targets = new Set<string>();
   for (const root of resolveWatchPaths(workspaceDir, config)) {
-    targets.add(toWatchRoot(root));
+    const globRoot = toWatchGlobRoot(root);
+    // Some configs point directly at a skill folder.
+    targets.add(`${globRoot}/SKILL.md`);
+    // Standard layout: <skillsRoot>/<skillName>/SKILL.md
+    targets.add(`${globRoot}/*/SKILL.md`);
   }
   return Array.from(targets).toSorted();
-}
-
-export function shouldIgnoreSkillsWatchPath(
-  watchPath: string,
-  stats?: { isDirectory?: () => boolean },
-): boolean {
-  if (DEFAULT_SKILLS_WATCH_IGNORED.some((re) => re.test(watchPath))) {
-    return true;
-  }
-  if (stats?.isDirectory?.()) {
-    return false;
-  }
-  if (!stats) {
-    return false;
-  }
-  const normalized = watchPath.replaceAll("\\", "/");
-  return path.posix.basename(normalized) !== "SKILL.md";
 }
 
 export function ensureSkillsWatcher(params: { workspaceDir: string; config?: OpenClawConfig }) {
@@ -137,13 +131,13 @@ export function ensureSkillsWatcher(params: { workspaceDir: string; config?: Ope
 
   const watcher = chokidar.watch(watchTargets, {
     ignoreInitial: true,
-    // Skill discovery reads root skills, direct child skills, and one grouped skill level.
-    depth: 2,
     awaitWriteFinish: {
       stabilityThreshold: debounceMs,
       pollInterval: 100,
     },
-    ignored: shouldIgnoreSkillsWatchPath,
+    // Avoid FD exhaustion on macOS when a workspace contains huge trees.
+    // This watcher only needs to react to SKILL.md changes.
+    ignored: DEFAULT_SKILLS_WATCH_IGNORED,
   });
 
   const state: SkillsWatchState = { watcher, pathsKey, debounceMs };
@@ -168,7 +162,6 @@ export function ensureSkillsWatcher(params: { workspaceDir: string; config?: Ope
   watcher.on("add", (p) => schedule(p));
   watcher.on("change", (p) => schedule(p));
   watcher.on("unlink", (p) => schedule(p));
-  watcher.on("unlinkDir", (p) => schedule(p));
   watcher.on("error", (err) => {
     log.warn(`skills watcher error (${workspaceDir}): ${String(err)}`);
   });

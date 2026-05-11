@@ -30,9 +30,7 @@ function createExecTool(workspaceDir: string) {
     exec: { host: "gateway", ask: "off", security: "full" },
   });
   const execTool = tools.find((tool) => tool.name === "exec");
-  if (!execTool) {
-    throw new Error("expected exec tool");
-  }
+  expect(execTool).toBeDefined();
   return execTool;
 }
 
@@ -47,11 +45,9 @@ async function expectExecCwdResolvesTo(
     result?.details && typeof result.details === "object" && "cwd" in result.details
       ? (result.details as { cwd?: string }).cwd
       : undefined;
-  if (typeof cwd !== "string" || cwd.length === 0) {
-    throw new Error("expected exec result cwd");
-  }
+  expect(cwd).toBeTruthy();
   const [resolvedOutput, resolvedExpected] = await Promise.all([
-    fs.realpath(cwd),
+    fs.realpath(String(cwd)),
     fs.realpath(expectedDir),
   ]);
   expect(resolvedOutput).toBe(resolvedExpected);

@@ -1,17 +1,10 @@
 import path from "node:path";
 import { formatErrorMessage } from "../infra/errors.js";
-import {
-  fetchWithSsrFGuard,
-  withStrictGuardedFetchMode,
-  withTrustedExplicitProxyGuardedFetchMode,
-} from "../infra/net/fetch-guard.js";
+import { fetchWithSsrFGuard, withStrictGuardedFetchMode } from "../infra/net/fetch-guard.js";
 import type { LookupFn, PinnedDispatcherPolicy, SsrFPolicy } from "../infra/net/ssrf.js";
 import { redactSensitiveText } from "../logging/redact.js";
-import { MAX_DOCUMENT_BYTES } from "./constants.js";
 import { detectMime, extensionForMime } from "./mime.js";
 import { readResponseTextSnippet, readResponseWithLimit } from "./read-response-with-limit.js";
-
-export const DEFAULT_FETCH_MEDIA_MAX_BYTES = MAX_DOCUMENT_BYTES;
 
 type FetchMediaResult = {
   buffer: Buffer;
@@ -49,14 +42,8 @@ type FetchMediaOptions = {
   readIdleTimeoutMs?: number;
   ssrfPolicy?: SsrFPolicy;
   lookupFn?: LookupFn;
-  dispatcherPolicy?: PinnedDispatcherPolicy;
   dispatcherAttempts?: FetchDispatcherAttempt[];
   shouldRetryFetchError?: (error: unknown) => boolean;
-  /**
-   * Allow an operator-configured explicit proxy to resolve target DNS after
-   * hostname-policy checks instead of forcing local pinned-DNS first.
-   */
-  trustExplicitProxyDns?: boolean;
 };
 
 function stripQuotes(value: string): string {
@@ -117,10 +104,8 @@ export async function fetchRemoteMedia(options: FetchMediaOptions): Promise<Fetc
     readIdleTimeoutMs,
     ssrfPolicy,
     lookupFn,
-    dispatcherPolicy,
     dispatcherAttempts,
     shouldRetryFetchError,
-    trustExplicitProxyDns,
   } = options;
   const sourceUrl = redactMediaUrl(url);
 
@@ -130,12 +115,10 @@ export async function fetchRemoteMedia(options: FetchMediaOptions): Promise<Fetc
   const attempts =
     dispatcherAttempts && dispatcherAttempts.length > 0
       ? dispatcherAttempts
-      : [{ dispatcherPolicy, lookupFn }];
+      : [{ dispatcherPolicy: undefined, lookupFn }];
   const runGuardedFetch = async (attempt: FetchDispatcherAttempt) =>
     await fetchWithSsrFGuard(
-      (trustExplicitProxyDns && attempt.dispatcherPolicy?.mode === "explicit-proxy"
-        ? withTrustedExplicitProxyGuardedFetchMode
-        : withStrictGuardedFetchMode)({
+      withStrictGuardedFetchMode({
         url,
         fetchImpl,
         init: requestInit,
@@ -212,28 +195,29 @@ export async function fetchRemoteMedia(options: FetchMediaOptions): Promise<Fetc
       );
     }
 
-    const effectiveMaxBytes = maxBytes ?? DEFAULT_FETCH_MEDIA_MAX_BYTES;
     const contentLength = res.headers.get("content-length");
-    if (contentLength) {
+    if (maxBytes && contentLength) {
       const length = Number(contentLength);
-      if (Number.isFinite(length) && length > effectiveMaxBytes) {
+      if (Number.isFinite(length) && length > maxBytes) {
         throw new MediaFetchError(
           "max_bytes",
-          `Failed to fetch media from ${sourceUrl}: content length ${length} exceeds maxBytes ${effectiveMaxBytes}`,
+          `Failed to fetch media from ${sourceUrl}: content length ${length} exceeds maxBytes ${maxBytes}`,
         );
       }
     }
 
     let buffer: Buffer;
     try {
-      buffer = await readResponseWithLimit(res, effectiveMaxBytes, {
-        onOverflow: ({ maxBytes, res }) =>
-          new MediaFetchError(
-            "max_bytes",
-            `Failed to fetch media from ${redactMediaUrl(res.url || url)}: payload exceeds maxBytes ${maxBytes}`,
-          ),
-        chunkTimeoutMs: readIdleTimeoutMs,
-      });
+      buffer = maxBytes
+        ? await readResponseWithLimit(res, maxBytes, {
+            onOverflow: ({ maxBytes, res }) =>
+              new MediaFetchError(
+                "max_bytes",
+                `Failed to fetch media from ${redactMediaUrl(res.url || url)}: payload exceeds maxBytes ${maxBytes}`,
+              ),
+            chunkTimeoutMs: readIdleTimeoutMs,
+          })
+        : Buffer.from(await res.arrayBuffer());
     } catch (err) {
       if (err instanceof MediaFetchError) {
         throw err;

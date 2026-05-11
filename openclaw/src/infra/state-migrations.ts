@@ -2,11 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveDefaultAgentId } from "../agents/agent-scope.js";
-import {
-  listBundledChannelLegacySessionSurfaces,
-  listBundledChannelLegacyStateMigrationDetectors,
-} from "../channels/plugins/bundled.js";
+import { iterateBootstrapChannelPlugins } from "../channels/plugins/bootstrap-registry.js";
+import { listBundledChannelPlugins } from "../channels/plugins/bundled.js";
 import type { ChannelLegacyStateMigrationPlan } from "../channels/plugins/types.core.js";
+import type { OpenClawConfig } from "../config/config.js";
 import {
   resolveLegacyStateDirs,
   resolveNewStateDir,
@@ -17,7 +16,6 @@ import type { SessionEntry } from "../config/sessions.js";
 import { saveSessionStore } from "../config/sessions.js";
 import { canonicalizeMainSessionAlias } from "../config/sessions/main-session.js";
 import type { SessionScope } from "../config/sessions/types.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import {
   buildAgentMainSessionKey,
@@ -75,7 +73,6 @@ type MigrationLogger = {
 
 let autoMigrateChecked = false;
 let autoMigrateStateDirChecked = false;
-let cachedLegacySessionSurfaces: LegacySessionSurface[] | null = null;
 
 type LegacySessionSurface = {
   isLegacyGroupSessionKey?: (key: string) => boolean;
@@ -86,11 +83,14 @@ type LegacySessionSurface = {
 };
 
 function getLegacySessionSurfaces(): LegacySessionSurface[] {
-  // Legacy migrations run on cold doctor/startup paths. Prefer the narrower
-  // setup plugin surface here so session-key cleanup does not materialize full
-  // bundled channel runtimes.
-  cachedLegacySessionSurfaces ??= [...listBundledChannelLegacySessionSurfaces()];
-  return cachedLegacySessionSurfaces;
+  const surfaces: LegacySessionSurface[] = [];
+  for (const plugin of iterateBootstrapChannelPlugins()) {
+    const surface = plugin.messaging;
+    if (surface && typeof surface === "object") {
+      surfaces.push(surface);
+    }
+  }
+  return surfaces;
 }
 
 function isSurfaceGroupKey(key: string): boolean {
@@ -219,8 +219,9 @@ function canonicalizeSessionKeyForAgent(params: {
     return normalizeLowercaseStringOrEmpty(`agent:${agentId}:subagent:${rest}`);
   }
   // Channel-owned legacy shapes must win before the generic group/channel
-  // fallback so plugin-specific legacy group keys can canonicalize to their
-  // owning channel instead of the generic `...:unknown:group:...` bucket.
+  // fallback. WhatsApp shipped channel-qualified group sessions, so
+  // `group:123@g.us` must canonicalize to `...:whatsapp:group:...`, not the
+  // generic `...:unknown:group:...` bucket.
   for (const surface of getLegacySessionSurfaces()) {
     const canonicalized = surface.canonicalizeLegacySessionKey?.({
       key: raw,
@@ -418,7 +419,6 @@ function removeDirIfEmpty(dir: string) {
 
 export function resetAutoMigrateLegacyStateForTest() {
   autoMigrateChecked = false;
-  cachedLegacySessionSurfaces = null;
 }
 
 export function resetAutoMigrateLegacyAgentDirForTest() {
@@ -667,11 +667,8 @@ async function collectChannelLegacyStateMigrationPlans(params: {
   oauthDir: string;
 }): Promise<ChannelLegacyStateMigrationPlan[]> {
   const plans: ChannelLegacyStateMigrationPlan[] = [];
-  // Legacy state detection belongs on a narrow setup-entry surface so doctor
-  // does not cold-load unrelated runtime channel code.
-  const detectors = listBundledChannelLegacyStateMigrationDetectors({ config: params.cfg });
-  for (const detectLegacyStateMigrations of detectors) {
-    const detected = await detectLegacyStateMigrations({
+  for (const plugin of listBundledChannelPlugins()) {
+    const detected = await plugin.lifecycle?.detectLegacyStateMigrations?.({
       cfg: params.cfg,
       env: params.env,
       stateDir: params.stateDir,

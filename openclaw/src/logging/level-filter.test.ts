@@ -124,7 +124,10 @@ describe("getChildLogger minLevel inheritance", () => {
 
     logging.toPinoLikeLogger(base, "info").child({ component: "test" });
 
-    expect(getSubLoggerSpy).toHaveBeenCalledOnce();
-    expect(getSubLoggerSpy.mock.calls[0]?.[0]?.minLevel).toBe(logging.levelToMinLevel("error"));
+    expect(getSubLoggerSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        minLevel: logging.levelToMinLevel("error"),
+      }),
+    );
   });
 });

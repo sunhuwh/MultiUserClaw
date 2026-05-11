@@ -1,10 +1,6 @@
 import crypto from "node:crypto";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
-import {
-  resolveVoiceCallEffectiveConfig,
-  resolveVoiceCallSessionKey,
-  type CallMode,
-} from "../config.js";
+import type { CallMode } from "../config.js";
 import { resolvePreferredTtsVoice } from "../tts-provider-voice.js";
 import {
   type EndReason,
@@ -20,7 +16,7 @@ import { getCallByProviderCallId } from "./lookup.js";
 import { addTranscriptEntry, transitionState } from "./state.js";
 import { persistCallRecord } from "./store.js";
 import { clearTranscriptWaiter, waitForFinalTranscript } from "./timers.js";
-import { generateDtmfRedirectTwiml, generateNotifyTwiml } from "./twiml.js";
+import { generateNotifyTwiml } from "./twiml.js";
 
 type InitiateContext = Pick<
   CallManagerContext,
@@ -106,12 +102,6 @@ function requireConnectedCall(ctx: ConnectedCallContext, callId: CallId): Connec
   };
 }
 
-function validateDtmfDigits(digits: string): string | null {
-  return /^[0-9*#wWpP,]+$/.test(digits)
-    ? null
-    : "digits may only contain digits, *, #, comma, w, p";
-}
-
 export async function initiateCall(
   ctx: InitiateContext,
   to: string,
@@ -122,21 +112,6 @@ export async function initiateCall(
     typeof options === "string" ? { message: options } : (options ?? {});
   const initialMessage = opts.message;
   const mode = opts.mode ?? ctx.config.outbound.defaultMode;
-  const dtmfSequence = opts.dtmfSequence;
-  const requesterSessionKey = opts.requesterSessionKey?.trim();
-  if (dtmfSequence) {
-    const validationError = validateDtmfDigits(dtmfSequence);
-    if (validationError) {
-      return { callId: "", success: false, error: validationError };
-    }
-    if (mode !== "conversation") {
-      return {
-        callId: "",
-        success: false,
-        error: "dtmfSequence requires conversation mode",
-      };
-    }
-  }
 
   if (!ctx.provider) {
     return { callId: "", success: false, error: "Provider not initialized" };
@@ -167,19 +142,13 @@ export async function initiateCall(
     state: "initiated",
     from,
     to,
-    sessionKey: resolveVoiceCallSessionKey({
-      config: ctx.config,
-      callId,
-      phone: to,
-      explicitSessionKey: sessionKey,
-    }),
+    sessionKey,
     startedAt: Date.now(),
     transcript: [],
     processedEventIds: [],
     metadata: {
       ...(initialMessage && { initialMessage }),
       mode,
-      ...(requesterSessionKey ? { requesterSessionKey } : {}),
     },
   };
 
@@ -189,16 +158,10 @@ export async function initiateCall(
   try {
     // For notify mode with a message, use inline TwiML with <Say>.
     let inlineTwiml: string | undefined;
-    let preConnectTwiml: string | undefined;
     if (mode === "notify" && initialMessage) {
       const pollyVoice = mapVoiceToPolly(resolvePreferredTtsVoice(ctx.config));
       inlineTwiml = generateNotifyTwiml(initialMessage, pollyVoice);
       console.log(`[voice-call] Using inline TwiML for notify mode (voice: ${pollyVoice})`);
-    } else if (dtmfSequence) {
-      preConnectTwiml = generateDtmfRedirectTwiml(dtmfSequence, ctx.webhookUrl);
-      console.log(
-        `[voice-call] Using pre-connect DTMF TwiML for call ${callId} (digits=${dtmfSequence.length}, initialMessage=${initialMessage ? "yes" : "no"})`,
-      );
     }
 
     const result = await ctx.provider.initiateCall({
@@ -207,15 +170,11 @@ export async function initiateCall(
       to,
       webhookUrl: ctx.webhookUrl,
       inlineTwiml,
-      preConnectTwiml,
     });
 
     callRecord.providerCallId = result.providerCallId;
     ctx.providerCallIdMap.set(result.providerCallId, callId);
     persistCallRecord(ctx.storePath, callRecord);
-    console.log(
-      `[voice-call] Outbound call initiated: callId=${callId} providerCallId=${result.providerCallId} mode=${mode} preConnectDtmf=${preConnectTwiml ? "yes" : "no"} initialMessage=${initialMessage ? "yes" : "no"}`,
-    );
 
     return { callId, success: true };
   } catch (err) {
@@ -248,11 +207,7 @@ export async function speak(
     transitionState(call, "speaking");
     persistCallRecord(ctx.storePath, call);
 
-    const numberRouteKey =
-      typeof call.metadata?.numberRouteKey === "string" ? call.metadata.numberRouteKey : call.to;
-    const voice = resolvePreferredTtsVoice(
-      resolveVoiceCallEffectiveConfig(ctx.config, numberRouteKey).config,
-    );
+    const voice = provider.name === "twilio" ? resolvePreferredTtsVoice(ctx.config) : undefined;
     await provider.playTts({
       callId,
       providerCallId,
@@ -268,48 +223,6 @@ export async function speak(
     // A failed playback should not leave the call stuck in speaking state.
     transitionState(call, "listening");
     persistCallRecord(ctx.storePath, call);
-    return { success: false, error: formatErrorMessage(err) };
-  }
-}
-
-function shouldStartListeningAfterInitialMessage(ctx: ConversationContext): boolean {
-  if (ctx.provider?.name !== "twilio") {
-    return true;
-  }
-  if (!ctx.config.streaming.enabled) {
-    return true;
-  }
-  const streamAwareProvider = ctx.provider as typeof ctx.provider & {
-    isConversationStreamConnectEnabled?: () => boolean;
-  };
-  return streamAwareProvider.isConversationStreamConnectEnabled?.() !== true;
-}
-
-export async function sendDtmf(
-  ctx: SpeakContext,
-  callId: CallId,
-  digits: string,
-): Promise<{ success: boolean; error?: string }> {
-  const validationError = validateDtmfDigits(digits);
-  if (validationError) {
-    return { success: false, error: validationError };
-  }
-  const connected = requireConnectedCall(ctx, callId);
-  if (!connected.ok) {
-    return { success: false, error: connected.error };
-  }
-  if (!connected.provider.sendDtmf) {
-    return { success: false, error: `${connected.provider.name} does not support outbound DTMF` };
-  }
-
-  try {
-    await connected.provider.sendDtmf({
-      callId,
-      providerCallId: connected.providerCallId,
-      digits,
-    });
-    return { success: true };
-  } catch (err) {
     return { success: false, error: formatErrorMessage(err) };
   }
 }
@@ -368,17 +281,6 @@ export async function speakInitialMessage(
           await endCall(ctx, call.callId);
         }
       }, delaySec * 1000);
-    } else if (
-      mode === "conversation" &&
-      ctx.provider &&
-      shouldStartListeningAfterInitialMessage(ctx)
-    ) {
-      transitionState(call, "listening");
-      persistCallRecord(ctx.storePath, call);
-      await ctx.provider.startListening({
-        callId: call.callId,
-        providerCallId,
-      });
     }
   } finally {
     ctx.initialMessageInFlight.delete(call.callId);

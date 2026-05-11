@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
 import path from "node:path";
 import type { Page } from "playwright-core";
 import { resolvePreferredOpenClawTmpDir } from "../infra/tmp-openclaw-dir.js";
-import { writeExternalFileWithinOutputRoot } from "./output-files.js";
+import { writeViaSiblingTempPath } from "./output-atomic.js";
 import { DEFAULT_UPLOAD_DIR, resolveStrictExistingPathsWithinRoot } from "./paths.js";
 import {
   ensurePageState,
@@ -27,18 +28,11 @@ function buildTempDownloadPath(fileName: string): string {
 }
 
 function createPageDownloadWaiter(page: Page, timeoutMs: number) {
-  const state = ensurePageState(page);
-  state.downloadWaiterDepth += 1;
   let done = false;
   let timer: NodeJS.Timeout | undefined;
   let handler: ((download: unknown) => void) | undefined;
-  let depthReleased = false;
 
   const cleanup = () => {
-    if (!depthReleased) {
-      depthReleased = true;
-      state.downloadWaiterDepth = Math.max(0, state.downloadWaiterDepth - 1);
-    }
     if (timer) {
       clearTimeout(timer);
     }
@@ -88,22 +82,28 @@ type DownloadPayload = {
   saveAs?: (outPath: string) => Promise<void>;
 };
 
-async function saveDownloadPayload(download: DownloadPayload, outPath: string, rootDir?: string) {
+async function saveDownloadPayload(download: DownloadPayload, outPath: string) {
   const suggested = download.suggestedFilename?.() || "download.bin";
   const requestedPath = outPath?.trim();
   const resolvedOutPath = path.resolve(requestedPath || buildTempDownloadPath(suggested));
-  const finalPath = await writeExternalFileWithinOutputRoot({
-    rootDir,
-    path: resolvedOutPath,
-    write: async (tempPath) => {
-      await download.saveAs?.(tempPath);
-    },
-  });
+  await fs.mkdir(path.dirname(resolvedOutPath), { recursive: true });
+
+  if (!requestedPath) {
+    await download.saveAs?.(resolvedOutPath);
+  } else {
+    await writeViaSiblingTempPath({
+      rootDir: path.dirname(resolvedOutPath),
+      targetPath: resolvedOutPath,
+      writeTemp: async (tempPath) => {
+        await download.saveAs?.(tempPath);
+      },
+    });
+  }
 
   return {
     url: download.url?.() || "",
     suggestedFilename: suggested,
-    path: finalPath,
+    path: resolvedOutPath,
   };
 }
 
@@ -112,14 +112,13 @@ async function awaitDownloadPayload(params: {
   state: ReturnType<typeof ensurePageState>;
   armId: number;
   outPath?: string;
-  rootDir?: string;
 }) {
   try {
     const download = (await params.waiter.promise) as DownloadPayload;
     if (params.state.armIdDownload !== params.armId) {
       throw new Error("Download was superseded by another waiter");
     }
-    return await saveDownloadPayload(download, params.outPath ?? "", params.rootDir);
+    return await saveDownloadPayload(download, params.outPath ?? "");
   } catch (err) {
     params.waiter.cancel();
     throw err;
@@ -223,7 +222,6 @@ export async function waitForDownloadViaPlaywright(opts: {
   cdpUrl: string;
   targetId?: string;
   path?: string;
-  rootDir?: string;
   timeoutMs?: number;
 }): Promise<{
   url: string;
@@ -238,13 +236,7 @@ export async function waitForDownloadViaPlaywright(opts: {
   const armId = state.armIdDownload;
 
   const waiter = createPageDownloadWaiter(page, timeout);
-  return await awaitDownloadPayload({
-    waiter,
-    state,
-    armId,
-    outPath: opts.path,
-    rootDir: opts.rootDir,
-  });
+  return await awaitDownloadPayload({ waiter, state, armId, outPath: opts.path });
 }
 
 export async function downloadViaPlaywright(opts: {
@@ -252,7 +244,6 @@ export async function downloadViaPlaywright(opts: {
   targetId?: string;
   ref: string;
   path: string;
-  rootDir?: string;
   timeoutMs?: number;
 }): Promise<{
   url: string;
@@ -281,13 +272,7 @@ export async function downloadViaPlaywright(opts: {
     } catch (err) {
       throw toAIFriendlyError(err, ref);
     }
-    return await awaitDownloadPayload({
-      waiter,
-      state,
-      armId,
-      outPath,
-      rootDir: opts.rootDir,
-    });
+    return await awaitDownloadPayload({ waiter, state, armId, outPath });
   } catch (err) {
     waiter.cancel();
     throw err;

@@ -1,6 +1,6 @@
 import path from "node:path";
 import { GrammyError } from "grammy";
-import { root as fsRoot } from "openclaw/plugin-sdk/file-access-runtime";
+import { readFileWithinRoot } from "openclaw/plugin-sdk/infra-runtime";
 import type { TelegramTransport } from "../fetch.js";
 import { cacheSticker, getCachedSticker } from "../sticker-cache.js";
 import {
@@ -151,22 +151,11 @@ function resolveRequiredTelegramTransport(transport?: TelegramTransport): Telegr
   return {
     fetch: resolvedFetch,
     sourceFetch: resolvedFetch,
-    // Caller-owned transport constructed from the globalThis fetch — it owns
-    // no dispatcher lifecycle of its own, so close() is a no-op.
-    close: async () => {},
   };
 }
 
 /** Default idle timeout for Telegram media downloads (30 seconds). */
 const TELEGRAM_DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
-
-function usesTrustedTelegramExplicitProxy(transport: TelegramTransport): boolean {
-  return (
-    transport.dispatcherAttempts?.some(
-      (attempt) => attempt.dispatcherPolicy?.mode === "explicit-proxy",
-    ) ?? false
-  );
-}
 
 function resolveTrustedLocalTelegramRoot(
   filePath: string,
@@ -203,8 +192,9 @@ async function downloadAndSaveTelegramFile(params: {
   if (trustedLocalFile) {
     let localFile;
     try {
-      const root = await fsRoot(trustedLocalFile.rootDir);
-      localFile = await root.read(trustedLocalFile.relativePath, {
+      localFile = await readFileWithinRoot({
+        rootDir: trustedLocalFile.rootDir,
+        relativePath: trustedLocalFile.relativePath,
         maxBytes: params.maxBytes,
       });
     } catch (err) {
@@ -235,7 +225,6 @@ async function downloadAndSaveTelegramFile(params: {
     url,
     fetchImpl: transport.sourceFetch,
     dispatcherAttempts: transport.dispatcherAttempts,
-    trustExplicitProxyDns: usesTrustedTelegramExplicitProxy(transport),
     shouldRetryFetchError: shouldRetryTelegramTransportFallback,
     filePathHint: params.filePath,
     maxBytes: params.maxBytes,

@@ -1,14 +1,14 @@
 import { expect, it } from "vitest";
 
-export type ResolveTargetMode = "explicit" | "implicit" | "heartbeat";
+type ResolveTargetMode = "explicit" | "implicit" | "heartbeat";
 
-export type ResolveTargetResult = {
+type ResolveTargetResult = {
   ok: boolean;
   to?: string;
   error?: unknown;
 };
 
-export type ResolveTargetFn = (params: {
+type ResolveTargetFn = (params: {
   to?: string;
   mode: ResolveTargetMode;
   allowFrom: string[];
@@ -19,12 +19,6 @@ export function installCommonResolveTargetErrorCases(params: {
   implicitAllowFrom: string[];
 }) {
   const { resolveTarget, implicitAllowFrom } = params;
-  const expectResolveTargetError = (result: ResolveTargetResult) => {
-    expect(result.ok).toBe(false);
-    if (result.error === undefined) {
-      throw new Error("expected resolveTarget to return an error");
-    }
-  };
 
   it("should error on normalization failure with allowlist (implicit mode)", () => {
     const result = resolveTarget({
@@ -33,7 +27,8 @@ export function installCommonResolveTargetErrorCases(params: {
       allowFrom: implicitAllowFrom,
     });
 
-    expectResolveTargetError(result);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeDefined();
   });
 
   it("should error when no target provided with allowlist", () => {
@@ -43,7 +38,8 @@ export function installCommonResolveTargetErrorCases(params: {
       allowFrom: implicitAllowFrom,
     });
 
-    expectResolveTargetError(result);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeDefined();
   });
 
   it("should error when no target and no allowlist", () => {
@@ -53,7 +49,8 @@ export function installCommonResolveTargetErrorCases(params: {
       allowFrom: [],
     });
 
-    expectResolveTargetError(result);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeDefined();
   });
 
   it("should handle whitespace-only target", () => {
@@ -63,6 +60,7 @@ export function installCommonResolveTargetErrorCases(params: {
       allowFrom: [],
     });
 
-    expectResolveTargetError(result);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeDefined();
   });
 }

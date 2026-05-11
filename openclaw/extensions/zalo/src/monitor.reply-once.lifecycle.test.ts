@@ -1,24 +1,22 @@
-import { withServer } from "openclaw/plugin-sdk/test-env";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { withServer } from "../../../test/helpers/http-test-server.js";
 import type { PluginRuntime } from "../runtime-api.js";
 import {
   createLifecycleMonitorSetup,
   createTextUpdate,
   postWebhookReplay,
   settleAsyncWork,
-} from "./test-support/lifecycle-test-support.js";
+} from "../test-support/lifecycle-test-support.js";
 import {
   resetLifecycleTestState,
   sendMessageMock,
   setLifecycleRuntimeCore,
   startWebhookLifecycleMonitor,
-} from "./test-support/monitor-mocks-test-support.js";
+} from "../test-support/monitor-mocks-test-support.js";
 
 describe("Zalo reply-once lifecycle", () => {
   const finalizeInboundContextMock = vi.fn((ctx: Record<string, unknown>) => ctx);
-  const recordInboundSessionMock = vi.fn(
-    async (_input: { sessionKey?: string; ctx?: Record<string, unknown> }) => undefined,
-  );
+  const recordInboundSessionMock = vi.fn(async () => undefined);
   const resolveAgentRouteMock = vi.fn(() => ({
     agentId: "main",
     channel: "zalo",
@@ -49,7 +47,7 @@ describe("Zalo reply-once lifecycle", () => {
     });
   });
 
-  afterAll(async () => {
+  afterEach(async () => {
     await resetLifecycleTestState();
   });
 
@@ -67,10 +65,7 @@ describe("Zalo reply-once lifecycle", () => {
       },
     );
 
-    const monitor = await startWebhookLifecycleMonitor({
-      ...createReplyOnceMonitorSetup(),
-      cacheKey: "zalo-reply-once-lifecycle",
-    });
+    const monitor = await startWebhookLifecycleMonitor(createReplyOnceMonitorSetup());
 
     try {
       await withServer(
@@ -94,24 +89,31 @@ describe("Zalo reply-once lifecycle", () => {
         },
       );
 
+      expect(finalizeInboundContextMock).toHaveBeenCalledTimes(1);
+      expect(finalizeInboundContextMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          AccountId: "acct-zalo-lifecycle",
+          SessionKey: "agent:main:zalo:direct:dm-chat-1",
+          MessageSid: expect.stringContaining("zalo-replay-"),
+          From: "zalo:user-1",
+          To: "zalo:dm-chat-1",
+        }),
+      );
       expect(recordInboundSessionMock).toHaveBeenCalledTimes(1);
-      const [recordArgs] = recordInboundSessionMock.mock.calls[0] ?? [];
-      expect(recordArgs?.sessionKey).toBe("agent:main:zalo:direct:dm-chat-1");
-      expect(recordArgs?.ctx?.AccountId).toBe("acct-zalo-lifecycle");
-      expect(recordArgs?.ctx?.SessionKey).toBe("agent:main:zalo:direct:dm-chat-1");
-      expect(recordArgs?.ctx?.From).toBe("zalo:user-1");
-      expect(recordArgs?.ctx?.To).toBe("zalo:dm-chat-1");
-      expect(recordArgs?.ctx?.MessageSid).toContain("zalo-replay-");
+      expect(recordInboundSessionMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionKey: "agent:main:zalo:direct:dm-chat-1",
+        }),
+      );
       expect(sendMessageMock).toHaveBeenCalledTimes(1);
-      const [sendToken, sendPayload, sendOptions] = sendMessageMock.mock.calls[0] as [
-        string,
-        { chat_id?: string; text?: string },
-        unknown,
-      ];
-      expect(sendToken).toBe("zalo-token");
-      expect(sendPayload.chat_id).toBe("dm-chat-1");
-      expect(sendPayload.text).toBe("zalo reply once");
-      expect(sendOptions).toBeUndefined();
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        "zalo-token",
+        expect.objectContaining({
+          chat_id: "dm-chat-1",
+          text: "zalo reply once",
+        }),
+        undefined,
+      );
     } finally {
       await monitor.stop();
     }
@@ -129,10 +131,7 @@ describe("Zalo reply-once lifecycle", () => {
       },
     );
 
-    const monitor = await startWebhookLifecycleMonitor({
-      ...createReplyOnceMonitorSetup(),
-      cacheKey: "zalo-reply-once-lifecycle",
-    });
+    const monitor = await startWebhookLifecycleMonitor(createReplyOnceMonitorSetup());
 
     try {
       await withServer(

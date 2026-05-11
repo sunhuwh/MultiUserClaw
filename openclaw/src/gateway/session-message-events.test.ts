@@ -19,26 +19,21 @@ import {
 installGatewayTestHooks({ scope: "suite" });
 
 const cleanupDirs: string[] = [];
-const SETUP_RPC_TIMEOUT_MS = 30_000;
 let harness: Awaited<ReturnType<typeof createGatewaySuiteHarness>>;
-let subscribedOperatorWs:
-  | Awaited<ReturnType<Awaited<ReturnType<typeof createGatewaySuiteHarness>>["openWs"]>>
-  | undefined;
+let previousMinimalGateway: string | undefined;
 
 beforeAll(async () => {
+  previousMinimalGateway = process.env.OPENCLAW_TEST_MINIMAL_GATEWAY;
+  delete process.env.OPENCLAW_TEST_MINIMAL_GATEWAY;
   harness = await createGatewaySuiteHarness();
-  subscribedOperatorWs = await harness.openWs();
-  await connectOk(subscribedOperatorWs, {
-    scopes: ["operator.read"],
-    timeoutMs: SETUP_RPC_TIMEOUT_MS,
-  });
-  await rpcReq(subscribedOperatorWs, "sessions.subscribe", undefined, SETUP_RPC_TIMEOUT_MS);
-}, 60_000);
+});
 
 afterAll(async () => {
-  subscribedOperatorWs?.close();
-  if (harness) {
-    await harness.close();
+  await harness.close();
+  if (previousMinimalGateway === undefined) {
+    delete process.env.OPENCLAW_TEST_MINIMAL_GATEWAY;
+  } else {
+    process.env.OPENCLAW_TEST_MINIMAL_GATEWAY = previousMinimalGateway;
   }
 });
 
@@ -57,12 +52,17 @@ async function createSessionStoreFile(): Promise<string> {
 }
 
 async function withOperatorSessionSubscriber<T>(
-  run: (ws: NonNullable<typeof subscribedOperatorWs>) => Promise<T>,
+  harness: Awaited<ReturnType<typeof createGatewaySuiteHarness>>,
+  run: (ws: Awaited<ReturnType<typeof harness.openWs>>) => Promise<T>,
 ) {
-  if (!subscribedOperatorWs) {
-    throw new Error("subscribed operator websocket is not ready");
+  const ws = await harness.openWs();
+  try {
+    await connectOk(ws, { scopes: ["operator.read"] });
+    await rpcReq(ws, "sessions.subscribe");
+    return await run(ws);
+  } finally {
+    ws.close();
   }
-  return await run(subscribedOperatorWs);
 }
 
 function waitForSessionMessageEvent(
@@ -78,70 +78,23 @@ function waitForSessionMessageEvent(
   );
 }
 
-function waitForSessionsChangedMessagePhase(
-  ws: Awaited<ReturnType<Awaited<ReturnType<typeof createGatewaySuiteHarness>>["openWs"]>>,
-  sessionKey: string,
-) {
-  return onceMessage(
-    ws,
-    (message) =>
-      message.type === "event" &&
-      message.event === "sessions.changed" &&
-      (message.payload as { phase?: string; sessionKey?: string } | undefined)?.phase ===
-        "message" &&
-      (message.payload as { sessionKey?: string } | undefined)?.sessionKey === sessionKey,
-  );
-}
-
-async function emitTranscriptUpdateAndCollectEvents(params: {
-  ws: Awaited<ReturnType<Awaited<ReturnType<typeof createGatewaySuiteHarness>>["openWs"]>>;
-  sessionKey: string;
-  sessionFile: string;
-  message: Record<string, unknown>;
-  messageId: string;
-}) {
-  const messageEventPromise = waitForSessionMessageEvent(params.ws, params.sessionKey);
-  const changedEventPromise = waitForSessionsChangedMessagePhase(params.ws, params.sessionKey);
-
-  emitSessionTranscriptUpdate({
-    sessionFile: params.sessionFile,
-    sessionKey: params.sessionKey,
-    message: params.message,
-    messageId: params.messageId,
-  });
-
-  const [messageEvent, changedEvent] = await Promise.all([
-    messageEventPromise,
-    changedEventPromise,
-  ]);
-  return { messageEvent, changedEvent };
-}
-
 async function expectNoMessageWithin(params: {
   action?: () => Promise<void> | void;
-  watch: (timeoutMs: number) => Promise<unknown>;
+  watch: () => Promise<unknown>;
   timeoutMs?: number;
 }): Promise<void> {
   const timeoutMs = params.timeoutMs ?? 300;
-  const received = params.watch(timeoutMs).then(
-    () => true,
-    () => false,
-  );
-  await params.action?.();
-  await expect(received).resolves.toBe(false);
-}
-
-function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object") {
-    throw new Error(`expected ${label} to be an object`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function expectRecordFields(value: unknown, expected: Record<string, unknown>): void {
-  const record = requireRecord(value, "record");
-  for (const [key, expectedValue] of Object.entries(expected)) {
-    expect(record[key]).toEqual(expectedValue);
+  vi.useFakeTimers();
+  try {
+    const outcome = params
+      .watch()
+      .then(() => "received")
+      .catch(() => "timeout");
+    await params.action?.();
+    await vi.advanceTimersByTimeAsync(timeoutMs);
+    await expect(outcome).resolves.toBe("timeout");
+  } finally {
+    vi.useRealTimers();
   }
 }
 
@@ -165,7 +118,7 @@ describe("session.message websocket events", () => {
       storePath,
     });
 
-    await withOperatorSessionSubscriber(async (ws) => {
+    await withOperatorSessionSubscriber(harness, async (ws) => {
       const changedEvent = onceMessage(
         ws,
         (message) =>
@@ -181,7 +134,7 @@ describe("session.message websocket events", () => {
       });
 
       const event = await changedEvent;
-      expectRecordFields(event.payload, {
+      expect(event.payload).toMatchObject({
         sessionKey: "agent:main:child",
         reason: "reactivated",
         spawnedBy: "agent:main:parent",
@@ -230,25 +183,21 @@ describe("session.message websocket events", () => {
         storePath,
       });
       expect(appended.ok).toBe(true);
-      const event = await subscribedEvent;
-      expectRecordFields(event, {
-        type: "event",
-        event: "session.message",
-      });
+      await expect(subscribedEvent).resolves.toBeTruthy();
       await expectNoMessageWithin({
-        watch: (timeoutMs) =>
+        watch: () =>
           onceMessage(
             unsubscribedWs,
             (message) => message.type === "event" && message.event === "session.message",
-            timeoutMs,
+            300,
           ),
       });
       await expectNoMessageWithin({
-        watch: (timeoutMs) =>
+        watch: () =>
           onceMessage(
             nodeWs,
             (message) => message.type === "event" && message.event === "session.message",
-            timeoutMs,
+            300,
           ),
       });
     } finally {
@@ -281,110 +230,22 @@ describe("session.message websocket events", () => {
       if (!appended.ok) {
         throw new Error(`append failed: ${appended.reason}`);
       }
-      const emitParams = requireRecord(emitSpy.mock.calls[0]?.[0], "transcript update params");
-      expect(emitParams.sessionFile).toBe(appended.sessionFile);
-      expect(emitParams.sessionKey).toBe("agent:main:main");
-      expect(emitParams.messageId).toBe(appended.messageId);
-      expectRecordFields(emitParams.message, {
-        role: "assistant",
-        content: [{ type: "text", text: "live websocket message" }],
-      });
+      expect(emitSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionFile: appended.sessionFile,
+          sessionKey: "agent:main:main",
+          messageId: appended.messageId,
+          message: expect.objectContaining({
+            role: "assistant",
+            content: [{ type: "text", text: "live websocket message" }],
+          }),
+        }),
+      );
       const transcript = await fs.readFile(appended.sessionFile, "utf-8");
       expect(transcript).toContain('"live websocket message"');
     } finally {
       emitSpy.mockRestore();
     }
-  });
-
-  test("strips blocked original content from live session.message events", async () => {
-    const storePath = await createSessionStoreFile();
-    await writeSessionStore({
-      entries: {
-        main: {
-          sessionId: "sess-main",
-          updatedAt: Date.now(),
-        },
-      },
-      storePath,
-    });
-    const transcriptPath = path.join(path.dirname(storePath), "sess-main.jsonl");
-    await fs.writeFile(
-      transcriptPath,
-      JSON.stringify({ type: "session", version: 1, id: "sess-main" }) + "\n",
-      "utf-8",
-    );
-
-    await withOperatorSessionSubscriber(async (ws) => {
-      const { messageEvent } = await emitTranscriptUpdateAndCollectEvents({
-        ws,
-        sessionKey: "agent:main:main",
-        sessionFile: transcriptPath,
-        messageId: "blocked-1",
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "The agent cannot read this message." }],
-          __openclaw: {
-            beforeAgentRunBlocked: { blockedBy: "policy-plugin", blockedAt: 1 },
-          },
-        },
-      });
-
-      const payload = messageEvent.payload as {
-        message?: { content?: unknown; __openclaw?: { beforeAgentRunBlocked?: unknown } };
-      };
-      expect(payload.message?.content).toEqual([
-        { type: "text", text: "The agent cannot read this message." },
-      ]);
-      expect(JSON.stringify(payload.message)).not.toContain("secret blocked prompt");
-      expect(JSON.stringify(payload.message)).not.toContain("contains protected content");
-    });
-  });
-
-  test("broadcasts redacted blocked user appends to live session listeners", async () => {
-    const storePath = await createSessionStoreFile();
-    await writeSessionStore({
-      entries: {
-        main: {
-          sessionId: "sess-main",
-          updatedAt: Date.now(),
-        },
-      },
-      storePath,
-    });
-
-    await withOperatorSessionSubscriber(async (ws) => {
-      const messageEventPromise = waitForSessionMessageEvent(ws, "agent:main:main");
-      emitSessionTranscriptUpdate({
-        sessionFile: path.join(path.dirname(storePath), "sess-main.jsonl"),
-        sessionKey: "agent:main:main",
-        messageId: "blocked-message",
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "The agent cannot read this message." }],
-          __openclaw: {
-            beforeAgentRunBlocked: {
-              blockedBy: "policy-plugin",
-              blockedAt: Date.now(),
-            },
-          },
-        },
-      });
-
-      const messageEvent = await messageEventPromise;
-      const payload = messageEvent.payload as {
-        message?: {
-          role?: unknown;
-          content?: unknown;
-          __openclaw?: { beforeAgentRunBlocked?: unknown };
-        };
-      };
-      expect(payload.message?.role).toBe("user");
-      expect(payload.message?.content).toEqual([
-        { type: "text", text: "The agent cannot read this message." },
-      ]);
-      expect(JSON.stringify(payload.message)).not.toContain("secret blocked prompt");
-      expect(JSON.stringify(payload.message)).not.toContain("contains protected content");
-    });
   });
 
   test("includes live usage metadata on session.message and sessions.changed transcript events", async () => {
@@ -427,15 +288,31 @@ describe("session.message websocket events", () => {
       "utf-8",
     );
 
-    await withOperatorSessionSubscriber(async (ws) => {
-      const { messageEvent, changedEvent } = await emitTranscriptUpdateAndCollectEvents({
+    await withOperatorSessionSubscriber(harness, async (ws) => {
+      const messageEventPromise = waitForSessionMessageEvent(ws, "agent:main:main");
+      const changedEventPromise = onceMessage(
         ws,
-        sessionKey: "agent:main:main",
+        (message) =>
+          message.type === "event" &&
+          message.event === "sessions.changed" &&
+          (message.payload as { phase?: string; sessionKey?: string } | undefined)?.phase ===
+            "message" &&
+          (message.payload as { sessionKey?: string } | undefined)?.sessionKey ===
+            "agent:main:main",
+      );
+
+      emitSessionTranscriptUpdate({
         sessionFile: transcriptPath,
+        sessionKey: "agent:main:main",
         message: transcriptMessage,
         messageId: "msg-usage",
       });
-      expectRecordFields(messageEvent.payload, {
+
+      const [messageEvent, changedEvent] = await Promise.all([
+        messageEventPromise,
+        changedEventPromise,
+      ]);
+      expect(messageEvent.payload).toMatchObject({
         sessionKey: "agent:main:main",
         messageId: "msg-usage",
         messageSeq: 1,
@@ -446,7 +323,7 @@ describe("session.message websocket events", () => {
         modelProvider: "openai",
         model: "gpt-5.4",
       });
-      expectRecordFields(changedEvent.payload, {
+      expect(changedEvent.payload).toMatchObject({
         sessionKey: "agent:main:main",
         phase: "message",
         messageId: "msg-usage",
@@ -530,7 +407,7 @@ describe("session.message websocket events", () => {
         messageEventPromise,
         changedEventPromise,
       ]);
-      expectRecordFields(messageEvent.payload, {
+      expect(messageEvent.payload).toMatchObject({
         sessionKey: "agent:main:child",
         spawnedBy: "agent:main:main",
         spawnedWorkspaceDir: "/tmp/subagent-workspace",
@@ -540,7 +417,7 @@ describe("session.message websocket events", () => {
         subagentControlScope: "children",
         parentSessionKey: "agent:main:main",
       });
-      expectRecordFields(changedEvent.payload, {
+      expect(changedEvent.payload).toMatchObject({
         sessionKey: "agent:main:child",
         phase: "message",
         spawnedBy: "agent:main:main",
@@ -587,22 +464,38 @@ describe("session.message websocket events", () => {
       "utf-8",
     );
 
-    await withOperatorSessionSubscriber(async (ws) => {
-      const { messageEvent, changedEvent } = await emitTranscriptUpdateAndCollectEvents({
+    await withOperatorSessionSubscriber(harness, async (ws) => {
+      const messageEventPromise = waitForSessionMessageEvent(ws, "agent:main:main");
+      const changedEventPromise = onceMessage(
         ws,
-        sessionKey: "agent:main:main",
+        (message) =>
+          message.type === "event" &&
+          message.event === "sessions.changed" &&
+          (message.payload as { phase?: string; sessionKey?: string } | undefined)?.phase ===
+            "message" &&
+          (message.payload as { sessionKey?: string } | undefined)?.sessionKey ===
+            "agent:main:main",
+      );
+
+      emitSessionTranscriptUpdate({
         sessionFile: transcriptPath,
+        sessionKey: "agent:main:main",
         message: transcriptMessage,
         messageId: "msg-thread",
       });
-      expectRecordFields(messageEvent.payload, {
+
+      const [messageEvent, changedEvent] = await Promise.all([
+        messageEventPromise,
+        changedEventPromise,
+      ]);
+      expect(messageEvent.payload).toMatchObject({
         sessionKey: "agent:main:main",
         lastChannel: "telegram",
         lastTo: "-100123",
         lastAccountId: "acct-1",
         lastThreadId: 42,
       });
-      expectRecordFields(changedEvent.payload, {
+      expect(changedEvent.payload).toMatchObject({
         sessionKey: "agent:main:main",
         phase: "message",
         lastChannel: "telegram",
@@ -651,7 +544,7 @@ describe("session.message websocket events", () => {
       expect(mainAppend.ok).toBe(true);
 
       await expectNoMessageWithin({
-        watch: (timeoutMs) =>
+        watch: () =>
           onceMessage(
             ws,
             (message) =>
@@ -659,7 +552,7 @@ describe("session.message websocket events", () => {
               message.event === "session.message" &&
               (message.payload as { sessionKey?: string } | undefined)?.sessionKey ===
                 "agent:main:worker",
-            timeoutMs,
+            300,
           ),
         action: async () => {
           const workerAppend = await appendAssistantMessageToSessionTranscript({
@@ -678,7 +571,7 @@ describe("session.message websocket events", () => {
       expect(unsubscribeRes.payload?.subscribed).toBe(false);
 
       await expectNoMessageWithin({
-        watch: (timeoutMs) =>
+        watch: () =>
           onceMessage(
             ws,
             (message) =>
@@ -686,7 +579,7 @@ describe("session.message websocket events", () => {
               message.event === "session.message" &&
               (message.payload as { sessionKey?: string } | undefined)?.sessionKey ===
                 "agent:main:main",
-            timeoutMs,
+            300,
           ),
         action: async () => {
           const hiddenAppend = await appendAssistantMessageToSessionTranscript({
@@ -736,7 +629,7 @@ describe("session.message websocket events", () => {
       "utf-8",
     );
 
-    await withOperatorSessionSubscriber(async (ws) => {
+    await withOperatorSessionSubscriber(harness, async (ws) => {
       const messageEventPromise = waitForSessionMessageEvent(ws, "agent:main:newer");
 
       emitSessionTranscriptUpdate({
@@ -750,7 +643,7 @@ describe("session.message websocket events", () => {
       });
 
       const messageEvent = await messageEventPromise;
-      expectRecordFields(messageEvent.payload, {
+      expect(messageEvent.payload).toMatchObject({
         sessionKey: "agent:main:newer",
         messageId: "msg-shared",
         messageSeq: 1,

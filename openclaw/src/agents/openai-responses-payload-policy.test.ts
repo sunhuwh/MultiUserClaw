@@ -20,41 +20,15 @@ describe("openai responses payload policy", () => {
       maxTokens: 8192,
     } satisfies Model<"openai-responses">;
 
-    const providerPolicy = resolveOpenAIResponsesPayloadPolicy(model, {
-      storeMode: "provider-policy",
+    expect(
+      resolveOpenAIResponsesPayloadPolicy(model, { storeMode: "provider-policy" }),
+    ).toMatchObject({
+      explicitStore: true,
+      allowsServiceTier: true,
     });
-    expect(providerPolicy.explicitStore).toBe(true);
-    expect(providerPolicy.allowsServiceTier).toBe(true);
-
-    const disablePolicy = resolveOpenAIResponsesPayloadPolicy(model, { storeMode: "disable" });
-    expect(disablePolicy.explicitStore).toBe(false);
-    expect(disablePolicy.allowsServiceTier).toBe(true);
-  });
-
-  it("couples native Responses server compaction to provider-managed store", () => {
-    const model = {
-      id: "gpt-5.4",
-      api: "openai-responses",
-      provider: "openai",
-      baseUrl: "https://api.openai.com/v1",
-      contextWindow: 200_000,
-    } satisfies Pick<
-      Model<"openai-responses">,
-      "api" | "baseUrl" | "contextWindow" | "id" | "provider"
-    >;
-    const payload = {} satisfies Record<string, unknown>;
-
-    applyOpenAIResponsesPayloadPolicy(
-      payload,
-      resolveOpenAIResponsesPayloadPolicy(model, {
-        enableServerCompaction: true,
-        storeMode: "provider-policy",
-      }),
-    );
-
-    expect(payload).toEqual({
-      store: true,
-      context_management: [{ type: "compaction", compact_threshold: 140_000 }],
+    expect(resolveOpenAIResponsesPayloadPolicy(model, { storeMode: "disable" })).toMatchObject({
+      explicitStore: false,
+      allowsServiceTier: true,
     });
   });
 
@@ -84,7 +58,7 @@ describe("openai responses payload policy", () => {
     expect(payload).not.toHaveProperty("prompt_cache_retention");
   });
 
-  it("keeps disabled reasoning payloads on native OpenAI responses models that support none", () => {
+  it("keeps disabled reasoning payloads on native OpenAI responses routes", () => {
     const payload = {
       reasoning: {
         effort: "none",
@@ -97,7 +71,6 @@ describe("openai responses payload policy", () => {
         {
           api: "openai-responses",
           provider: "openai",
-          id: "gpt-5.4",
           baseUrl: "https://api.openai.com/v1",
         },
         { storeMode: "disable" },
@@ -108,31 +81,6 @@ describe("openai responses payload policy", () => {
       reasoning: {
         effort: "none",
       },
-      store: false,
-    });
-  });
-
-  it("strips disabled reasoning payloads on native OpenAI responses models that do not support none", () => {
-    const payload = {
-      reasoning: {
-        effort: "none",
-      },
-    } satisfies Record<string, unknown>;
-
-    applyOpenAIResponsesPayloadPolicy(
-      payload,
-      resolveOpenAIResponsesPayloadPolicy(
-        {
-          api: "openai-responses",
-          provider: "openai",
-          id: "gpt-5",
-          baseUrl: "https://api.openai.com/v1",
-        },
-        { storeMode: "disable" },
-      ),
-    );
-
-    expect(payload).toEqual({
       store: false,
     });
   });
@@ -157,20 +105,5 @@ describe("openai responses payload policy", () => {
     );
 
     expect(payload).not.toHaveProperty("reasoning");
-  });
-
-  it("emits store false for native OpenAI Codex responses disable mode", () => {
-    const policy = resolveOpenAIResponsesPayloadPolicy(
-      {
-        api: "openai-codex-responses",
-        provider: "openai-codex",
-        baseUrl: "https://chatgpt.com/backend-api/codex",
-      },
-      { storeMode: "disable" },
-    );
-
-    expect(policy.explicitStore).toBe(false);
-    expect(policy.allowsServiceTier).toBe(true);
-    expect(policy.shouldStripStore).toBe(false);
   });
 });

@@ -1,4 +1,3 @@
-import { PAIRING_APPROVED_MESSAGE } from "openclaw/plugin-sdk/channel-status";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMatrixPairingText, createMatrixProbeAccount } from "./channel-account-paths.js";
 
@@ -61,7 +60,6 @@ describe("matrix account path propagation", () => {
     );
 
     await pairingText.notify({
-      cfg: {} as never,
       id: "@user:example.org",
       message: pairingText.message,
       accountId: "poe",
@@ -69,8 +67,8 @@ describe("matrix account path propagation", () => {
 
     expect(sendMessageMatrixMock).toHaveBeenCalledWith(
       "user:@user:example.org",
-      PAIRING_APPROVED_MESSAGE,
-      { cfg: {}, accountId: "poe" },
+      expect.any(String),
+      { accountId: "poe" },
     );
   });
 

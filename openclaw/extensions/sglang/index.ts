@@ -58,7 +58,7 @@ export default definePluginEntry({
           },
         },
       ],
-      catalog: {
+      discovery: {
         order: "late",
         run: async (ctx) => {
           const providerSetup = await loadProviderSetup();

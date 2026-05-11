@@ -63,9 +63,10 @@ extension NodeAppModel {
         if await self.screen.waitForA2UIReady(timeoutMs: timeoutMs) {
             return .ready(initialUrl)
         }
-        guard let refreshedUrl = await self.resolveA2UIHostURLWithCapabilityRefresh(forceRefresh: true) else {
-            return .hostUnavailable
-        }
+
+        // First render can fail when scoped capability rotates between reconnects.
+        guard await self.gatewaySession.refreshNodeCanvasCapability() else { return .hostUnavailable }
+        guard let refreshedUrl = await self.resolveA2UIHostURL() else { return .hostUnavailable }
         self.screen.navigate(to: refreshedUrl, trustA2UIActions: true)
         if await self.screen.waitForA2UIReady(timeoutMs: timeoutMs) {
             return .ready(refreshedUrl)
@@ -78,19 +79,19 @@ extension NodeAppModel {
         self.screen.showDefaultCanvas()
     }
 
-    private func resolveA2UIHostURLWithCapabilityRefresh(forceRefresh: Bool = false) async -> String? {
-        if !forceRefresh, let current = await self.resolveA2UIHostURL() {
-            return current
+    private func resolveA2UIHostURLWithCapabilityRefresh() async -> String? {
+        if let url = await self.resolveA2UIHostURL() {
+            return url
         }
-        _ = await self.gatewaySession.refreshCanvasHostUrl()
+        guard await self.gatewaySession.refreshNodeCanvasCapability() else { return nil }
         return await self.resolveA2UIHostURL()
     }
 
-    private func resolveCanvasHostURLWithCapabilityRefresh(forceRefresh: Bool = false) async -> String? {
-        if !forceRefresh, let current = await self.resolveCanvasHostURL() {
-            return current
+    private func resolveCanvasHostURLWithCapabilityRefresh() async -> String? {
+        if let url = await self.resolveCanvasHostURL() {
+            return url
         }
-        _ = await self.gatewaySession.refreshCanvasHostUrl()
+        guard await self.gatewaySession.refreshNodeCanvasCapability() else { return nil }
         return await self.resolveCanvasHostURL()
     }
 

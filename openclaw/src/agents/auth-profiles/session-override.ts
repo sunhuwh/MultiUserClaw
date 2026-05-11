@@ -1,60 +1,29 @@
+import type { OpenClawConfig } from "../../config/config.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { createLazyImportLoader } from "../../shared/lazy-promise.js";
-import {
-  isConfiguredAwsSdkAuthProfileForProvider,
-  resolveAuthProfileOrder,
-} from "../auth-profiles/order.js";
+import { resolveAuthProfileOrder } from "../auth-profiles/order.js";
 import { ensureAuthProfileStore, hasAnyAuthProfileStoreSource } from "../auth-profiles/store.js";
 import { isProfileInCooldown } from "../auth-profiles/usage.js";
-import { resolveProviderIdForAuth } from "../provider-auth-aliases.js";
+import { normalizeProviderId } from "../model-selection.js";
 
-const sessionStoreRuntimeLoader = createLazyImportLoader(
-  () => import("../../config/sessions/store.runtime.js"),
-);
+let sessionStoreRuntimePromise:
+  | Promise<typeof import("../../config/sessions/store.runtime.js")>
+  | undefined;
 
 function loadSessionStoreRuntime() {
-  return sessionStoreRuntimeLoader.load();
+  sessionStoreRuntimePromise ??= import("../../config/sessions/store.runtime.js");
+  return sessionStoreRuntimePromise;
 }
 
 function isProfileForProvider(params: {
-  cfg: OpenClawConfig;
-  providers: readonly string[];
+  provider: string;
   profileId: string;
   store: ReturnType<typeof ensureAuthProfileStore>;
 }): boolean {
-  const providerKeys = params.providers.map((provider) =>
-    resolveProviderIdForAuth(provider, { config: params.cfg }),
-  );
   const entry = params.store.profiles[params.profileId];
-  if (entry) {
-    if (!entry.provider) {
-      return false;
-    }
-    const profileProviderKey = resolveProviderIdForAuth(entry.provider, { config: params.cfg });
-    return providerKeys.includes(profileProviderKey);
+  if (!entry?.provider) {
+    return false;
   }
-  return params.providers.some((provider) =>
-    isConfiguredAwsSdkAuthProfileForProvider({
-      cfg: params.cfg,
-      provider,
-      profileId: params.profileId,
-    }),
-  );
-}
-
-function uniqueProviders(provider: string, acceptedProviderIds?: readonly string[]): string[] {
-  const providers = new Set<string>();
-  const push = (value: string | undefined) => {
-    const normalized = value?.trim();
-    if (normalized) {
-      providers.add(normalized);
-    }
-  };
-  const candidates =
-    acceptedProviderIds && acceptedProviderIds.length > 0 ? acceptedProviderIds : [provider];
-  candidates.forEach(push);
-  return [...providers];
+  return normalizeProviderId(entry.provider) === normalizeProviderId(params.provider);
 }
 
 export async function clearSessionAuthProfileOverride(params: {
@@ -87,7 +56,6 @@ export async function resolveSessionAuthProfileOverride(params: {
   sessionKey?: string;
   storePath?: string;
   isNewSession: boolean;
-  acceptedProviderIds?: string[];
 }): Promise<string | undefined> {
   const {
     cfg,
@@ -115,14 +83,7 @@ export async function resolveSessionAuthProfileOverride(params: {
   }
 
   const store = ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
-  const providers = uniqueProviders(provider, params.acceptedProviderIds);
-  const order = [
-    ...new Set(
-      providers.flatMap((candidateProvider) =>
-        resolveAuthProfileOrder({ cfg, store, provider: candidateProvider }),
-      ),
-    ),
-  ];
+  const order = resolveAuthProfileOrder({ cfg, store, provider });
   let current = sessionEntry.authProfileOverride?.trim();
   const source =
     sessionEntry.authProfileOverrideSource ??
@@ -132,23 +93,12 @@ export async function resolveSessionAuthProfileOverride(params: {
         ? "user"
         : undefined);
 
-  const currentProfileId = current;
-  if (
-    currentProfileId &&
-    !store.profiles[currentProfileId] &&
-    !providers.some((candidateProvider) =>
-      isConfiguredAwsSdkAuthProfileForProvider({
-        cfg,
-        provider: candidateProvider,
-        profileId: currentProfileId,
-      }),
-    )
-  ) {
+  if (current && !store.profiles[current]) {
     await clearSessionAuthProfileOverride({ sessionEntry, sessionStore, sessionKey, storePath });
     current = undefined;
   }
 
-  if (current && !isProfileForProvider({ cfg, providers, profileId: current, store })) {
+  if (current && !isProfileForProvider({ provider, profileId: current, store })) {
     await clearSessionAuthProfileOverride({ sessionEntry, sessionStore, sessionKey, storePath });
     current = undefined;
   }
@@ -184,21 +134,12 @@ export async function resolveSessionAuthProfileOverride(params: {
     typeof sessionEntry.authProfileOverrideCompactionCount === "number"
       ? sessionEntry.authProfileOverrideCompactionCount
       : compactionCount;
-  const replacementForUnusableCurrent =
-    current && isProfileInCooldown(store, current)
-      ? order.find((profileId) => profileId !== current && !isProfileInCooldown(store, profileId))
-      : undefined;
-  if (replacementForUnusableCurrent) {
-    current = undefined;
-  }
   if (source === "user" && current && !isNewSession) {
     return current;
   }
 
   let next = current;
-  if (replacementForUnusableCurrent) {
-    next = replacementForUnusableCurrent;
-  } else if (isNewSession) {
+  if (isNewSession) {
     next = current ? pickNextAvailable(current) : pickFirstAvailable();
   } else if (current && compactionCount > storedCompaction) {
     next = pickNextAvailable(current);

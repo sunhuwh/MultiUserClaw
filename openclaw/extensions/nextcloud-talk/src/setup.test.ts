@@ -16,12 +16,6 @@ import { nextcloudTalkSetupWizard } from "./setup-surface.js";
 import type { CoreConfig } from "./types.js";
 
 describe("nextcloud talk setup", () => {
-  it("shows a bot install command with webhook, response, and reaction features", () => {
-    expect(nextcloudTalkSetupWizard.introNote?.lines.join("\n")).toContain(
-      "--feature webhook --feature response --feature reaction",
-    );
-  });
-
   it("normalizes and validates base urls", () => {
     expect(normalizeNextcloudTalkBaseUrl(" https://cloud.example.com/// ")).toBe(
       "https://cloud.example.com",
@@ -73,7 +67,13 @@ describe("nextcloud talk setup", () => {
     });
     expect(
       clearNextcloudTalkAccountFields(cfg, DEFAULT_ACCOUNT_ID, ["botSecret"]),
-    ).not.toHaveProperty(["channels", "nextcloud-talk", "botSecret"]);
+    ).not.toMatchObject({
+      channels: {
+        "nextcloud-talk": {
+          botSecret: expect.anything(),
+        },
+      },
+    });
 
     expect(
       clearNextcloudTalkAccountFields(cfg, "work", ["botSecret", "botSecretFile"]),
@@ -90,7 +90,7 @@ describe("nextcloud talk setup", () => {
     });
   });
 
-  it("sets top-level DM policy state", () => {
+  it("sets top-level DM policy state", async () => {
     const base: CoreConfig = {
       channels: {
         "nextcloud-talk": {},
@@ -193,26 +193,23 @@ describe("nextcloud talk setup", () => {
     const applyAccountConfig = nextcloudTalkSetupAdapter.applyAccountConfig;
     expect(validateInput).toBeTypeOf("function");
     expect(applyAccountConfig).toBeTypeOf("function");
-    if (!validateInput) {
-      throw new Error("Expected Nextcloud Talk setup validateInput");
-    }
 
     expect(
-      validateInput({
+      validateInput!({
         accountId: "work",
         input: { useEnv: true },
       } as never),
     ).toBe("NEXTCLOUD_TALK_BOT_SECRET can only be used for the default account.");
 
     expect(
-      validateInput({
+      validateInput!({
         accountId: DEFAULT_ACCOUNT_ID,
         input: { useEnv: false, baseUrl: "", secret: "" },
       } as never),
     ).toBe("Nextcloud Talk requires bot secret or --secret-file (or --use-env).");
 
     expect(
-      validateInput({
+      validateInput!({
         accountId: DEFAULT_ACCOUNT_ID,
         input: { useEnv: false, secret: "secret", baseUrl: "" },
       } as never),

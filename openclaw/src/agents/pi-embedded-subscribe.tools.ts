@@ -1,6 +1,5 @@
 import { getChannelPlugin, normalizeChannelId } from "../channels/plugins/index.js";
 import { normalizeTargetForProvider } from "../infra/outbound/target-normalization.js";
-import { redactSensitiveFieldValue, redactToolPayloadText } from "../logging/redact.js";
 import { splitMediaFromOutput } from "../media/parse.js";
 import { pluginRegistrationContractRegistry } from "../plugins/contracts/registry.js";
 import {
@@ -10,8 +9,7 @@ import {
 } from "../shared/string-coerce.js";
 import { truncateUtf16Safe } from "../utils.js";
 import { collectTextContentBlocks } from "./content-blocks.js";
-import { isMessageToolSendActionName } from "./pi-embedded-messaging.js";
-import type { MessagingToolSend } from "./pi-embedded-messaging.types.js";
+import { type MessagingToolSend } from "./pi-embedded-messaging.js";
 import { normalizeToolName } from "./tool-policy.js";
 
 const TOOL_RESULT_MAX_CHARS = 8000;
@@ -77,7 +75,10 @@ function extractErrorField(value: unknown): string | undefined {
     return undefined;
   }
   const record = value as Record<string, unknown>;
-  const direct = extractDirectErrorField(record);
+  const direct =
+    readErrorCandidate(record.error) ??
+    readErrorCandidate(record.message) ??
+    readErrorCandidate(record.reason);
   if (direct) {
     return direct;
   }
@@ -88,115 +89,34 @@ function extractErrorField(value: unknown): string | undefined {
   return normalizeToolErrorText(status);
 }
 
-function extractDirectErrorField(value: unknown): string | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  return (
-    readErrorCandidate(record.error) ??
-    readErrorCandidate(record.message) ??
-    readErrorCandidate(record.reason)
-  );
-}
-
-function extractAggregatedErrorField(value: unknown): string | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  return readErrorCandidate(record.aggregated);
-}
-
-function isHostDenialToolText(text: string): boolean {
-  const normalized = text.trim();
-  if (normalized.includes("SYSTEM_RUN_DENIED") || normalized.includes("INVALID_REQUEST")) {
-    return true;
-  }
-  return normalized.toLowerCase().includes("approval cannot safely bind");
-}
-
-function redactStringsDeep(value: unknown, seen = new WeakSet<object>()): unknown {
-  if (typeof value === "string") {
-    return redactToolPayloadText(value);
-  }
-  if (Array.isArray(value)) {
-    if (seen.has(value)) {
-      return "[Circular]";
-    }
-    seen.add(value);
-    return value.map((item) => redactStringsDeep(item, seen));
-  }
-  if (value && typeof value === "object") {
-    if (seen.has(value)) {
-      return "[Circular]";
-    }
-    seen.add(value);
-    const out: Record<string, unknown> = {};
-    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-      out[key] =
-        typeof child === "string"
-          ? redactSensitiveFieldValue(key, child)
-          : redactStringsDeep(child, seen);
-    }
-    return out;
-  }
-  return value;
-}
-
-export function sanitizeToolArgs(args: unknown): unknown {
-  return redactStringsDeep(args);
-}
-
 export function sanitizeToolResult(result: unknown): unknown {
-  if (typeof result === "string") {
-    return redactToolPayloadText(result);
-  }
-  if (Array.isArray(result)) {
-    return redactStringsDeep(result);
-  }
   if (!result || typeof result !== "object") {
     return result;
   }
   const record = result as Record<string, unknown>;
-  // Strip image data first so the deep redaction pass doesn't waste work
-  // scanning base64 payloads (and so we capture the original byte counts).
-  const preCleaned: Record<string, unknown> = { ...record };
-  const originalContent = Array.isArray(record.content) ? record.content : null;
-  if (originalContent) {
-    preCleaned.content = originalContent.map((item) => {
-      if (!item || typeof item !== "object") {
-        return item;
-      }
-      const entry = item as Record<string, unknown>;
-      if (readStringValue(entry.type) === "image") {
-        const data = readStringValue(entry.data);
-        const bytes = data ? data.length : undefined;
-        const cleaned = { ...entry };
-        delete cleaned.data;
-        return Object.assign({}, cleaned, { bytes, omitted: true });
-      }
-      return entry;
-    });
+  const content = Array.isArray(record.content) ? record.content : null;
+  if (!content) {
+    return record;
   }
-  // Deep-redact the entire result so any top-level or nested string is
-  // protected, not just `details` and text content blocks.
-  const baseline = redactStringsDeep(preCleaned) as Record<string, unknown>;
-  const out: Record<string, unknown> = { ...baseline };
-  const content = Array.isArray(baseline.content) ? baseline.content : null;
-  if (content) {
-    out.content = content.map((item) => {
-      if (!item || typeof item !== "object") {
-        return item;
-      }
-      const entry = item as Record<string, unknown>;
-      if (readStringValue(entry.type) === "text" && typeof entry.text === "string") {
-        return Object.assign({}, entry, { text: truncateToolText(entry.text) });
-      }
-      return entry;
-    });
-  }
-  return out;
+  const sanitized = content.map((item) => {
+    if (!item || typeof item !== "object") {
+      return item;
+    }
+    const entry = item as Record<string, unknown>;
+    const type = readStringValue(entry.type);
+    if (type === "text" && typeof entry.text === "string") {
+      return { ...entry, text: truncateToolText(entry.text) };
+    }
+    if (type === "image") {
+      const data = readStringValue(entry.data);
+      const bytes = data ? data.length : undefined;
+      const cleaned = { ...entry };
+      delete cleaned.data;
+      return { ...cleaned, bytes, omitted: true };
+    }
+    return entry;
+  });
+  return { ...record, content: sanitized };
 }
 
 export function extractToolResultText(result: unknown): string | undefined {
@@ -287,48 +207,15 @@ export function isToolResultMediaTrusted(toolName?: string, result?: unknown): b
   );
 }
 
-function isTrustedOwnedTtsLocalMedia(toolName: string | undefined, result: unknown): boolean {
-  if (
-    !toolName ||
-    !isToolResultMediaTrusted(toolName, result) ||
-    normalizeToolName(toolName) !== "tts"
-  ) {
-    return false;
-  }
-  const media = readToolResultDetails(result)?.media;
-  if (!media || typeof media !== "object" || Array.isArray(media)) {
-    return false;
-  }
-  return (media as Record<string, unknown>).trustedLocalMedia === true;
-}
-
 export function filterToolResultMediaUrls(
   toolName: string | undefined,
   mediaUrls: string[],
   result?: unknown,
-  builtinToolNames?: ReadonlySet<string>,
 ): string[] {
   if (mediaUrls.length === 0) {
     return mediaUrls;
   }
-  const trustedOwnedTtsLocalMedia = isTrustedOwnedTtsLocalMedia(toolName, result);
   if (isToolResultMediaTrusted(toolName, result)) {
-    // When the current run provides its exact registered tool names (core
-    // built-ins plus bundled/trusted plugin tools), require the raw emitted
-    // tool name to match one of them before allowing local MEDIA: paths.
-    // This blocks normalized aliases and case-variant collisions such as
-    // "Bash" -> "bash" or "Web_Search" -> "web_search" from inheriting a
-    // registered tool's media trust. TTS-generated local files carry a
-    // separate trusted-media flag from the owned tool result, so they can
-    // survive runs whose exact built-in set omitted the raw tts name.
-    if (builtinToolNames !== undefined) {
-      if (!trustedOwnedTtsLocalMedia) {
-        const registeredName = toolName?.trim();
-        if (!registeredName || !builtinToolNames.has(registeredName)) {
-          return mediaUrls.filter((url) => HTTP_URL_RE.test(url.trim()));
-        }
-      }
-    }
     return mediaUrls;
   }
   return mediaUrls.filter((url) => HTTP_URL_RE.test(url.trim()));
@@ -339,17 +226,16 @@ export function filterToolResultMediaUrls(
  *
  * Strategy (first match wins):
  * 1. Read structured `details.media` attachments from tool details.
- * 2. Parse `MEDIA:` directive tokens from text content blocks.
+ * 2. Parse legacy `MEDIA:` tokens from text content blocks.
  * 3. Fall back to `details.path` when image content exists (legacy imageResult).
  *
  * Returns an empty array when no media is found (e.g. Pi SDK `read` tool
  * returns base64 image data but no file path; those need a different delivery
  * path like saving to a temp file).
  */
-type ToolResultMediaArtifact = {
+export type ToolResultMediaArtifact = {
   mediaUrls: string[];
   audioAsVoice?: boolean;
-  trustedLocalMedia?: boolean;
 };
 
 function readToolResultDetailsMedia(
@@ -379,44 +265,6 @@ function collectStructuredMediaUrls(media: Record<string, unknown>): string[] {
   return Array.from(new Set(urls));
 }
 
-function extractTextContentMediaArtifact(content: unknown[]): {
-  mediaUrls: string[];
-  audioAsVoice?: boolean;
-  hasImageContent: boolean;
-} {
-  const mediaUrls: string[] = [];
-  let audioAsVoice = false;
-  let hasImageContent = false;
-
-  for (const item of content) {
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-    const entry = item as Record<string, unknown>;
-    if (entry.type === "image") {
-      hasImageContent = true;
-      continue;
-    }
-    if (entry.type !== "text" || typeof entry.text !== "string") {
-      continue;
-    }
-
-    const parsed = splitMediaFromOutput(entry.text);
-    if (parsed.audioAsVoice) {
-      audioAsVoice = true;
-    }
-    if (parsed.mediaUrls?.length) {
-      mediaUrls.push(...parsed.mediaUrls);
-    }
-  }
-
-  return {
-    mediaUrls,
-    ...(audioAsVoice ? { audioAsVoice: true } : {}),
-    hasImageContent,
-  };
-}
-
 export function extractToolResultMediaArtifact(
   result: unknown,
 ): ToolResultMediaArtifact | undefined {
@@ -431,7 +279,6 @@ export function extractToolResultMediaArtifact(
       return {
         mediaUrls,
         ...(detailsMedia.audioAsVoice === true ? { audioAsVoice: true } : {}),
-        ...(detailsMedia.trustedLocalMedia === true ? { trustedLocalMedia: true } : {}),
       };
     }
   }
@@ -441,18 +288,35 @@ export function extractToolResultMediaArtifact(
     return undefined;
   }
 
-  const textMedia = extractTextContentMediaArtifact(content);
+  // Extract legacy MEDIA: paths from text content blocks using the shared
+  // parser so directive matching and validation stay in sync with outbound
+  // reply parsing.
+  const paths: string[] = [];
+  let hasImageContent = false;
+  for (const item of content) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const entry = item as Record<string, unknown>;
+    if (entry.type === "image") {
+      hasImageContent = true;
+      continue;
+    }
+    if (entry.type === "text" && typeof entry.text === "string") {
+      const parsed = splitMediaFromOutput(entry.text);
+      if (parsed.mediaUrls?.length) {
+        paths.push(...parsed.mediaUrls);
+      }
+    }
+  }
 
-  if (textMedia.mediaUrls.length > 0) {
-    return {
-      mediaUrls: textMedia.mediaUrls,
-      ...(textMedia.audioAsVoice ? { audioAsVoice: true } : {}),
-    };
+  if (paths.length > 0) {
+    return { mediaUrls: paths };
   }
 
   // Fall back to legacy details.path when image content exists but no
   // structured media details or MEDIA: text.
-  if (textMedia.hasImageContent) {
+  if (hasImageContent) {
     const details = record.details as Record<string, unknown> | undefined;
     const p = normalizeOptionalString(details?.path) ?? "";
     if (p) {
@@ -488,42 +352,28 @@ export function extractToolErrorMessage(result: unknown): string | undefined {
     return undefined;
   }
   const record = result as Record<string, unknown>;
-  const fromDetails = extractDirectErrorField(record.details);
+  const fromDetails = extractErrorField(record.details);
   if (fromDetails) {
     return fromDetails;
   }
-  const fromDetailsAggregated = extractAggregatedErrorField(record.details);
-  if (fromDetailsAggregated) {
-    return fromDetailsAggregated;
-  }
-  const fromRoot = extractDirectErrorField(record);
+  const fromRoot = extractErrorField(record);
   if (fromRoot) {
     return fromRoot;
   }
   const text = extractToolResultText(result);
-  if (text) {
-    try {
-      const parsed = JSON.parse(text) as unknown;
-      const fromJson = extractErrorField(parsed);
-      if (fromJson) {
-        return fromJson;
-      }
-    } catch {
-      // Fall through to status/text fallback.
+  if (!text) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    const fromJson = extractErrorField(parsed);
+    if (fromJson) {
+      return fromJson;
     }
-    if (isHostDenialToolText(text)) {
-      return normalizeToolErrorText(text);
-    }
+  } catch {
+    // Fall through to first-line text fallback.
   }
-  const fromDetailsStatus = extractErrorField(record.details);
-  if (fromDetailsStatus) {
-    return fromDetailsStatus;
-  }
-  const fromRootStatus = extractErrorField(record);
-  if (fromRootStatus) {
-    return fromRootStatus;
-  }
-  return text ? normalizeToolErrorText(text) : undefined;
+  return normalizeToolErrorText(text);
 }
 
 function resolveMessageToolTarget(args: Record<string, unknown>): string | undefined {
@@ -542,7 +392,7 @@ export function extractMessagingToolSend(
   const action = normalizeOptionalString(args.action) ?? "";
   const accountId = normalizeOptionalString(args.accountId);
   if (toolName === "message") {
-    if (!isMessageToolSendActionName(action)) {
+    if (action !== "send" && action !== "thread-reply") {
       return undefined;
     }
     const toRaw = resolveMessageToolTarget(args);
@@ -555,10 +405,7 @@ export function extractMessagingToolSend(
     const providerId = providerHint ? normalizeChannelId(providerHint) : null;
     const provider = providerId ?? normalizeOptionalLowercaseString(providerHint) ?? "message";
     const to = normalizeTargetForProvider(provider, toRaw);
-    const threadId = normalizeOptionalString(args.threadId);
-    return to
-      ? { tool: toolName, provider, accountId, to, ...(threadId ? { threadId } : {}) }
-      : undefined;
+    return to ? { tool: toolName, provider, accountId, to } : undefined;
   }
   const providerId = normalizeChannelId(toolName);
   if (!providerId) {

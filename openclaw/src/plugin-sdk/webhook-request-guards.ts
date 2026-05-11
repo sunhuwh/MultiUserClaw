@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { formatErrorMessage } from "../infra/errors.js";
 import {
+  installRequestBodyLimitGuard,
   isRequestBodyLimitError,
   readJsonBodyWithLimit,
   readRequestBodyWithLimit,

@@ -13,12 +13,13 @@ import {
   type OpenClawConfig,
 } from "openclaw/plugin-sdk/setup";
 import {
-  checkZcaAuthenticated,
   listZalouserAccountIds,
   resolveDefaultZalouserAccountId,
   resolveZalouserAccountSync,
+  checkZcaAuthenticated,
 } from "./accounts.js";
 import { writeQrDataUrlToTempFile } from "./qr-temp-file.js";
+import { zalouserSetupAdapter } from "./setup-core.js";
 import {
   logoutZaloProfile,
   resolveZaloAllowFromEntries,
@@ -157,7 +158,7 @@ async function promptZalouserAllowFrom(params: {
       placeholder: ZALOUSER_ALLOW_FROM_PLACEHOLDER,
       initialValue: existingAllowFrom.length > 0 ? existingAllowFrom.join(", ") : undefined,
     });
-    const parts = parseZalouserEntries(entry);
+    const parts = parseZalouserEntries(String(entry));
     if (parts.length === 0) {
       await prompter.note(
         [

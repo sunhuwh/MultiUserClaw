@@ -5,12 +5,16 @@ let registerSlackPinEvents: typeof import("./pins.js").registerSlackPinEvents;
 let buildPinHarness: typeof import("./system-event-test-harness.js").createSlackSystemEventTestHarness;
 type PinOverrides = import("./system-event-test-harness.js").SlackSystemEventTestOverrides;
 
-vi.mock("openclaw/plugin-sdk/system-event-runtime", () => ({
-  enqueueSystemEvent: (...args: unknown[]) => pinEnqueueMock(...args),
-}));
-vi.mock("openclaw/plugin-sdk/system-event-runtime.js", () => ({
-  enqueueSystemEvent: (...args: unknown[]) => pinEnqueueMock(...args),
-}));
+async function createChannelRuntimeMock() {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/infra-runtime")>(
+    "openclaw/plugin-sdk/infra-runtime",
+  );
+  return { ...actual, enqueueSystemEvent: pinEnqueueMock };
+}
+
+vi.mock("openclaw/plugin-sdk/infra-runtime", createChannelRuntimeMock);
+vi.mock("openclaw/plugin-sdk/infra-runtime.js", createChannelRuntimeMock);
+
 type PinHandler = (args: { event: Record<string, unknown>; body: unknown }) => Promise<void>;
 
 type PinCase = {
@@ -60,12 +64,10 @@ async function runPinCase(input: PinCase = {}): Promise<void> {
   });
   const handlerKey = input.handler ?? "added";
   const handler = handlerKey === "removed" ? removed : added;
-  if (!handler) {
-    throw new Error(`expected Slack pin ${handlerKey} handler`);
-  }
+  expect(handler).toBeTruthy();
   const event = (input.event ?? makePinEvent()) as Record<string, unknown>;
   const body = input.body ?? {};
-  await handler({
+  await handler!({
     body,
     event,
   });

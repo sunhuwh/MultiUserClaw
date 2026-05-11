@@ -1,4 +1,4 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { resolveIMessageAccount } from "./accounts.js";
 
 export function resolveIMessageConfigAllowFrom(params: {
@@ -16,6 +16,6 @@ export function resolveIMessageConfigDefaultTo(params: {
   if (defaultTo == null) {
     return undefined;
   }
-  const normalized = defaultTo.trim();
+  const normalized = String(defaultTo).trim();
   return normalized || undefined;
 }

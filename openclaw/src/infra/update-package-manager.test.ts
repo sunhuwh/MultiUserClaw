@@ -13,7 +13,7 @@ describe("resolveUpdateBuildManager", () => {
         const envPath = options.env?.PATH ?? options.env?.Path ?? "";
         if (envPath.includes("openclaw-update-pnpm-")) {
           paths.push(envPath);
-          return { stdout: "11.0.0", stderr: "", code: 0 };
+          return { stdout: "10.0.0", stderr: "", code: 0 };
         }
         throw new Error("spawn pnpm ENOENT");
       }
@@ -23,7 +23,7 @@ describe("resolveUpdateBuildManager", () => {
       if (key === "npm --version") {
         return { stdout: "10.0.0", stderr: "", code: 0 };
       }
-      if (key.startsWith("npm install --prefix ") && key.endsWith(" pnpm@11")) {
+      if (key.startsWith("npm install --prefix ") && key.endsWith(" pnpm@10")) {
         return { stdout: "added 1 package", stderr: "", code: 0 };
       }
       return { stdout: "", stderr: "", code: 0 };
@@ -34,9 +34,7 @@ describe("resolveUpdateBuildManager", () => {
     expect(result.kind).toBe("resolved");
     if (result.kind === "resolved") {
       expect(result.manager).toBe("pnpm");
-      expect(paths).toEqual(
-        expect.arrayContaining([expect.stringContaining("openclaw-update-pnpm-")]),
-      );
+      expect(paths.some((value) => value.includes("openclaw-update-pnpm-"))).toBe(true);
       await result.cleanup?.();
     }
   });
@@ -53,7 +51,7 @@ describe("resolveUpdateBuildManager", () => {
       if (key === "npm --version") {
         return { stdout: "10.0.0", stderr: "", code: 0 };
       }
-      if (key.startsWith("npm install --prefix ") && key.endsWith(" pnpm@11")) {
+      if (key.startsWith("npm install --prefix ") && key.endsWith(" pnpm@10")) {
         return { stdout: "", stderr: "network exploded", code: 1 };
       }
       return { stdout: "", stderr: "", code: 0 };

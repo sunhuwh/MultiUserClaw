@@ -154,67 +154,20 @@ async function expectRemoteMarketplaceError(params: { manifest: unknown; expecte
   expect(runCommandWithTimeoutMock).toHaveBeenCalledTimes(1);
 }
 
-function installPluginInput(callIndex = 0): Record<string, unknown> {
-  const input = installPluginFromPathMock.mock.calls[callIndex]?.[0];
-  expect(typeof input).toBe("object");
-  expect(input).not.toBeNull();
-  return input as Record<string, unknown>;
-}
-
-function fetchGuardInput(callIndex = 0): Record<string, unknown> {
-  const input = fetchWithSsrFGuardMock.mock.calls[callIndex]?.[0];
-  expect(typeof input).toBe("object");
-  expect(input).not.toBeNull();
-  return input as Record<string, unknown>;
-}
-
-function expectMarketplaceInstallSuccess(
-  result: unknown,
-  params: {
-    pluginId?: string;
-    marketplacePlugin?: string;
-    marketplaceSource?: string;
-  },
-) {
-  expect(typeof result).toBe("object");
-  expect(result).not.toBeNull();
-  const record = result as Record<string, unknown>;
-  expect(record.ok).toBe(true);
-  expect(record.pluginId).toBe(params.pluginId ?? "frontend-design");
-  if (params.marketplacePlugin) {
-    expect(record.marketplacePlugin).toBe(params.marketplacePlugin);
-  }
-  if (params.marketplaceSource) {
-    expect(record.marketplaceSource).toBe(params.marketplaceSource);
-  }
-}
-
-function expectRemoteCloneCommand() {
-  expect(runCommandWithTimeoutMock).toHaveBeenCalledTimes(1);
-  const [argv, options] = runCommandWithTimeoutMock.mock.calls[0] ?? [];
-  expect(Array.isArray(argv)).toBe(true);
-  expect((argv as unknown[]).slice(0, 5)).toEqual([
-    "git",
-    "clone",
-    "--depth",
-    "1",
-    "https://github.com/owner/repo.git",
-  ]);
-  expect(typeof (argv as unknown[])[5]).toBe("string");
-  expect(options).toEqual({ timeoutMs: 120_000 });
-}
-
-function expectFetchDownloadCall(url = "https://example.com/frontend-design.tgz") {
-  const input = fetchGuardInput();
-  expect(input.url).toBe(url);
-  expect(input.timeoutMs).toBe(120_000);
-  expect(input.auditContext).toBe("marketplace-plugin-download");
-}
-
 function expectRemoteMarketplaceInstallResult(result: unknown) {
-  expectRemoteCloneCommand();
-  expect(String(installPluginInput().path)).toMatch(/[\\/]repo[\\/]plugins[\\/]frontend-design$/);
-  expectMarketplaceInstallSuccess(result, {
+  expect(runCommandWithTimeoutMock).toHaveBeenCalledTimes(1);
+  expect(runCommandWithTimeoutMock).toHaveBeenCalledWith(
+    ["git", "clone", "--depth", "1", "https://github.com/owner/repo.git", expect.any(String)],
+    { timeoutMs: 120_000 },
+  );
+  expect(installPluginFromPathMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      path: expect.stringMatching(/[\\/]repo[\\/]plugins[\\/]frontend-design$/),
+    }),
+  );
+  expect(result).toMatchObject({
+    ok: true,
+    pluginId: "frontend-design",
     marketplacePlugin: "frontend-design",
     marketplaceSource: "owner/repo",
   });
@@ -247,8 +200,14 @@ function expectLocalMarketplaceInstallResult(params: {
   pluginDir: string;
   marketplaceSource: string;
 }) {
-  expect(installPluginInput().path).toBe(params.pluginDir);
-  expectMarketplaceInstallSuccess(params.result, {
+  expect(installPluginFromPathMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      path: params.pluginDir,
+    }),
+  );
+  expect(params.result).toMatchObject({
+    ok: true,
+    pluginId: "frontend-design",
     marketplacePlugin: "frontend-design",
     marketplaceSource: params.marketplaceSource,
   });
@@ -354,11 +313,11 @@ describe("marketplace plugins", () => {
         marketplaceSource: manifestPath,
       });
       if (canonicalPluginDir !== pluginDir) {
-        expect(
-          installPluginFromPathMock.mock.calls.some(
-            ([input]) => (input as { path?: unknown } | undefined)?.path === canonicalPluginDir,
-          ),
-        ).toBe(false);
+        expect(installPluginFromPathMock).not.toHaveBeenCalledWith(
+          expect.objectContaining({
+            path: canonicalPluginDir,
+          }),
+        );
       }
     });
   });
@@ -392,8 +351,12 @@ describe("marketplace plugins", () => {
         dangerouslyForceUnsafeInstall: true,
       });
 
-      expect(installPluginInput().path).toBe(pluginDir);
-      expect(installPluginInput().dangerouslyForceUnsafeInstall).toBe(true);
+      expect(installPluginFromPathMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: pluginDir,
+          dangerouslyForceUnsafeInstall: true,
+        }),
+      );
     });
   });
 
@@ -483,10 +446,14 @@ describe("marketplace plugins", () => {
     });
 
     expect(runCommandWithTimeoutMock).toHaveBeenCalledTimes(1);
-    expect(String(installPluginInput().path)).toMatch(
-      /[\\/]repo[\\/]plugins[\\/]frontend-design\.tgz$/,
+    expect(installPluginFromPathMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: expect.stringMatching(/[\\/]repo[\\/]plugins[\\/]frontend-design\.tgz$/),
+      }),
     );
-    expectMarketplaceInstallSuccess(result, {
+    expect(result).toMatchObject({
+      ok: true,
+      pluginId: "frontend-design",
       marketplacePlugin: "frontend-design",
       marketplaceSource: "owner/repo",
     });
@@ -584,7 +551,13 @@ describe("marketplace plugins", () => {
         ok: false,
         error: "failed to download https://example.com/frontend-design.tgz: empty response body",
       });
-      expectFetchDownloadCall();
+      expect(fetchWithSsrFGuardMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: "https://example.com/frontend-design.tgz",
+          timeoutMs: 120_000,
+          auditContext: "marketplace-plugin-download",
+        }),
+      );
       expect(installPluginFromPathMock).not.toHaveBeenCalled();
       expect(release).toHaveBeenCalledTimes(1);
     });
@@ -678,10 +651,17 @@ describe("marketplace plugins", () => {
         timeoutMs: Number.NaN,
       });
 
-      expectMarketplaceInstallSuccess(result, {
+      expect(result).toMatchObject({
+        ok: true,
         pluginId: "frontend-design",
       });
-      expectFetchDownloadCall();
+      expect(fetchWithSsrFGuardMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: "https://example.com/frontend-design.tgz",
+          timeoutMs: 120_000,
+          auditContext: "marketplace-plugin-download",
+        }),
+      );
     });
   });
 
@@ -718,12 +698,24 @@ describe("marketplace plugins", () => {
         plugin: "frontend-design",
       });
 
-      expectMarketplaceInstallSuccess(result, {
+      expect(result).toMatchObject({
+        ok: true,
+        pluginId: "frontend-design",
         marketplacePlugin: "frontend-design",
         marketplaceSource: manifestPath,
       });
-      expectFetchDownloadCall();
-      expect(String(installPluginInput().path)).toMatch(/[\\/]frontend-design\.tgz$/);
+      expect(fetchWithSsrFGuardMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: "https://example.com/frontend-design.tgz",
+          timeoutMs: 120_000,
+          auditContext: "marketplace-plugin-download",
+        }),
+      );
+      expect(installPluginFromPathMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: expect.stringMatching(/[\\/]frontend-design\.tgz$/),
+        }),
+      );
       expect(release).toHaveBeenCalledTimes(1);
     });
   });

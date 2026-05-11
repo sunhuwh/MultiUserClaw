@@ -5,7 +5,6 @@ import type { PluginApprovalRequestPayload } from "../../infra/plugin-approvals.
 import {
   DEFAULT_PLUGIN_APPROVAL_TIMEOUT_MS,
   MAX_PLUGIN_APPROVAL_TIMEOUT_MS,
-  resolvePluginApprovalRequestAllowedDecisions,
 } from "../../infra/plugin-approvals.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import type { ExecApprovalManager } from "../exec-approval-manager.js";
@@ -62,7 +61,6 @@ export function createPluginApprovalHandlers(
         severity?: string | null;
         toolName?: string | null;
         toolCallId?: string | null;
-        allowedDecisions?: string[] | null;
         agentId?: string | null;
         sessionKey?: string | null;
         turnSourceChannel?: string | null;
@@ -88,13 +86,6 @@ export function createPluginApprovalHandlers(
         severity: (p.severity as PluginApprovalRequestPayload["severity"]) ?? null,
         toolName: p.toolName ?? null,
         toolCallId: p.toolCallId ?? null,
-        ...(Array.isArray(p.allowedDecisions)
-          ? {
-              allowedDecisions: resolvePluginApprovalRequestAllowedDecisions({
-                allowedDecisions: p.allowedDecisions,
-              }),
-            }
-          : {}),
         agentId: p.agentId ?? null,
         sessionKey: p.sessionKey ?? null,
         turnSourceChannel: normalizeTrimmedString(p.turnSourceChannel),
@@ -175,24 +166,14 @@ export function createPluginApprovalHandlers(
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "invalid decision"));
         return;
       }
-      const decision = p.decision;
       await handleApprovalResolve({
         manager,
         inputId: p.id,
-        decision,
+        decision: p.decision,
         respond,
         context,
         client,
         exposeAmbiguousPrefixError: false,
-        validateDecision: (snapshot) =>
-          resolvePluginApprovalRequestAllowedDecisions(snapshot.request).includes(decision)
-            ? null
-            : {
-                message: `${decision} is unavailable for this plugin approval`,
-                details: {
-                  allowedDecisions: resolvePluginApprovalRequestAllowedDecisions(snapshot.request),
-                },
-              },
         resolvedEventName: "plugin.approval.resolved",
         buildResolvedEvent: ({ approvalId, decision, resolvedBy, snapshot, nowMs }) => ({
           id: approvalId,

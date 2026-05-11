@@ -4,7 +4,7 @@ import {
   normalizeOptionalString,
 } from "../../shared/string-coerce.js";
 import type { DirectoryConfigParams } from "./directory-types.js";
-import type { ChannelDirectoryEntry } from "./types.public.js";
+import type { ChannelDirectoryEntry } from "./types.js";
 
 function resolveDirectoryQuery(query?: string | null): string {
   return normalizeLowercaseStringOrEmpty(query);
@@ -20,76 +20,50 @@ export function applyDirectoryQueryAndLimit(
 ): string[] {
   const q = resolveDirectoryQuery(params.query);
   const limit = resolveDirectoryLimit(params.limit);
-  const filtered: string[] = [];
-  for (const id of ids) {
-    if (q && !normalizeLowercaseStringOrEmpty(id).includes(q)) {
-      continue;
-    }
-    filtered.push(id);
-    if (typeof limit === "number" && filtered.length >= limit) {
-      break;
-    }
-  }
-  return filtered;
+  const filtered = ids.filter((id) => (q ? normalizeLowercaseStringOrEmpty(id).includes(q) : true));
+  return typeof limit === "number" ? filtered.slice(0, limit) : filtered;
 }
 
 export function toDirectoryEntries(kind: "user" | "group", ids: string[]): ChannelDirectoryEntry[] {
-  const entries: ChannelDirectoryEntry[] = [];
-  for (const id of ids) {
-    entries.push({ kind, id });
-  }
-  return entries;
+  return ids.map((id) => ({ kind, id }) as const);
+}
+
+function normalizeDirectoryIds(params: {
+  rawIds: readonly string[];
+  normalizeId?: (entry: string) => string | null | undefined;
+}): string[] {
+  return params.rawIds
+    .map((entry) => normalizeOptionalString(entry) ?? "")
+    .filter((entry) => Boolean(entry) && entry !== "*")
+    .map((entry) => {
+      const normalized = params.normalizeId ? params.normalizeId(entry) : entry;
+      return normalizeOptionalString(normalized) ?? "";
+    })
+    .filter(Boolean);
 }
 
 function collectDirectoryIdsFromEntries(params: {
   entries?: readonly unknown[];
   normalizeId?: (entry: string) => string | null | undefined;
 }): string[] {
-  const ids: string[] = [];
-  for (const value of params.entries ?? []) {
-    const entry = normalizeOptionalString(String(value)) ?? "";
-    if (!entry || entry === "*") {
-      continue;
-    }
-    const normalized = params.normalizeId ? params.normalizeId(entry) : entry;
-    const id = normalizeOptionalString(normalized) ?? "";
-    if (id) {
-      ids.push(id);
-    }
-  }
-  return ids;
+  return normalizeDirectoryIds({
+    rawIds: (params.entries ?? []).map((entry) => String(entry)),
+    normalizeId: params.normalizeId,
+  });
 }
 
 function collectDirectoryIdsFromMapKeys(params: {
   groups?: Record<string, unknown>;
   normalizeId?: (entry: string) => string | null | undefined;
 }): string[] {
-  const ids: string[] = [];
-  for (const key of Object.keys(params.groups ?? {})) {
-    const entry = normalizeOptionalString(key) ?? "";
-    if (!entry || entry === "*") {
-      continue;
-    }
-    const normalized = params.normalizeId ? params.normalizeId(entry) : entry;
-    const id = normalizeOptionalString(normalized) ?? "";
-    if (id) {
-      ids.push(id);
-    }
-  }
-  return ids;
+  return normalizeDirectoryIds({
+    rawIds: Object.keys(params.groups ?? {}),
+    normalizeId: params.normalizeId,
+  });
 }
 
 function dedupeDirectoryIds(ids: string[]): string[] {
-  const deduped: string[] = [];
-  const seen = new Set<string>();
-  for (const id of ids) {
-    if (seen.has(id)) {
-      continue;
-    }
-    seen.add(id);
-    deduped.push(id);
-  }
-  return deduped;
+  return Array.from(new Set(ids));
 }
 
 export function collectNormalizedDirectoryIds(params: {

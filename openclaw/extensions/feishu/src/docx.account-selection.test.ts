@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import type { OpenClawPluginApi } from "../runtime-api.js";
 import { createToolFactoryHarness } from "./tool-factory-test-harness.js";
 
@@ -24,12 +24,6 @@ describe("feishu_doc account selection", () => {
 
   beforeAll(async () => {
     ({ registerFeishuDocTools } = await import("./docx.js"));
-  });
-
-  afterAll(() => {
-    vi.doUnmock("./client.js");
-    vi.doUnmock("@larksuiteoapi/node-sdk");
-    vi.resetModules();
   });
 
   beforeEach(() => {

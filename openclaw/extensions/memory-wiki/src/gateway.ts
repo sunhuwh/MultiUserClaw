@@ -7,11 +7,8 @@ import {
   WIKI_SEARCH_CORPORA,
   type ResolvedMemoryWikiConfig,
 } from "./config.js";
-import { listMemoryWikiImportInsights } from "./import-insights.js";
-import { listMemoryWikiImportRuns } from "./import-runs.js";
 import { ingestMemoryWikiSource } from "./ingest.js";
 import { lintMemoryWikiVault } from "./lint.js";
-import { listMemoryWikiPalace } from "./memory-palace.js";
 import {
   probeObsidianCli,
   runObsidianCommand,
@@ -19,7 +16,7 @@ import {
   runObsidianOpen,
   runObsidianSearch,
 } from "./obsidian.js";
-import { getMemoryWikiPage, searchMemoryWiki, WIKI_SEARCH_MODES } from "./query.js";
+import { getMemoryWikiPage, searchMemoryWiki } from "./query.js";
 import { syncMemoryWikiImportedSources } from "./source-sync.js";
 import { buildMemoryWikiDoctorReport, resolveMemoryWikiStatus } from "./status.js";
 import { initializeMemoryWikiVault } from "./vault.js";
@@ -111,45 +108,6 @@ export function registerMemoryWikiGatewayMethods(params: {
             appConfig,
           }),
         );
-      } catch (error) {
-        respondError(respond, error);
-      }
-    },
-    { scope: READ_SCOPE },
-  );
-
-  api.registerGatewayMethod(
-    "wiki.importRuns",
-    async ({ params: requestParams, respond }) => {
-      try {
-        const limit = readNumberParam(requestParams, "limit");
-        respond(true, await listMemoryWikiImportRuns(config, limit !== undefined ? { limit } : {}));
-      } catch (error) {
-        respondError(respond, error);
-      }
-    },
-    { scope: READ_SCOPE },
-  );
-
-  api.registerGatewayMethod(
-    "wiki.importInsights",
-    async ({ respond }) => {
-      try {
-        await syncImportedSourcesIfNeeded(config, appConfig);
-        respond(true, await listMemoryWikiImportInsights(config));
-      } catch (error) {
-        respondError(respond, error);
-      }
-    },
-    { scope: READ_SCOPE },
-  );
-
-  api.registerGatewayMethod(
-    "wiki.palace",
-    async ({ respond }) => {
-      try {
-        await syncImportedSourcesIfNeeded(config, appConfig);
-        respond(true, await listMemoryWikiPalace(config));
       } catch (error) {
         respondError(respond, error);
       }
@@ -277,7 +235,6 @@ export function registerMemoryWikiGatewayMethods(params: {
         const maxResults = readNumberParam(requestParams, "maxResults");
         const searchBackend = readEnumParam(requestParams, "backend", WIKI_SEARCH_BACKENDS);
         const searchCorpus = readEnumParam(requestParams, "corpus", WIKI_SEARCH_CORPORA);
-        const mode = readEnumParam(requestParams, "mode", WIKI_SEARCH_MODES);
         respond(
           true,
           await searchMemoryWiki({
@@ -287,7 +244,6 @@ export function registerMemoryWikiGatewayMethods(params: {
             maxResults,
             searchBackend,
             searchCorpus,
-            mode,
           }),
         );
       } catch (error) {

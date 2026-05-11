@@ -5,7 +5,6 @@ import type { MarkdownTableMode } from "../config/types.base.js";
 type ListState = {
   type: "bullet" | "ordered";
   index: number;
-  openLevel: number;
 };
 
 type LinkState = {
@@ -23,8 +22,6 @@ type MarkdownToken = {
   children?: MarkdownToken[];
   attrs?: [string, string][];
   attrGet?: (name: string) => string | null;
-  hidden?: boolean;
-  level?: number;
 };
 
 export type MarkdownStyle =
@@ -250,20 +247,13 @@ function openStyle(state: RenderState, style: MarkdownStyle) {
   target.openStyles.push({ style, start: target.text.length });
 }
 
-function closeStyle(
-  state: RenderState,
-  style: MarkdownStyle,
-  options?: { trimTrailingParagraphSeparator?: boolean },
-) {
+function closeStyle(state: RenderState, style: MarkdownStyle) {
   const target = resolveRenderTarget(state);
   for (let i = target.openStyles.length - 1; i >= 0; i -= 1) {
     if (target.openStyles[i]?.style === style) {
       const start = target.openStyles[i].start;
       target.openStyles.splice(i, 1);
-      const end =
-        options?.trimTrailingParagraphSeparator && target.text.endsWith("\n\n")
-          ? target.text.length - 2
-          : target.text.length;
+      const end = target.text.length;
       if (end > start) {
         target.styles.push({ start, end, style });
       }
@@ -272,35 +262,14 @@ function closeStyle(
   }
 }
 
-function appendParagraphSeparator(state: RenderState, token?: MarkdownToken) {
+function appendParagraphSeparator(state: RenderState) {
+  if (state.env.listStack.length > 0) {
+    return;
+  }
   if (state.table) {
     return;
   } // Don't add paragraph separators inside tables
-  if (state.env.listStack.length > 0) {
-    const currentList = state.env.listStack[state.env.listStack.length - 1];
-    const directListParagraphLevel = (currentList?.openLevel ?? 0) + 2;
-    if (
-      token?.type !== "paragraph_close" ||
-      token.hidden ||
-      token.level !== directListParagraphLevel
-    ) {
-      return;
-    }
-  }
   state.text += "\n\n";
-}
-
-function appendTopLevelListSeparator(state: RenderState) {
-  const trailingNewlines = state.text.match(/\n*$/)?.[0].length ?? 0;
-  if (trailingNewlines < 2) {
-    state.text += "\n";
-  }
-}
-
-function appendNestedListSeparator(state: RenderState) {
-  if (!state.text.endsWith("\n")) {
-    state.text += "\n";
-  }
 }
 
 function appendListPrefix(state: RenderState) {
@@ -667,7 +636,7 @@ function renderTokens(tokens: MarkdownToken[], state: RenderState): void {
         appendText(state, "\n");
         break;
       case "paragraph_close":
-        appendParagraphSeparator(state, token);
+        appendParagraphSeparator(state);
         break;
       case "heading_open":
         if (state.headingStyle === "bold") {
@@ -687,38 +656,34 @@ function renderTokens(tokens: MarkdownToken[], state: RenderState): void {
         openStyle(state, "blockquote");
         break;
       case "blockquote_close":
-        closeStyle(state, "blockquote", { trimTrailingParagraphSeparator: true });
+        closeStyle(state, "blockquote");
         break;
       case "bullet_list_open":
         // Add newline before nested list starts (so nested items appear on new line)
         if (state.env.listStack.length > 0) {
-          appendNestedListSeparator(state);
+          state.text += "\n";
         }
-        state.env.listStack.push({ type: "bullet", index: 0, openLevel: token.level ?? 0 });
+        state.env.listStack.push({ type: "bullet", index: 0 });
         break;
       case "bullet_list_close":
         state.env.listStack.pop();
         if (state.env.listStack.length === 0) {
-          appendTopLevelListSeparator(state);
+          state.text += "\n";
         }
         break;
       case "ordered_list_open": {
         // Add newline before nested list starts (so nested items appear on new line)
         if (state.env.listStack.length > 0) {
-          appendNestedListSeparator(state);
+          state.text += "\n";
         }
         const start = Number(getAttr(token, "start") ?? "1");
-        state.env.listStack.push({
-          type: "ordered",
-          index: start - 1,
-          openLevel: token.level ?? 0,
-        });
+        state.env.listStack.push({ type: "ordered", index: start - 1 });
         break;
       }
       case "ordered_list_close":
         state.env.listStack.pop();
         if (state.env.listStack.length === 0) {
-          appendTopLevelListSeparator(state);
+          state.text += "\n";
         }
         break;
       case "list_item_open":
@@ -1002,11 +967,10 @@ export function markdownToIRWithMeta(
       links: clampLinkSpans(state.links, finalLength),
     },
     hasTables: state.hasTables,
-    tables: state.collectedTables.map((table) =>
-      Object.assign({}, table, {
-        placeholderOffset: Math.min(table.placeholderOffset, finalLength),
-      }),
-    ),
+    tables: state.collectedTables.map((table) => ({
+      ...table,
+      placeholderOffset: Math.min(table.placeholderOffset, finalLength),
+    })),
   };
 }
 

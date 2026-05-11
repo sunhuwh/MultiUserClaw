@@ -155,9 +155,7 @@ describe("ChatLog", () => {
 
     chatLog.addPendingUser("run-1", "continue", 5_000);
 
-    expect(chatLog.reconcilePendingUsers([{ text: "continue", timestamp: -56_000 }])).toStrictEqual(
-      [],
-    );
+    expect(chatLog.reconcilePendingUsers([{ text: "continue", timestamp: -56_000 }])).toEqual([]);
     expect(chatLog.countPendingUsers()).toBe(1);
   });
 });

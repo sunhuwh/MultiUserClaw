@@ -1,9 +1,9 @@
-import { resolveChannelContextVisibilityMode } from "openclaw/plugin-sdk/context-visibility-runtime";
+import { resolveChannelContextVisibilityMode } from "openclaw/plugin-sdk/config-runtime";
 import {
   evaluateSupplementalContextVisibility,
   type ContextVisibilityDecision,
 } from "openclaw/plugin-sdk/security-runtime";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import {
   formatSignalSenderDisplay,
   isSignalSenderAllowed,
@@ -11,7 +11,7 @@ import {
 } from "../identity.js";
 import type { SignalDataMessage } from "./event-handler.types.js";
 
-type SignalQuoteContext = {
+export type SignalQuoteContext = {
   contextVisibilityMode: ReturnType<typeof resolveChannelContextVisibilityMode>;
   decision: ContextVisibilityDecision;
   quoteSenderAllowed: boolean;

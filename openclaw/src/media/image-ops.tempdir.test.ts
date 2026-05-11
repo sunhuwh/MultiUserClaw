@@ -22,29 +22,13 @@ describe("image-ops temp dir", () => {
   });
 
   it("creates sips temp dirs under the secured OpenClaw tmp root", async () => {
-    const secureRoot = await fs.realpath(resolvePreferredOpenClawTmpDir());
+    const secureRoot = resolvePreferredOpenClawTmpDir();
 
     await getImageMetadata(Buffer.from("image"));
 
     expect(fs.mkdtemp).toHaveBeenCalledTimes(1);
-    const [prefix] = vi.mocked(fs.mkdtemp).mock.calls[0] ?? [];
-    expect(typeof prefix).toBe("string");
-    const uuidPrefix = path.join(secureRoot, "openclaw-img-");
-    expect(prefix?.startsWith(uuidPrefix)).toBe(true);
-    expect(prefix?.endsWith("-")).toBe(true);
-    const uuid = prefix?.slice(uuidPrefix.length, -1) ?? "";
-    expect(uuid).toHaveLength(36);
-    expect(Array.from(uuid).every((char) => /[0-9a-f-]/u.test(char))).toBe(true);
-    expect([8, 13, 18, 23].map((index) => uuid[index])).toEqual(["-", "-", "-", "-"]);
-    expect(path.dirname(prefix ?? "")).toBe(secureRoot);
-    expect(createdTempDir.startsWith(prefix ?? "")).toBe(true);
-    let accessError: unknown;
-    try {
-      await fs.access(createdTempDir);
-    } catch (error) {
-      accessError = error;
-    }
-    expect(accessError).toBeInstanceOf(Error);
-    expect((accessError as NodeJS.ErrnoException).code).toBe("ENOENT");
+    expect(fs.mkdtemp).toHaveBeenCalledWith(path.join(secureRoot, "openclaw-img-"));
+    expect(createdTempDir.startsWith(path.join(secureRoot, "openclaw-img-"))).toBe(true);
+    await expect(fs.access(createdTempDir)).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

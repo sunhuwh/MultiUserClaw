@@ -1,7 +1,7 @@
 import type { AcpRuntimeEvent, AcpSessionUpdateTag } from "../../acp/runtime/types.js";
 import { EmbeddedBlockChunker } from "../../agents/pi-embedded-block-chunker.js";
 import { formatToolSummary, resolveToolDisplay } from "../../agents/tool-display.js";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import { prefixSystemMessage } from "../../infra/system-message.js";
 import {
   normalizeOptionalLowercaseString,
@@ -15,7 +15,7 @@ import {
   resolveAcpStreamingConfig,
 } from "./acp-stream-settings.js";
 import { createBlockReplyPipeline } from "./block-reply-pipeline.js";
-import type { ReplyDispatchKind } from "./reply-dispatcher.types.js";
+import type { ReplyDispatchKind } from "./reply-dispatcher.js";
 
 const ACP_BLOCK_REPLY_TIMEOUT_MS = 15_000;
 const ACP_LIVE_IDLE_FLUSH_FLOOR_MS = 750;
@@ -173,7 +173,6 @@ export function createAcpReplyProjector(params: {
     payload: ReplyPayload,
     meta?: AcpProjectedDeliveryMeta,
   ) => Promise<boolean>;
-  onProgress?: () => void;
   provider?: string;
   accountId?: string;
 }): AcpReplyProjector {
@@ -204,7 +203,6 @@ export function createAcpReplyProjector(params: {
   let lastVisibleOutputTail: string | undefined;
   let pendingHiddenBoundary = false;
   let liveBufferText = "";
-  let finalOnlyOutputText = "";
   let liveIdleTimer: NodeJS.Timeout | undefined;
   const pendingToolDeliveries: BufferedToolDelivery[] = [];
   const toolLifecycleById = new Map<string, ToolLifecycleState>();
@@ -273,7 +271,6 @@ export function createAcpReplyProjector(params: {
     lastVisibleOutputTail = undefined;
     pendingHiddenBoundary = false;
     liveBufferText = "";
-    finalOnlyOutputText = "";
     pendingToolDeliveries.length = 0;
     toolLifecycleById.clear();
   };
@@ -282,7 +279,7 @@ export function createAcpReplyProjector(params: {
     if (!(settings.deliveryMode === "final_only" && force)) {
       return;
     }
-    for (const entry of pendingToolDeliveries.splice(0)) {
+    for (const entry of pendingToolDeliveries.splice(0, pendingToolDeliveries.length)) {
       await params.deliver("tool", entry.payload, entry.meta);
     }
   };
@@ -293,15 +290,7 @@ export function createAcpReplyProjector(params: {
       flushLiveBuffer({ force: true });
     }
     await flushBufferedToolDeliveries(force);
-    if (settings.deliveryMode === "final_only") {
-      if (force && finalOnlyOutputText.trim().length > 0) {
-        const text = finalOnlyOutputText;
-        finalOnlyOutputText = "";
-        await params.deliver("final", { text });
-      }
-    } else {
-      drainChunker(force);
-    }
+    drainChunker(force);
     await blockReplyPipeline.flush({ force });
   };
 
@@ -414,7 +403,6 @@ export function createAcpReplyProjector(params: {
   };
 
   const onEvent = async (event: AcpRuntimeEvent): Promise<void> => {
-    params.onProgress?.();
     if (event.type === "text_delta") {
       if (event.stream && event.stream !== "output") {
         return;
@@ -455,7 +443,8 @@ export function createAcpReplyProjector(params: {
             scheduleLiveIdleFlush();
           }
         } else {
-          finalOnlyOutputText += accepted;
+          chunker.append(accepted);
+          drainChunker(false);
         }
       }
       if (accepted.length < text.length) {

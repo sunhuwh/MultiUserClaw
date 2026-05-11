@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
-let createProviderAuthResolver: typeof import("./models-config.providers.secrets.js").createProviderAuthResolver;
+import { createProviderAuthResolver } from "./models-config.providers.secrets.js";
 
 type MockManifestRegistry = {
   plugins: Array<{
@@ -55,53 +54,16 @@ const loadPluginManifestRegistry = vi.hoisted(() =>
   })),
 );
 const resolveManifestContractOwnerPluginId = vi.hoisted(() => vi.fn<() => undefined>());
-const resolveProviderSyntheticAuthWithPlugin = vi.hoisted(() => vi.fn(() => undefined));
 
 vi.mock("../plugins/manifest-registry.js", () => ({
   loadPluginManifestRegistry,
   resolveManifestContractOwnerPluginId,
 }));
-vi.mock("../plugins/manifest-registry-installed.js", () => ({
-  loadPluginManifestRegistryForInstalledIndex: loadPluginManifestRegistry,
-  resolveInstalledManifestRegistryIndexFingerprint: () => "test-installed-index",
-}));
-vi.mock("../plugins/plugin-registry.js", () => ({
-  loadPluginRegistrySnapshot: () => ({ plugins: [] }),
-  loadPluginRegistrySnapshotWithMetadata: () => ({
-    source: "derived",
-    snapshot: { plugins: [] },
-    diagnostics: [],
-  }),
-  loadPluginManifestRegistryForPluginRegistry: () => loadPluginManifestRegistry(),
-}));
-vi.mock("../plugins/provider-runtime.js", () => ({
-  resolveProviderSyntheticAuthWithPlugin,
-}));
-
-function expectAuthResult(
-  value: ReturnType<ReturnType<typeof createProviderAuthResolver>>,
-  expected: {
-    apiKey?: string;
-    mode: string;
-    source: string;
-    profileId?: string;
-  },
-) {
-  expect(value.apiKey).toBe(expected.apiKey);
-  expect(value.mode).toBe(expected.mode);
-  expect(value.source).toBe(expected.source);
-  if ("profileId" in expected) {
-    expect(value.profileId).toBe(expected.profileId);
-  }
-}
 
 describe("provider auth aliases", () => {
-  beforeEach(async () => {
-    vi.resetModules();
+  beforeEach(() => {
     loadPluginManifestRegistry.mockReset();
     loadPluginManifestRegistry.mockReturnValue(createFixtureProviderRegistry());
-    resolveProviderSyntheticAuthWithPlugin.mockReset();
-    ({ createProviderAuthResolver } = await import("./models-config.providers.secrets.js"));
   });
 
   it("shares manifest env vars across aliased providers", () => {
@@ -112,12 +74,12 @@ describe("provider auth aliases", () => {
       { version: 1, profiles: {} },
     );
 
-    expectAuthResult(resolveAuth("fixture-provider"), {
+    expect(resolveAuth("fixture-provider")).toMatchObject({
       apiKey: "FIXTURE_PROVIDER_API_KEY",
       mode: "api_key",
       source: "env",
     });
-    expectAuthResult(resolveAuth("fixture-provider-plan"), {
+    expect(resolveAuth("fixture-provider-plan")).toMatchObject({
       apiKey: "FIXTURE_PROVIDER_API_KEY",
       mode: "api_key",
       source: "env",
@@ -136,13 +98,13 @@ describe("provider auth aliases", () => {
       },
     });
 
-    expectAuthResult(resolveAuth("fixture-provider"), {
+    expect(resolveAuth("fixture-provider")).toMatchObject({
       apiKey: "FIXTURE_PROVIDER_API_KEY",
       mode: "api_key",
       source: "profile",
       profileId: "fixture-provider:default",
     });
-    expectAuthResult(resolveAuth("fixture-provider-plan"), {
+    expect(resolveAuth("fixture-provider-plan")).toMatchObject({
       apiKey: "FIXTURE_PROVIDER_API_KEY",
       mode: "api_key",
       source: "profile",
@@ -186,12 +148,12 @@ describe("provider auth aliases", () => {
       {},
     );
 
-    expectAuthResult(resolveAuth("openai"), {
+    expect(resolveAuth("openai")).toMatchObject({
       apiKey: "OPENAI_API_KEY",
       mode: "api_key",
       source: "env",
     });
-    expectAuthResult(resolveAuth("evil-openai"), {
+    expect(resolveAuth("evil-openai")).toMatchObject({
       apiKey: undefined,
       mode: "none",
       source: "none",
@@ -242,7 +204,7 @@ describe("provider auth aliases", () => {
       },
     );
 
-    expectAuthResult(resolveAuth("openai-compatible"), {
+    expect(resolveAuth("openai-compatible")).toMatchObject({
       apiKey: "OPENAI_API_KEY",
       mode: "api_key",
       source: "env",

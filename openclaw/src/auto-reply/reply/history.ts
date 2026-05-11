@@ -4,7 +4,7 @@ export const HISTORY_CONTEXT_MARKER = "[Chat messages since your last reply - fo
 export const DEFAULT_GROUP_HISTORY_LIMIT = 50;
 
 /** Maximum number of group history keys to retain (LRU eviction when exceeded). */
-const MAX_HISTORY_KEYS = 1000;
+export const MAX_HISTORY_KEYS = 1000;
 
 /**
  * Evict oldest keys from a history map when it exceeds MAX_HISTORY_KEYS.
@@ -61,9 +61,8 @@ export function appendHistoryEntry<T extends HistoryEntry>(params: {
   }
   const history = historyMap.get(historyKey) ?? [];
   history.push(entry);
-  const overflowCount = history.length - params.limit;
-  if (overflowCount > 0) {
-    history.splice(0, overflowCount);
+  while (history.length > params.limit) {
+    history.shift();
   }
   if (historyMap.has(historyKey)) {
     // Refresh insertion order so eviction keeps recently used histories.

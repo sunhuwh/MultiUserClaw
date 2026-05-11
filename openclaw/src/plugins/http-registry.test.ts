@@ -121,7 +121,7 @@ describe("registerPluginHttpRoute", () => {
 
     expect(registry.httpRoutes).toHaveLength(0);
     expect(logs).toEqual(['plugin: webhook path missing for account "default"']);
-    unregister();
+    expect(() => unregister()).not.toThrow();
   });
 
   it("replaces stale route on same path when replaceExisting=true", () => {
@@ -214,13 +214,13 @@ describe("registerPluginHttpRoute", () => {
     setActivePluginRegistry(laterActiveRegistry);
 
     const unregister = registerPluginHttpRoute({
-      path: "/imessage-webhook",
+      path: "/bluebubbles-webhook",
       auth: "plugin",
       handler: vi.fn(),
     });
 
     expectRegisteredRouteShape(startupRegistry, {
-      path: "/imessage-webhook",
+      path: "/bluebubbles-webhook",
       auth: "plugin",
     });
     expect(laterActiveRegistry.httpRoutes).toHaveLength(0);

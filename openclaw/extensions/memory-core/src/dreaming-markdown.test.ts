@@ -6,24 +6,6 @@ import { createMemoryCoreTestHarness } from "./test-helpers.js";
 
 const { createTempWorkspace } = createMemoryCoreTestHarness();
 
-async function expectPathMissing(targetPath: string): Promise<void> {
-  await expect(fs.access(targetPath)).rejects.toMatchObject({ code: "ENOENT" });
-}
-
-function requireInlinePath(result: { inlinePath?: string }): string {
-  if (!result.inlinePath) {
-    throw new Error("Expected inline dreaming markdown path");
-  }
-  return result.inlinePath;
-}
-
-function requireReportPath(reportPath: string | undefined): string {
-  if (!reportPath) {
-    throw new Error("Expected deep dreaming report path");
-  }
-  return reportPath;
-}
-
 describe("dreaming markdown storage", () => {
   const nowMs = Date.parse("2026-04-05T10:00:00Z");
   const timezone = "UTC";
@@ -43,9 +25,8 @@ describe("dreaming markdown storage", () => {
       },
     });
 
-    const inlinePath = requireInlinePath(result);
-    expect(inlinePath).toBe(path.join(workspaceDir, "memory", "2026-04-05.md"));
-    const content = await fs.readFile(inlinePath, "utf-8");
+    expect(result.inlinePath).toBe(path.join(workspaceDir, "memory", "2026-04-05.md"));
+    const content = await fs.readFile(result.inlinePath!, "utf-8");
     expect(content).toContain("## Light Sleep");
     expect(content).toContain("- Candidate: remember the API key is fake");
   });
@@ -101,9 +82,8 @@ describe("dreaming markdown storage", () => {
       },
     });
 
-    const inlinePath = requireInlinePath(result);
-    expect(inlinePath).toBe(path.join(workspaceDir, "memory", "2026-04-05.md"));
-    const content = await fs.readFile(inlinePath, "utf-8");
+    expect(result.inlinePath).toBe(path.join(workspaceDir, "memory", "2026-04-05.md"));
+    const content = await fs.readFile(result.inlinePath!, "utf-8");
     expect(content).toContain("## REM Sleep");
     expect(content).toContain("- Theme: `glacier` kept surfacing.");
     await expect(fs.readFile(lowercasePath, "utf-8")).resolves.toBe("# Scratch\n\n");
@@ -123,14 +103,11 @@ describe("dreaming markdown storage", () => {
       timezone: "UTC",
     });
 
-    const requiredReportPath = requireReportPath(reportPath);
-    expect(requiredReportPath).toBe(
-      path.join(workspaceDir, "memory", "dreaming", "deep", "2026-04-05.md"),
-    );
-    const content = await fs.readFile(requiredReportPath, "utf-8");
+    expect(reportPath).toBe(path.join(workspaceDir, "memory", "dreaming", "deep", "2026-04-05.md"));
+    const content = await fs.readFile(reportPath!, "utf-8");
     expect(content).toContain("# Deep Sleep");
     expect(content).toContain("- Promoted: durable preference");
 
-    await expectPathMissing(path.join(workspaceDir, "DREAMS.md"));
+    await expect(fs.access(path.join(workspaceDir, "DREAMS.md"))).rejects.toThrow();
   });
 });

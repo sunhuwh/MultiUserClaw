@@ -20,34 +20,6 @@ vi.mock("./polls.js", () => ({
 
 import { msteamsOutbound } from "./outbound.js";
 
-type MSTeamsSendText = NonNullable<typeof msteamsOutbound.sendText>;
-type MSTeamsSendMedia = NonNullable<typeof msteamsOutbound.sendMedia>;
-type MSTeamsSendPoll = NonNullable<typeof msteamsOutbound.sendPoll>;
-
-function requireSendText(): MSTeamsSendText {
-  const sendText = msteamsOutbound.sendText;
-  if (!sendText) {
-    throw new Error("Expected msteams outbound sendText");
-  }
-  return sendText;
-}
-
-function requireSendMedia(): MSTeamsSendMedia {
-  const sendMedia = msteamsOutbound.sendMedia;
-  if (!sendMedia) {
-    throw new Error("Expected msteams outbound sendMedia");
-  }
-  return sendMedia;
-}
-
-function requireSendPoll(): MSTeamsSendPoll {
-  const sendPoll = msteamsOutbound.sendPoll;
-  if (!sendPoll) {
-    throw new Error("Expected msteams outbound sendPoll");
-  }
-  return sendPoll;
-}
-
 describe("msteamsOutbound cfg threading", () => {
   beforeEach(() => {
     mocks.sendMessageMSTeams.mockReset();
@@ -74,7 +46,7 @@ describe("msteamsOutbound cfg threading", () => {
       },
     } as OpenClawConfig;
 
-    await requireSendText()({
+    await msteamsOutbound.sendText!({
       cfg,
       to: "conversation:abc",
       text: "hello",
@@ -96,7 +68,7 @@ describe("msteamsOutbound cfg threading", () => {
       },
     } as OpenClawConfig;
 
-    await requireSendMedia()({
+    await msteamsOutbound.sendMedia!({
       cfg,
       to: "conversation:abc",
       text: "photo",
@@ -122,7 +94,7 @@ describe("msteamsOutbound cfg threading", () => {
       },
     } as OpenClawConfig;
 
-    await requireSendPoll()({
+    await msteamsOutbound.sendPoll!({
       cfg,
       to: "conversation:abc",
       poll: {
@@ -138,18 +110,13 @@ describe("msteamsOutbound cfg threading", () => {
       options: ["Pizza", "Sushi"],
       maxSelections: 1,
     });
-    const [pollRecord] = mocks.createPoll.mock.calls[0] ?? [];
-    expect(pollRecord).toEqual({
-      id: "poll-1",
-      question: "Snack?",
-      options: ["Pizza", "Sushi"],
-      maxSelections: 1,
-      createdAt: pollRecord?.createdAt,
-      conversationId: "conv-1",
-      messageId: "msg-poll-1",
-      votes: {},
-    });
-    expect(Number.isNaN(Date.parse(pollRecord?.createdAt))).toBe(false);
+    expect(mocks.createPoll).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "poll-1",
+        question: "Snack?",
+        options: ["Pizza", "Sushi"],
+      }),
+    );
   });
 
   it("chunks outbound text without requiring MSTeams runtime initialization", () => {

@@ -16,6 +16,7 @@ enum GatewayAgentChannel: String, Codable, CaseIterable {
     case signal
     case imessage
     case msteams
+    case bluebubbles
     case webchat
 
     init(raw: String?) {
@@ -41,7 +42,6 @@ struct GatewayAgentInvocation {
     var channel: GatewayAgentChannel = .last
     var timeoutSeconds: Int?
     var idempotencyKey: String = UUID().uuidString
-    var voiceWakeTrigger: String?
 }
 
 /// Single, shared Gateway websocket connection for the whole app.
@@ -70,7 +70,6 @@ actor GatewayConnection {
         case wizardStatus = "wizard.status"
         case talkConfig = "talk.config"
         case talkMode = "talk.mode"
-        case talkSpeak = "talk.speak"
         case webLoginStart = "web.login.start"
         case webLoginWait = "web.login.wait"
         case channelsLogout = "channels.logout"
@@ -310,10 +309,9 @@ actor GatewayConnection {
         self.lastSnapshot = nil
     }
 
-    func canvasPluginSurfaceUrl() async -> String? {
+    func canvasHostUrl() async -> String? {
         guard let snapshot = self.lastSnapshot else { return nil }
-        let raw = snapshot.pluginsurfaceurls?["canvas"]?.value as? String
-        let trimmed = raw?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines) ?? ""
+        let trimmed = snapshot.canvashosturl?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
     }
 
@@ -499,10 +497,6 @@ extension GatewayConnection {
         ]
         if let timeout = invocation.timeoutSeconds {
             params["timeout"] = AnyCodable(timeout)
-        }
-        if let trigger = invocation.voiceWakeTrigger {
-            params["voiceWakeTrigger"] = AnyCodable(
-                trigger.trimmingCharacters(in: .whitespacesAndNewlines))
         }
 
         do {

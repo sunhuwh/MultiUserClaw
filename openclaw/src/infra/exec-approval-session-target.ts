@@ -1,14 +1,20 @@
 import { resolveSessionConversationRef } from "../channels/plugins/session-conversation.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { OpenClawConfig } from "../config/config.js";
+import { resolveStorePath } from "../config/sessions/paths.js";
+import { loadSessionStore } from "../config/sessions/store-load.js";
+import { parseAgentSessionKey } from "../routing/session-key.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { normalizeMessageChannel } from "../utils/message-channel.js";
-import {
-  doesApprovalRequestMatchChannelAccount,
-  resolvePersistedApprovalRequestSessionEntry,
-} from "./approval-request-account-binding.js";
+import { doesApprovalRequestMatchChannelAccount } from "./approval-request-account-binding.js";
 import type { ExecApprovalRequest } from "./exec-approvals.js";
 import { resolveSessionDeliveryTarget } from "./outbound/targets.js";
 import type { PluginApprovalRequest } from "./plugin-approvals.js";
+
+export {
+  doesApprovalRequestMatchChannelAccount,
+  resolveApprovalRequestAccountId,
+  resolveApprovalRequestChannelAccountId,
+} from "./approval-request-account-binding.js";
 
 export type ExecApprovalSessionTarget = {
   channel?: string;
@@ -81,15 +87,12 @@ function normalizeOptionalChannel(value?: string | null): string | undefined {
 export function resolveApprovalRequestSessionConversation(params: {
   request: ApprovalRequestLike;
   channel?: string | null;
-  bundledFallback?: boolean;
 }): ApprovalRequestSessionConversation | null {
   const sessionKey = normalizeOptionalString(params.request.request.sessionKey);
   if (!sessionKey) {
     return null;
   }
-  const resolved = resolveSessionConversationRef(sessionKey, {
-    bundledFallback: params.bundledFallback,
-  });
+  const resolved = resolveSessionConversationRef(sessionKey);
   if (!resolved) {
     return null;
   }
@@ -121,16 +124,17 @@ export function resolveExecApprovalSessionTarget(params: {
   if (!sessionKey) {
     return null;
   }
-  const persisted = resolvePersistedApprovalRequestSessionEntry({
-    cfg: params.cfg,
-    request: params.request,
-  });
-  if (!persisted) {
+  const parsed = parseAgentSessionKey(sessionKey);
+  const agentId = parsed?.agentId ?? params.request.request.agentId ?? "main";
+  const storePath = resolveStorePath(params.cfg.session?.store, { agentId });
+  const store = loadSessionStore(storePath);
+  const entry = store[sessionKey];
+  if (!entry) {
     return null;
   }
 
   const target = resolveSessionDeliveryTarget({
-    entry: persisted.entry,
+    entry,
     requestedChannel: "last",
     turnSourceChannel: normalizeOptionalString(params.turnSourceChannel),
     turnSourceTo: normalizeOptionalString(params.turnSourceTo),

@@ -1,9 +1,7 @@
-import {
-  parsePluginBindingApprovalCustomId,
-  resolvePinnedMainDmOwnerFromAllowlist,
-} from "openclaw/plugin-sdk/conversation-runtime";
 import { isSingleUseReplyToMode } from "openclaw/plugin-sdk/reply-reference";
 import { vi, type Mock } from "vitest";
+import { parsePluginBindingApprovalCustomId } from "../../../../src/plugins/conversation-binding.js";
+import { resolvePinnedMainDmOwnerFromAllowlist } from "../../../../src/security/dm-policy-shared.js";
 
 type UnknownMock = Mock<(...args: unknown[]) => unknown>;
 type AsyncUnknownMock = Mock<(...args: unknown[]) => Promise<unknown>>;
@@ -48,22 +46,18 @@ export const upsertPairingRequestMock: AsyncUnknownMock = runtimeMocks.upsertPai
 export const recordInboundSessionMock: AsyncUnknownMock = runtimeMocks.recordInboundSessionMock;
 export const readSessionUpdatedAtMock: UnknownMock = runtimeMocks.readSessionUpdatedAtMock;
 export const resolveStorePathMock: UnknownMock = runtimeMocks.resolveStorePathMock;
-const resolvePluginConversationBindingApprovalMock: AsyncUnknownMock =
+export const resolvePluginConversationBindingApprovalMock: AsyncUnknownMock =
   runtimeMocks.resolvePluginConversationBindingApprovalMock;
-const buildPluginBindingResolvedTextMock: UnknownMock =
+export const buildPluginBindingResolvedTextMock: UnknownMock =
   runtimeMocks.buildPluginBindingResolvedTextMock;
 
-async function readChannelIngressStoreAllowFromForDmPolicy(params: {
+async function readStoreAllowFromForDmPolicy(params: {
   provider: string;
   accountId: string;
   dmPolicy?: string | null;
   shouldRead?: boolean | null;
 }) {
-  if (
-    params.shouldRead === false ||
-    params.dmPolicy === "allowlist" ||
-    params.dmPolicy === "open"
-  ) {
+  if (params.shouldRead === false || params.dmPolicy === "allowlist") {
     return [];
   }
   return await readAllowFromStoreMock(params.provider, params.accountId);
@@ -71,7 +65,7 @@ async function readChannelIngressStoreAllowFromForDmPolicy(params: {
 
 vi.mock("../monitor/agent-components-helpers.runtime.js", () => {
   return {
-    readChannelIngressStoreAllowFromForDmPolicy,
+    readStoreAllowFromForDmPolicy,
     resolvePinnedMainDmOwnerFromAllowlist,
     upsertChannelPairingRequest: (...args: unknown[]) => upsertPairingRequestMock(...args),
   };

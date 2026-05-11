@@ -1,10 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { readJsonFileWithFallback, writeJsonFileAtomically } from "openclaw/plugin-sdk/json-store";
 
 export type MemoryWikiImportedSourceGroup = "bridge" | "unsafe-local";
 
-type MemoryWikiImportedSourceStateEntry = {
+export type MemoryWikiImportedSourceStateEntry = {
   group: MemoryWikiImportedSourceGroup;
   pagePath: string;
   sourcePath: string;
@@ -23,7 +22,7 @@ const EMPTY_STATE: MemoryWikiImportedSourceState = {
   entries: {},
 };
 
-function resolveMemoryWikiSourceSyncStatePath(vaultRoot: string): string {
+export function resolveMemoryWikiSourceSyncStatePath(vaultRoot: string): string {
   return path.join(vaultRoot, ".openclaw-wiki", "source-sync.json");
 }
 
@@ -31,14 +30,30 @@ export async function readMemoryWikiSourceSyncState(
   vaultRoot: string,
 ): Promise<MemoryWikiImportedSourceState> {
   const statePath = resolveMemoryWikiSourceSyncStatePath(vaultRoot);
-  const { value: parsed } = await readJsonFileWithFallback<Partial<MemoryWikiImportedSourceState>>(
-    statePath,
-    EMPTY_STATE,
-  );
-  return {
-    version: 1,
-    entries: { ...parsed.entries },
-  };
+  const raw = await fs.readFile(statePath, "utf8").catch((err: unknown) => {
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+      return "";
+    }
+    throw err;
+  });
+  if (!raw.trim()) {
+    return {
+      version: EMPTY_STATE.version,
+      entries: {},
+    };
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<MemoryWikiImportedSourceState>;
+    return {
+      version: 1,
+      entries: { ...parsed.entries },
+    };
+  } catch {
+    return {
+      version: EMPTY_STATE.version,
+      entries: {},
+    };
+  }
 }
 
 export async function writeMemoryWikiSourceSyncState(
@@ -46,7 +61,8 @@ export async function writeMemoryWikiSourceSyncState(
   state: MemoryWikiImportedSourceState,
 ): Promise<void> {
   const statePath = resolveMemoryWikiSourceSyncStatePath(vaultRoot);
-  await writeJsonFileAtomically(statePath, state);
+  await fs.mkdir(path.dirname(statePath), { recursive: true });
+  await fs.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
 
 export async function shouldSkipImportedSourceWrite(params: {

@@ -1,29 +1,30 @@
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
-import { callGatewayFromCli } from "openclaw/plugin-sdk/gateway-runtime";
-import { formatQaGatewayLogsForError } from "./gateway-log-redaction.js";
+import { callGatewayFromCli } from "./runtime-api.js";
 
 type QaGatewayRpcRequestOptions = {
   expectFinal?: boolean;
   timeoutMs?: number;
 };
 
-type QaGatewayRpcClient = {
+export type QaGatewayRpcClient = {
   request(method: string, rpcParams?: unknown, opts?: QaGatewayRpcRequestOptions): Promise<unknown>;
   stop(): Promise<void>;
 };
 
 function formatQaGatewayRpcError(error: unknown, logs: () => string) {
   const details = formatErrorMessage(error);
-  return new Error(`${details}${formatQaGatewayLogsForError(logs())}`);
+  return new Error(`${details}\nGateway logs:\n${logs()}`);
 }
 
-function runQueuedQaGatewayRpc<T>(queue: Promise<void>, task: () => Promise<T>) {
-  const run = queue.then(task, task);
-  const nextQueue = run.then(
+let qaGatewayRpcQueue = Promise.resolve();
+
+async function runQueuedQaGatewayRpc<T>(task: () => Promise<T>): Promise<T> {
+  const run = qaGatewayRpcQueue.then(task, task);
+  qaGatewayRpcQueue = run.then(
     () => undefined,
     () => undefined,
   );
-  return { run, nextQueue };
+  return await run;
 }
 
 export async function startQaGatewayRpcClient(params: {
@@ -33,7 +34,6 @@ export async function startQaGatewayRpcClient(params: {
 }): Promise<QaGatewayRpcClient> {
   const wrapError = (error: unknown) => formatQaGatewayRpcError(error, params.logs);
   let stopped = false;
-  let queue = Promise.resolve();
 
   return {
     async request(method, rpcParams, opts) {
@@ -41,8 +41,7 @@ export async function startQaGatewayRpcClient(params: {
         throw wrapError(new Error("gateway rpc client already stopped"));
       }
       try {
-        const { run, nextQueue } = runQueuedQaGatewayRpc(
-          queue,
+        return await runQueuedQaGatewayRpc(
           async () =>
             await callGatewayFromCli(
               method,
@@ -55,17 +54,11 @@ export async function startQaGatewayRpcClient(params: {
               },
               rpcParams ?? {},
               {
-                clientName: "gateway-client",
-                deviceIdentity: null,
                 expectFinal: opts?.expectFinal,
-                mode: "backend",
                 progress: false,
-                scopes: ["operator.admin"],
               },
             ),
         );
-        queue = nextQueue;
-        return await run;
       } catch (error) {
         throw wrapError(error);
       }

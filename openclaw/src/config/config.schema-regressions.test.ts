@@ -1,12 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { validateConfigObject } from "./validation.js";
+import { validateConfigObject } from "./config.js";
 
 describe("config schema regressions", () => {
-  it("accepts session write-lock acquire timeout", () => {
+  it("accepts nested telegram groupPolicy overrides", () => {
     const res = validateConfigObject({
-      session: {
-        writeLock: {
-          acquireTimeoutMs: 60_000,
+      channels: {
+        telegram: {
+          groups: {
+            "-1001234567890": {
+              groupPolicy: "open",
+              topics: {
+                "42": {
+                  groupPolicy: "disabled",
+                },
+              },
+            },
+          },
         },
       },
     });
@@ -95,17 +104,39 @@ describe("config schema regressions", () => {
     expect(res.ok).toBe(true);
   });
 
-  it("accepts agents.defaults.startupContext overrides", () => {
+  it("accepts safe iMessage remoteHost", () => {
     const res = validateConfigObject({
-      agents: {
-        defaults: {
-          startupContext: {
-            enabled: true,
-            applyOn: ["new"],
-            dailyMemoryDays: 3,
-            maxFileBytes: 8192,
-            maxFileChars: 1000,
-            maxTotalChars: 2500,
+      channels: {
+        imessage: {
+          remoteHost: "bot@gateway-host",
+        },
+      },
+    });
+
+    expect(res.ok).toBe(true);
+  });
+
+  it("accepts channels.whatsapp.enabled", () => {
+    const res = validateConfigObject({
+      channels: {
+        whatsapp: {
+          enabled: true,
+        },
+      },
+    });
+
+    expect(res.ok).toBe(true);
+  });
+
+  it("accepts BlueBubbles enrichGroupParticipantsFromContacts at channel and account scope", () => {
+    const res = validateConfigObject({
+      channels: {
+        bluebubbles: {
+          enrichGroupParticipantsFromContacts: true,
+          accounts: {
+            work: {
+              enrichGroupParticipantsFromContacts: false,
+            },
           },
         },
       },
@@ -114,63 +145,34 @@ describe("config schema regressions", () => {
     expect(res.ok).toBe(true);
   });
 
-  it("rejects oversized agents.defaults.startupContext overrides", () => {
+  it("rejects unsafe iMessage remoteHost", () => {
     const res = validateConfigObject({
-      agents: {
-        defaults: {
-          startupContext: {
-            dailyMemoryDays: 99,
-            maxFileBytes: 999_999,
-          },
+      channels: {
+        imessage: {
+          remoteHost: "bot@gateway-host -oProxyCommand=whoami",
         },
       },
     });
 
     expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.issues[0]?.path).toBe("channels.imessage.remoteHost");
+    }
   });
 
-  it("accepts agents.defaults and agents.list contextLimits overrides", () => {
+  it("accepts iMessage attachment root patterns", () => {
     const res = validateConfigObject({
-      agents: {
-        defaults: {
-          contextLimits: {
-            memoryGetMaxChars: 20_000,
-            memoryGetDefaultLines: 180,
-            toolResultMaxChars: 24_000,
-            postCompactionMaxChars: 4_000,
-          },
-        },
-        list: [
-          {
-            id: "writer",
-            skillsLimits: {
-              maxSkillsPromptChars: 30_000,
-            },
-            contextLimits: {
-              memoryGetMaxChars: 24_000,
-            },
-          },
-        ],
-      },
-    });
-
-    expect(res.ok).toBe(true);
-  });
-
-  it("accepts agents.defaults.compaction.truncateAfterCompaction", () => {
-    const res = validateConfigObject({
-      agents: {
-        defaults: {
-          compaction: {
-            truncateAfterCompaction: true,
-            maxActiveTranscriptBytes: "20mb",
-          },
+      channels: {
+        imessage: {
+          attachmentRoots: ["/Users/*/Library/Messages/Attachments"],
+          remoteAttachmentRoots: ["/Volumes/relay/attachments"],
         },
       },
     });
 
     expect(res.ok).toBe(true);
   });
+
   it("accepts string values for agents defaults model inputs", () => {
     const res = validateConfigObject({
       agents: {
@@ -214,9 +216,22 @@ describe("config schema regressions", () => {
 
     expect(res.ok).toBe(false);
     if (!res.ok) {
-      expect(res.issues.map((issue) => issue.path)).toEqual(
-        expect.arrayContaining(["agents.defaults.pdfMaxBytesMb", "agents.defaults.pdfMaxPages"]),
-      );
+      expect(res.issues.some((issue) => issue.path.includes("agents.defaults.pdfMax"))).toBe(true);
+    }
+  });
+
+  it("rejects relative iMessage attachment roots", () => {
+    const res = validateConfigObject({
+      channels: {
+        imessage: {
+          attachmentRoots: ["./attachments"],
+        },
+      },
+    });
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.issues[0]?.path).toBe("channels.imessage.attachmentRoots.0");
     }
   });
 
@@ -230,28 +245,6 @@ describe("config schema regressions", () => {
     expect(res.ok).toBe(true);
   });
 
-  it("accepts browser local startup timeout settings", () => {
-    const res = validateConfigObject({
-      browser: {
-        localLaunchTimeoutMs: 45_000,
-        localCdpReadyTimeoutMs: 30_000,
-      },
-    });
-
-    expect(res.ok).toBe(true);
-  });
-
-  it("rejects out-of-range browser local startup timeout settings", () => {
-    const res = validateConfigObject({
-      browser: {
-        localLaunchTimeoutMs: 120_001,
-        localCdpReadyTimeoutMs: 0,
-      },
-    });
-
-    expect(res.ok).toBe(false);
-  });
-
   it("rejects browser.extraArgs with non-array value", () => {
     const res = validateConfigObject({
       browser: {
@@ -262,14 +255,11 @@ describe("config schema regressions", () => {
     expect(res.ok).toBe(false);
   });
 
-  it("accepts browser.tabCleanup overrides", () => {
+  it("accepts signal accountUuid for loop protection", () => {
     const res = validateConfigObject({
-      browser: {
-        tabCleanup: {
-          enabled: true,
-          idleMinutes: 10,
-          maxTabsPerSession: 10,
-          sweepMinutes: 5,
+      channels: {
+        signal: {
+          accountUuid: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
         },
       },
     });
@@ -277,36 +267,13 @@ describe("config schema regressions", () => {
     expect(res.ok).toBe(true);
   });
 
-  it("rejects browser.tabCleanup.sweepMinutes when not positive", () => {
+  it("accepts telegram actions editMessage and createForumTopic", () => {
     const res = validateConfigObject({
-      browser: {
-        tabCleanup: {
-          sweepMinutes: 0,
-        },
-      },
-    });
-
-    expect(res.ok).toBe(false);
-  });
-
-  it("rejects unknown keys under browser.tabCleanup", () => {
-    const res = validateConfigObject({
-      browser: {
-        tabCleanup: {
-          unknownKey: true as unknown,
-        },
-      },
-    });
-
-    expect(res.ok).toBe(false);
-  });
-
-  it("accepts tools.media.asyncCompletion.directSend", () => {
-    const res = validateConfigObject({
-      tools: {
-        media: {
-          asyncCompletion: {
-            directSend: true,
+      channels: {
+        telegram: {
+          actions: {
+            editMessage: true,
+            createForumTopic: false,
           },
         },
       },
@@ -314,6 +281,7 @@ describe("config schema regressions", () => {
 
     expect(res.ok).toBe(true);
   });
+
   it("accepts discovery.wideArea.domain for unicast DNS-SD", () => {
     const res = validateConfigObject({
       discovery: {

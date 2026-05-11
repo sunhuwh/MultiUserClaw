@@ -1,12 +1,11 @@
 import { createLazyChannelApprovalNativeRuntimeAdapter } from "openclaw/plugin-sdk/approval-handler-adapter-runtime";
 import type { ChannelApprovalNativeRuntimeAdapter } from "openclaw/plugin-sdk/approval-handler-runtime";
 import { resolveApprovalRequestSessionConversation } from "openclaw/plugin-sdk/approval-native-runtime";
-import type { ChannelApprovalCapability } from "openclaw/plugin-sdk/channel-contract";
-import type { DiscordExecApprovalConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { DiscordExecApprovalConfig } from "openclaw/plugin-sdk/config-runtime";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
+} from "openclaw/plugin-sdk/text-runtime";
 export { shouldHandleDiscordApprovalRequest } from "./approval-shared.js";
 import { listDiscordAccountIds, resolveDiscordAccount } from "./accounts.js";
 import {
@@ -29,6 +28,14 @@ export function extractDiscordChannelId(sessionKey?: string | null): string | nu
     return null;
   }
   const match = sessionKey.match(/discord:(?:channel|group):(\d+)/);
+  return match ? match[1] : null;
+}
+
+export function extractDiscordThreadId(sessionKey?: string | null): string | null {
+  if (!sessionKey) {
+    return null;
+  }
+  const match = sessionKey.match(/discord:(?:channel|group):\d+:thread:(\d+)/);
   return match ? match[1] : null;
 }
 
@@ -83,7 +90,6 @@ function createDiscordOriginTargetResolver(configOverride?: DiscordExecApprovalC
       const sessionConversation = resolveApprovalRequestSessionConversation({
         request,
         channel: "discord",
-        bundledFallback: false,
       });
       const sessionKind = extractDiscordSessionKind(
         normalizeOptionalString(request.request.sessionKey) ?? null,
@@ -107,7 +113,6 @@ function createDiscordOriginTargetResolver(configOverride?: DiscordExecApprovalC
       const sessionConversation = resolveApprovalRequestSessionConversation({
         request,
         channel: "discord",
-        bundledFallback: false,
       });
       const sessionKind = extractDiscordSessionKind(request.request.sessionKey?.trim() || null);
       if (sessionKind === "dm") {
@@ -124,11 +129,11 @@ function createDiscordOriginTargetResolver(configOverride?: DiscordExecApprovalC
           }
         : null;
     },
+    targetsMatch: (a, b) => a.to === b.to && a.threadId === b.threadId,
     resolveFallbackTarget: (request) => {
       const sessionConversation = resolveApprovalRequestSessionConversation({
         request,
         channel: "discord",
-        bundledFallback: false,
       });
       const sessionKind = extractDiscordSessionKind(request.request.sessionKey?.trim() || null);
       if (sessionKind === "dm") {
@@ -156,22 +161,20 @@ function createDiscordApproverDmTargetResolver(configOverride?: DiscordExecAppro
       }),
     resolveApprovers: ({ cfg, accountId }) =>
       getDiscordExecApprovalApprovers({ cfg, accountId, configOverride }),
-    mapApprover: (approver) => ({ to: approver }),
+    mapApprover: (approver) => ({ to: String(approver) }),
   });
 }
 
-function createDiscordApprovalCapability(configOverride?: DiscordExecApprovalConfig | null) {
+export function createDiscordApprovalCapability(configOverride?: DiscordExecApprovalConfig | null) {
   return createApproverRestrictedNativeApprovalCapability({
     channel: "discord",
     channelLabel: "Discord",
-    describeExecApprovalSetup: ({
-      accountId,
-    }: Parameters<NonNullable<ChannelApprovalCapability["describeExecApprovalSetup"]>>[0]) => {
+    describeExecApprovalSetup: ({ accountId }) => {
       const prefix =
         accountId && accountId !== "default"
           ? `channels.discord.accounts.${accountId}`
           : "channels.discord";
-      return `Approve it from the Web UI or terminal UI for now. Discord supports native exec approvals for this account. Configure \`${prefix}.execApprovals.approvers\` or \`commands.ownerAllowFrom\`; set \`${prefix}.execApprovals.enabled\` to \`auto\` or \`true\`.`;
+      return `Approve it from the Web UI or terminal UI for now. Discord supports native exec approvals for this account. Configure \`${prefix}.execApprovals.approvers\` or \`commands.ownerAllowFrom\`; leave \`${prefix}.execApprovals.enabled\` unset/\`auto\` or set it to \`true\`.`;
     },
     listAccountIds: listDiscordAccountIds,
     hasApprovers: ({ cfg, accountId }) =>
@@ -212,8 +215,16 @@ export function createDiscordNativeApprovalAdapter(
 }
 
 let cachedDiscordApprovalCapability: ReturnType<typeof createDiscordApprovalCapability> | undefined;
+let cachedDiscordNativeApprovalAdapter:
+  | ReturnType<typeof createDiscordNativeApprovalAdapter>
+  | undefined;
 
 export function getDiscordApprovalCapability() {
   cachedDiscordApprovalCapability ??= createDiscordApprovalCapability();
   return cachedDiscordApprovalCapability;
+}
+
+export function getDiscordNativeApprovalAdapter() {
+  cachedDiscordNativeApprovalAdapter ??= createDiscordNativeApprovalAdapter();
+  return cachedDiscordNativeApprovalAdapter;
 }

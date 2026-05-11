@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { appendRegularFile } from "../infra/fs-safe.js";
 import type { MemoryDreamingPhaseName } from "./dreaming.js";
 
 export const MEMORY_HOST_EVENT_LOG_RELATIVE_PATH = path.join("memory", ".dreams", "events.jsonl");
@@ -58,11 +57,7 @@ export async function appendMemoryHostEvent(
 ): Promise<void> {
   const eventLogPath = resolveMemoryHostEventLogPath(workspaceDir);
   await fs.mkdir(path.dirname(eventLogPath), { recursive: true });
-  await appendRegularFile({
-    filePath: eventLogPath,
-    content: `${JSON.stringify(event)}\n`,
-    rejectSymlinkParents: true,
-  });
+  await fs.appendFile(eventLogPath, `${JSON.stringify(event)}\n`, "utf8");
 }
 
 export async function readMemoryHostEvents(params: {

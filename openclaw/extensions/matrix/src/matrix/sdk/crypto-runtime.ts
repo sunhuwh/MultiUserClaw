@@ -8,7 +8,4 @@ export { MatrixDecryptBridge } from "./decrypt-bridge.js";
 export { persistIdbToDisk, restoreIdbFromDisk } from "./idb-persistence.js";
 export { MatrixVerificationManager } from "./verification-manager.js";
 export type { MatrixVerificationSummary } from "./verification-manager.js";
-export {
-  isMatrixDeviceOwnerVerified,
-  isMatrixDeviceVerifiedInCurrentClient,
-} from "./verification-status.js";
+export { isMatrixDeviceOwnerVerified } from "./verification-status.js";

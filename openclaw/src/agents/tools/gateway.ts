@@ -1,17 +1,16 @@
-import { getRuntimeConfig, resolveGatewayPort } from "../../config/config.js";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { loadConfig, resolveGatewayPort } from "../../config/config.js";
 import { callGateway } from "../../gateway/call.js";
 import { resolveGatewayCredentialsFromConfig, trimToUndefined } from "../../gateway/credentials.js";
 import {
   resolveLeastPrivilegeOperatorScopesForMethod,
   type OperatorScope,
 } from "../../gateway/method-scopes.js";
-import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../../gateway/protocol/client-info.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
 } from "../../shared/string-coerce.js";
+import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../../utils/message-channel.js";
 import { readStringParam } from "./common.js";
 
 export const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
@@ -63,7 +62,7 @@ function canonicalizeToolGatewayWsUrl(raw: string): { origin: string; key: strin
 }
 
 function validateGatewayUrlOverrideForAgentTools(params: {
-  cfg: OpenClawConfig;
+  cfg: ReturnType<typeof loadConfig>;
   urlOverride: string;
 }): { url: string; target: GatewayOverrideTarget } {
   const { cfg } = params;
@@ -105,7 +104,7 @@ function validateGatewayUrlOverrideForAgentTools(params: {
 }
 
 function resolveGatewayOverrideToken(params: {
-  cfg: OpenClawConfig;
+  cfg: ReturnType<typeof loadConfig>;
   target: GatewayOverrideTarget;
   explicitToken?: string;
 }): string | undefined {
@@ -122,7 +121,7 @@ function resolveGatewayOverrideToken(params: {
 }
 
 export function resolveGatewayOptions(opts?: GatewayCallOptions) {
-  const cfg = getRuntimeConfig();
+  const cfg = loadConfig();
   const validatedOverride =
     trimToUndefined(opts?.gatewayUrl) !== undefined
       ? validateGatewayUrlOverrideForAgentTools({
@@ -154,7 +153,7 @@ export async function callGatewayTool<T = Record<string, unknown>>(
   const gateway = resolveGatewayOptions(opts);
   const scopes = Array.isArray(extra?.scopes)
     ? extra.scopes
-    : resolveLeastPrivilegeOperatorScopesForMethod(method, params);
+    : resolveLeastPrivilegeOperatorScopesForMethod(method);
   return await callGateway<T>({
     url: gateway.url,
     token: gateway.token,

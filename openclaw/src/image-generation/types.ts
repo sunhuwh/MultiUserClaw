@@ -1,7 +1,6 @@
-import type { AuthProfileStore } from "../agents/auth-profiles/types.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
-import type { SsrFPolicy } from "../infra/net/ssrf.js";
-import type { MediaNormalizationEntry } from "../media-generation/normalization.types.js";
+import type { AuthProfileStore } from "../agents/auth-profiles.js";
+import type { OpenClawConfig } from "../config/config.js";
+import type { MediaNormalizationEntry } from "../media-generation/runtime-shared.js";
 
 export type GeneratedImageAsset = {
   buffer: Buffer;
@@ -13,34 +12,7 @@ export type GeneratedImageAsset = {
 
 export type ImageGenerationResolution = "1K" | "2K" | "4K";
 
-export type ImageGenerationQuality = "low" | "medium" | "high" | "auto";
-
-export type ImageGenerationOutputFormat = "png" | "jpeg" | "webp";
-
-export type ImageGenerationBackground = "transparent" | "opaque" | "auto";
-
-export type ImageGenerationOpenAIBackground = ImageGenerationBackground;
-
-export type ImageGenerationOpenAIModeration = "low" | "auto";
-
-export type ImageGenerationOpenAIOptions = {
-  background?: ImageGenerationOpenAIBackground;
-  moderation?: ImageGenerationOpenAIModeration;
-  outputCompression?: number;
-  user?: string;
-};
-
-export type ImageGenerationProviderOptions = {
-  openai?: ImageGenerationOpenAIOptions;
-};
-
-type ImageGenerationIgnoredOverrideKey =
-  | "size"
-  | "aspectRatio"
-  | "resolution"
-  | "quality"
-  | "outputFormat"
-  | "background";
+export type ImageGenerationIgnoredOverrideKey = "size" | "aspectRatio" | "resolution";
 
 export type ImageGenerationIgnoredOverride = {
   key: ImageGenerationIgnoredOverrideKey;
@@ -71,12 +43,7 @@ export type ImageGenerationRequest = {
   size?: string;
   aspectRatio?: string;
   resolution?: ImageGenerationResolution;
-  quality?: ImageGenerationQuality;
-  outputFormat?: ImageGenerationOutputFormat;
-  background?: ImageGenerationBackground;
   inputImages?: ImageGenerationSourceImage[];
-  providerOptions?: ImageGenerationProviderOptions;
-  ssrfPolicy?: SsrFPolicy;
 };
 
 export type ImageGenerationResult = {
@@ -85,28 +52,22 @@ export type ImageGenerationResult = {
   metadata?: Record<string, unknown>;
 };
 
-type ImageGenerationModeCapabilities = {
+export type ImageGenerationModeCapabilities = {
   maxCount?: number;
   supportsSize?: boolean;
   supportsAspectRatio?: boolean;
   supportsResolution?: boolean;
 };
 
-type ImageGenerationEditCapabilities = ImageGenerationModeCapabilities & {
+export type ImageGenerationEditCapabilities = ImageGenerationModeCapabilities & {
   enabled: boolean;
   maxInputImages?: number;
 };
 
-type ImageGenerationGeometryCapabilities = {
+export type ImageGenerationGeometryCapabilities = {
   sizes?: string[];
   aspectRatios?: string[];
   resolutions?: ImageGenerationResolution[];
-};
-
-type ImageGenerationOutputCapabilities = {
-  qualities?: ImageGenerationQuality[];
-  formats?: ImageGenerationOutputFormat[];
-  backgrounds?: ImageGenerationBackground[];
 };
 
 export type ImageGenerationNormalization = {
@@ -119,7 +80,6 @@ export type ImageGenerationProviderCapabilities = {
   generate: ImageGenerationModeCapabilities;
   edit: ImageGenerationEditCapabilities;
   geometry?: ImageGenerationGeometryCapabilities;
-  output?: ImageGenerationOutputCapabilities;
 };
 
 export type ImageGenerationProvider = {

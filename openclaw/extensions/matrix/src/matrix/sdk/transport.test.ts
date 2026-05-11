@@ -8,15 +8,6 @@ function clearTestUndiciRuntimeDepsOverride(): void {
   Reflect.deleteProperty(globalThis as object, TEST_UNDICI_RUNTIME_DEPS_KEY);
 }
 
-function stubRuntimeFetch(fetchImpl: typeof fetch): void {
-  (globalThis as Record<string, unknown>)[TEST_UNDICI_RUNTIME_DEPS_KEY] = {
-    Agent: function MockAgent() {},
-    EnvHttpProxyAgent: function MockEnvHttpProxyAgent() {},
-    ProxyAgent: function MockProxyAgent() {},
-    fetch: fetchImpl,
-  };
-}
-
 describe("performMatrixRequest", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
@@ -28,7 +19,8 @@ describe("performMatrixRequest", () => {
   });
 
   it("rejects oversized raw responses before buffering the whole body", async () => {
-    stubRuntimeFetch(
+    vi.stubGlobal(
+      "fetch",
       vi.fn(
         async () =>
           new Response("too-big", {
@@ -63,7 +55,8 @@ describe("performMatrixRequest", () => {
         controller.close();
       },
     });
-    stubRuntimeFetch(
+    vi.stubGlobal(
+      "fetch",
       vi.fn(
         async () =>
           new Response(stream, {
@@ -94,7 +87,8 @@ describe("performMatrixRequest", () => {
           controller.enqueue(new Uint8Array([1, 2, 3]));
         },
       });
-      stubRuntimeFetch(
+      vi.stubGlobal(
+        "fetch",
         vi.fn(
           async () =>
             new Response(stream, {
@@ -133,10 +127,7 @@ describe("performMatrixRequest", () => {
     }) as typeof fetch);
     const runtimeFetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const requestInit = init as RequestInit & { dispatcher?: unknown };
-      expect(
-        (requestInit.dispatcher as { constructor?: { name?: string } } | undefined)?.constructor
-          ?.name,
-      ).toBe("MockAgent");
+      expect(requestInit.dispatcher).toBeDefined();
       return new Response('{"ok":true}', {
         status: 200,
         headers: {
@@ -144,7 +135,12 @@ describe("performMatrixRequest", () => {
         },
       });
     });
-    stubRuntimeFetch(runtimeFetch);
+    (globalThis as Record<string, unknown>)[TEST_UNDICI_RUNTIME_DEPS_KEY] = {
+      Agent: class MockAgent {},
+      EnvHttpProxyAgent: class MockEnvHttpProxyAgent {},
+      ProxyAgent: class MockProxyAgent {},
+      fetch: runtimeFetch,
+    };
 
     const result = await performMatrixRequest({
       homeserver: "http://127.0.0.1:8008",
@@ -158,10 +154,8 @@ describe("performMatrixRequest", () => {
     expect(result.text).toBe('{"ok":true}');
     expect(ambientFetchCalls).toBe(0);
     expect(runtimeFetch).toHaveBeenCalledTimes(1);
-    const dispatcher = (runtimeFetch.mock.calls[0]?.[1] as RequestInit & { dispatcher?: unknown })
-      ?.dispatcher;
-    expect((dispatcher as { constructor?: { name?: string } } | undefined)?.constructor?.name).toBe(
-      "MockAgent",
-    );
+    expect(
+      (runtimeFetch.mock.calls[0]?.[1] as RequestInit & { dispatcher?: unknown })?.dispatcher,
+    ).toBeDefined();
   });
 });

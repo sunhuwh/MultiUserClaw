@@ -66,7 +66,7 @@ describe("resolveGroupAllowFromSources", () => {
         groupAllowFrom: [],
         fallbackToAllowFrom: false,
       }),
-    ).toStrictEqual([]);
+    ).toEqual([]);
   });
 });
 

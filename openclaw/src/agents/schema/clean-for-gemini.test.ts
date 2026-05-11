@@ -9,7 +9,7 @@ describe("cleanSchemaForGemini", () => {
     }) as { type?: unknown; properties?: unknown };
 
     expect(cleaned.type).toBe("object");
-    expect(cleaned.properties).toStrictEqual({});
+    expect(cleaned.properties).toEqual({});
   });
 
   it("coerces non-object properties to an empty object", () => {
@@ -18,7 +18,7 @@ describe("cleanSchemaForGemini", () => {
       properties: "invalid",
     }) as { properties?: unknown };
 
-    expect(cleaned.properties).toStrictEqual({});
+    expect(cleaned.properties).toEqual({});
   });
 
   it("coerces array properties to an empty object", () => {
@@ -27,7 +27,7 @@ describe("cleanSchemaForGemini", () => {
       properties: [],
     }) as { properties?: unknown };
 
-    expect(cleaned.properties).toStrictEqual({});
+    expect(cleaned.properties).toEqual({});
   });
 
   it("filters required fields that are not in properties", () => {
@@ -134,7 +134,7 @@ describe("cleanSchemaForGemini", () => {
       };
     };
 
-    expect(cleaned.properties?.bad?.properties).toStrictEqual({});
+    expect(cleaned.properties?.bad?.properties).toEqual({});
     expect(cleaned.properties?.good?.type).toBe("string");
   });
 

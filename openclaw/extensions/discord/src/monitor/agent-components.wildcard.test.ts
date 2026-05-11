@@ -50,7 +50,7 @@ describe("discord wildcard component registration ids", () => {
     const components = createWildcardComponents();
     const customIds = components.map((component) => component.customId);
 
-    expect(customIds.some((id) => id === "*")).toBe(false);
+    expect(customIds.every((id) => id !== "*")).toBe(true);
     expect(new Set(customIds).size).toBe(customIds.length);
   });
 

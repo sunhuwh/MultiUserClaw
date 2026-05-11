@@ -20,7 +20,7 @@ export const MISTRAL_MODEL_TRANSPORT_PATCH = {
   maxTokensField: "max_tokens";
 };
 
-const MISTRAL_SMALL_LATEST_REASONING_EFFORT_MAP: Record<string, string> = {
+export const MISTRAL_SMALL_LATEST_REASONING_EFFORT_MAP: Record<string, string> = {
   off: "none",
   minimal: "none",
   low: "high",
@@ -28,11 +28,9 @@ const MISTRAL_SMALL_LATEST_REASONING_EFFORT_MAP: Record<string, string> = {
   high: "high",
   xhigh: "high",
   adaptive: "high",
-  max: "high",
 };
 
 export const MISTRAL_SMALL_LATEST_ID = "mistral-small-latest";
-export const MISTRAL_MEDIUM_3_5_ID = "mistral-medium-3-5";
 
 export function resolveMistralCompatPatch(model: { id?: string }): {
   supportsStore: boolean;
@@ -40,8 +38,7 @@ export function resolveMistralCompatPatch(model: { id?: string }): {
   maxTokensField: "max_tokens";
   reasoningEffortMap?: Record<string, string>;
 } {
-  const reasoningEnabled =
-    model.id === MISTRAL_SMALL_LATEST_ID || model.id === MISTRAL_MEDIUM_3_5_ID;
+  const reasoningEnabled = model.id === MISTRAL_SMALL_LATEST_ID;
   return {
     ...MISTRAL_MODEL_TRANSPORT_PATCH,
     supportsReasoningEffort: reasoningEnabled,

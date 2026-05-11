@@ -4,8 +4,6 @@ import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
 } from "../shared/string-coerce.js";
-import { isInterpreterLikeAllowlistPattern } from "./command-analysis/inline-eval.js";
-import { detectInlineEvalArgv } from "./command-analysis/risks.js";
 import { isDispatchWrapperExecutable } from "./dispatch-wrapper-resolution.js";
 import {
   analyzeShellCommand,
@@ -25,6 +23,10 @@ import {
 } from "./exec-approvals-analysis.js";
 import type { ExecAllowlistEntry } from "./exec-approvals.types.js";
 import {
+  detectInterpreterInlineEvalArgv,
+  isInterpreterLikeAllowlistPattern,
+} from "./exec-inline-eval.js";
+import {
   DEFAULT_SAFE_BINS,
   SAFE_BIN_PROFILES,
   type SafeBinProfile,
@@ -32,7 +34,7 @@ import {
 } from "./exec-safe-bin-policy.js";
 import { isTrustedSafeBinPath } from "./exec-safe-bin-trust.js";
 import {
-  extractBindableShellWrapperInlineCommand,
+  extractShellWrapperInlineCommand,
   isShellWrapperExecutable,
   normalizeExecutableToken,
   POWERSHELL_WRAPPERS,
@@ -426,7 +428,7 @@ function resolveSegmentAllowlistMatch(params: {
     candidatePath && executableResolution
       ? { ...executableResolution, resolvedPath: candidatePath }
       : executableResolution;
-  const inlineCommand = extractBindableShellWrapperInlineCommand(allowlistSegment.argv);
+  const inlineCommand = extractShellWrapperInlineCommand(allowlistSegment.argv);
   const isPositionalCarrierInvocation =
     inlineCommand !== null && isDirectShellPositionalCarrierInvocation(inlineCommand);
   const executableMatch = isPositionalCarrierInvocation
@@ -437,14 +439,11 @@ function resolveSegmentAllowlistMatch(params: {
         effectiveArgv,
         params.context.platform,
       );
-  const shellPositionalArgvCandidatePath =
-    inlineCommand !== null
-      ? resolveShellWrapperPositionalArgvCandidatePath({
-          segment: allowlistSegment,
-          cwd: params.context.cwd,
-          env: params.context.env,
-        })
-      : undefined;
+  const shellPositionalArgvCandidatePath = resolveShellWrapperPositionalArgvCandidatePath({
+    segment: allowlistSegment,
+    cwd: params.context.cwd,
+    env: params.context.env,
+  });
   const shellPositionalArgvMatch = shellPositionalArgvCandidatePath
     ? matchAllowlist(
         params.context.allowlist,
@@ -965,13 +964,25 @@ function collectAllowAlwaysPatterns(params: {
   }
   if (isInterpreterLikeAllowlistPattern(candidatePath)) {
     const effectiveArgv = segment.resolution?.effectiveArgv ?? segment.argv;
-    if (params.strictInlineEval !== true || detectInlineEvalArgv(effectiveArgv) !== null) {
+    if (
+      params.strictInlineEval !== true ||
+      detectInterpreterInlineEvalArgv(effectiveArgv) !== null
+    ) {
       return;
     }
   }
   if (!trustPlan.shellWrapperExecutable) {
     const argPattern = buildArgPatternFromArgv(segment.argv, params.platform);
     addAllowAlwaysPattern(params.out, candidatePath, argPattern);
+    return;
+  }
+  const positionalArgvPath = resolveShellWrapperPositionalArgvCandidatePath({
+    segment,
+    cwd: params.cwd,
+    env: params.env,
+  });
+  if (positionalArgvPath) {
+    addAllowAlwaysPattern(params.out, positionalArgvPath);
     return;
   }
   const isPowerShellFileInvocation =
@@ -984,19 +995,9 @@ function collectAllowAlwaysPatterns(params: {
       const lower = normalizeLowercaseStringOrEmpty(t);
       return lower === "-command" || lower === "-c" || lower === "--command";
     });
-  const inlineCommand = isPowerShellFileInvocation ? null : trustPlan.shellInlineCommand;
-  const positionalArgvPath =
-    inlineCommand !== null
-      ? resolveShellWrapperPositionalArgvCandidatePath({
-          segment,
-          cwd: params.cwd,
-          env: params.env,
-        })
-      : undefined;
-  if (positionalArgvPath) {
-    addAllowAlwaysPattern(params.out, positionalArgvPath);
-    return;
-  }
+  const inlineCommand = isPowerShellFileInvocation
+    ? null
+    : (trustPlan.shellInlineCommand ?? extractShellWrapperInlineCommand(segment.argv));
   if (!inlineCommand) {
     const scriptPath = resolveShellWrapperScriptCandidatePath({
       segment,

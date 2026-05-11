@@ -12,10 +12,6 @@ vi.mock("../../plugins/provider-runtime.js", () => ({
   resolveProviderRuntimePlugin: () => undefined,
 }));
 
-vi.mock("../../plugins/provider-hook-runtime.js", () => ({
-  resolveProviderRuntimePlugin: () => undefined,
-}));
-
 function buildSafeguardFactories(cfg: OpenClawConfig) {
   const sessionManager = {} as SessionManager;
   const model = {
@@ -41,37 +37,16 @@ function expectSafeguardRuntime(
   const { factories, sessionManager } = buildSafeguardFactories(cfg);
 
   expect(factories).toContain(compactionSafeguardExtension);
-  const runtime = getCompactionSafeguardRuntime(sessionManager);
-  expect(runtime?.contextWindowTokens).toBe(200_000);
-  expect(runtime?.qualityGuardEnabled).toBe(expectedRuntime.qualityGuardEnabled);
-  expect(runtime?.qualityGuardMaxRetries).toBe(expectedRuntime.qualityGuardMaxRetries);
+  expect(getCompactionSafeguardRuntime(sessionManager)).toMatchObject(expectedRuntime);
 }
 
 describe("buildEmbeddedExtensionFactories", () => {
-  it("enables quality-guard retries by default in safeguard mode", () => {
+  it("does not opt safeguard mode into quality-guard retries", () => {
     const cfg = {
       agents: {
         defaults: {
           compaction: {
             mode: "safeguard",
-          },
-        },
-      },
-    } as OpenClawConfig;
-    expectSafeguardRuntime(cfg, {
-      qualityGuardEnabled: true,
-    });
-  });
-
-  it("honors explicit safeguard quality-guard disablement", () => {
-    const cfg = {
-      agents: {
-        defaults: {
-          compaction: {
-            mode: "safeguard",
-            qualityGuard: {
-              enabled: false,
-            },
           },
         },
       },

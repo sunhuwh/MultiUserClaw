@@ -2,8 +2,8 @@ import { formatErrorMessage } from "openclaw/plugin-sdk/ssrf-runtime";
 
 const DECRYPT_FAILURE_WINDOW_MS = 30_000;
 const DECRYPT_FAILURE_RECONNECT_THRESHOLD = 3;
-const DECRYPT_FAILURE_MARKER = "DecryptionFailed(";
-const DAVE_PASSTHROUGH_DISABLED_MARKER = "UnencryptedWhenPassthroughDisabled";
+const DECRYPT_FAILURE_PATTERN = /DecryptionFailed\(/;
+const DAVE_PASSTHROUGH_DISABLED_PATTERN = /UnencryptedWhenPassthroughDisabled/;
 
 export const DAVE_RECEIVE_PASSTHROUGH_INITIAL_EXPIRY_SECONDS = 30;
 export const DAVE_RECEIVE_PASSTHROUGH_REARM_EXPIRY_SECONDS = 15;
@@ -14,7 +14,7 @@ export type VoiceReceiveRecoveryState = {
   decryptRecoveryInFlight: boolean;
 };
 
-type VoiceReceiveErrorAnalysis = {
+export type VoiceReceiveErrorAnalysis = {
   message: string;
   isAbortLike: boolean;
   shouldAttemptPassthrough: boolean;
@@ -59,7 +59,7 @@ export function createVoiceReceiveRecoveryState(): VoiceReceiveRecoveryState {
   };
 }
 
-function isAbortLikeReceiveError(err: unknown): boolean {
+export function isAbortLikeReceiveError(err: unknown): boolean {
   if (!err || typeof err !== "object") {
     return false;
   }
@@ -80,12 +80,12 @@ function isAbortLikeReceiveError(err: unknown): boolean {
 
 export function analyzeVoiceReceiveError(err: unknown): VoiceReceiveErrorAnalysis {
   const message = formatErrorMessage(err);
-  const shouldAttemptPassthrough = message.includes(DAVE_PASSTHROUGH_DISABLED_MARKER);
+  const shouldAttemptPassthrough = DAVE_PASSTHROUGH_DISABLED_PATTERN.test(message);
   return {
     message,
     isAbortLike: isAbortLikeReceiveError(err),
     shouldAttemptPassthrough,
-    countsAsDecryptFailure: message.includes(DECRYPT_FAILURE_MARKER) || shouldAttemptPassthrough,
+    countsAsDecryptFailure: DECRYPT_FAILURE_PATTERN.test(message) || shouldAttemptPassthrough,
   };
 }
 

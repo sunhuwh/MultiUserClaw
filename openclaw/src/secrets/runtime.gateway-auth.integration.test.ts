@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
-import { getRuntimeConfig, writeConfigFile } from "../config/config.js";
+import { loadConfig, writeConfigFile } from "../config/config.js";
 import { withTempHome } from "../config/home-env.test-harness.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import {
@@ -37,6 +37,7 @@ describe("secrets runtime snapshot gateway-auth integration", () => {
     await withEnvAsync(
       {
         OPENCLAW_BUNDLED_PLUGINS_DIR: undefined,
+        OPENCLAW_DISABLE_PLUGIN_DISCOVERY_CACHE: "1",
         OPENCLAW_VERSION: undefined,
       },
       async () => {
@@ -97,11 +98,11 @@ describe("secrets runtime snapshot gateway-auth integration", () => {
         });
 
         activateSecretsRuntimeSnapshot(prepared);
-        expect(getRuntimeConfig().gateway?.auth?.token).toBe("gateway-runtime-token");
+        expect(loadConfig().gateway?.auth?.token).toBe("gateway-runtime-token");
 
         await expect(
           writeConfigFile({
-            ...getRuntimeConfig(),
+            ...loadConfig(),
             gateway: {
               auth: {
                 mode: "token",
@@ -112,11 +113,9 @@ describe("secrets runtime snapshot gateway-auth integration", () => {
         ).rejects.toThrow(/runtime snapshot refresh failed: .*MISSING_GATEWAY_AUTH_TOKEN/i);
 
         const activeAfterFailure = getActiveSecretsRuntimeSnapshot();
-        if (activeAfterFailure === null) {
-          throw new Error("Expected active secrets runtime snapshot");
-        }
-        expect(getRuntimeConfig().gateway?.auth?.token).toBe("gateway-runtime-token");
-        expect(activeAfterFailure.sourceConfig.gateway?.auth?.token).toEqual(initialTokenRef);
+        expect(activeAfterFailure).not.toBeNull();
+        expect(loadConfig().gateway?.auth?.token).toBe("gateway-runtime-token");
+        expect(activeAfterFailure?.sourceConfig.gateway?.auth?.token).toEqual(initialTokenRef);
 
         const persistedConfig = JSON.parse(
           await fs.readFile(path.join(home, ".openclaw", "openclaw.json"), "utf8"),

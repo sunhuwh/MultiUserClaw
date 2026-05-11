@@ -2,15 +2,15 @@ import {
   SSEClientTransport,
   type SSEClientTransportOptions,
 } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { FetchLike, Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { loadUndiciRuntimeDeps } from "../infra/net/undici-runtime.js";
 import { logDebug } from "../logger.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
-import { OpenClawStdioClientTransport } from "./mcp-stdio-transport.js";
 import { resolveMcpTransportConfig } from "./mcp-transport-config.js";
 
-type ResolvedMcpTransport = {
+export type ResolvedMcpTransport = {
   transport: Transport;
   description: string;
   transportType: "stdio" | "sse" | "streamable-http";
@@ -18,7 +18,7 @@ type ResolvedMcpTransport = {
   detachStderr?: () => void;
 };
 
-function attachStderrLogging(serverName: string, transport: OpenClawStdioClientTransport) {
+function attachStderrLogging(serverName: string, transport: StdioClientTransport) {
   const stderr = transport.stderr;
   if (!stderr || typeof stderr.on !== "function") {
     return undefined;
@@ -84,7 +84,7 @@ export function resolveMcpTransport(
     return null;
   }
   if (resolved.kind === "stdio") {
-    const transport = new OpenClawStdioClientTransport({
+    const transport = new StdioClientTransport({
       command: resolved.command,
       args: resolved.args,
       env: resolved.env,

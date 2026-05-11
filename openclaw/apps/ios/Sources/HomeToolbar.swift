@@ -98,7 +98,8 @@ private struct HomeToolbarStatusButton: View {
                         .scaleEffect(
                             self.gateway == .connecting && !self.reduceMotion
                                 ? (self.pulse ? 1.15 : 0.85)
-                                : 1.0)
+                                : 1.0
+                        )
                         .opacity(self.gateway == .connecting && !self.reduceMotion ? (self.pulse ? 1.0 : 0.6) : 1.0)
 
                     Text(self.gateway.title)
@@ -135,10 +136,7 @@ private struct HomeToolbarStatusButton: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Connection Status")
         .accessibilityValue(self.accessibilityValue)
-        .accessibilityHint(
-            self.gateway == .connected
-                ? "Double tap for gateway actions"
-                : "Double tap to open settings")
+        .accessibilityHint(self.gateway == .connected ? "Double tap for gateway actions" : "Double tap to open settings")
         .onAppear { self.updatePulse(for: self.gateway, scenePhase: self.scenePhase, reduceMotion: self.reduceMotion) }
         .onDisappear { self.pulse = false }
         .onChange(of: self.gateway) { _, newValue in
@@ -213,7 +211,8 @@ private struct HomeToolbarActionButton: View {
                                     (self.tint ?? .white).opacity(
                                         self.isActive
                                             ? 0.34
-                                            : (self.contrast == .increased ? 0.4 : (self.brighten ? 0.22 : 0.16))),
+                                            : (self.contrast == .increased ? 0.4 : (self.brighten ? 0.22 : 0.16))
+                                    ),
                                     lineWidth: self.contrast == .increased ? 1.0 : (self.isActive ? 0.8 : 0.6))
                         }
                 }

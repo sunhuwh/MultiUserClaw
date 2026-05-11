@@ -1,19 +1,18 @@
 import { createHash } from "node:crypto";
 import type { ToolLoopDetectionConfig } from "../config/types.tools.js";
-import type { SessionState, ToolCallRecord } from "../logging/diagnostic-session-state.js";
+import type { SessionState } from "../logging/diagnostic-session-state.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { isPlainObject } from "../utils.js";
 
 const log = createSubsystemLogger("agents/loop-detection");
 
-type LoopDetectorKind =
+export type LoopDetectorKind =
   | "generic_repeat"
-  | "unknown_tool_repeat"
   | "known_poll_no_progress"
   | "global_circuit_breaker"
   | "ping_pong";
 
-type LoopDetectionResult =
+export type LoopDetectionResult =
   | { stuck: false }
   | {
       stuck: true;
@@ -27,14 +26,12 @@ type LoopDetectionResult =
 
 export const TOOL_CALL_HISTORY_SIZE = 30;
 export const WARNING_THRESHOLD = 10;
-export const UNKNOWN_TOOL_THRESHOLD = 10;
 export const CRITICAL_THRESHOLD = 20;
 export const GLOBAL_CIRCUIT_BREAKER_THRESHOLD = 30;
 const DEFAULT_LOOP_DETECTION_CONFIG = {
   enabled: false,
   historySize: TOOL_CALL_HISTORY_SIZE,
   warningThreshold: WARNING_THRESHOLD,
-  unknownToolThreshold: UNKNOWN_TOOL_THRESHOLD,
   criticalThreshold: CRITICAL_THRESHOLD,
   globalCircuitBreakerThreshold: GLOBAL_CIRCUIT_BREAKER_THRESHOLD,
   detectors: {
@@ -48,7 +45,6 @@ type ResolvedLoopDetectionConfig = {
   enabled: boolean;
   historySize: number;
   warningThreshold: number;
-  unknownToolThreshold: number;
   criticalThreshold: number;
   globalCircuitBreakerThreshold: number;
   detectors: {
@@ -57,23 +53,6 @@ type ResolvedLoopDetectionConfig = {
     pingPong: boolean;
   };
 };
-
-type ToolLoopDetectionScope = {
-  runId?: string;
-};
-
-function normalizeRunId(runId?: string): string | undefined {
-  const trimmed = runId?.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function selectHistoryForScope(
-  history: readonly ToolCallRecord[],
-  scope?: ToolLoopDetectionScope,
-): ToolCallRecord[] {
-  const runId = normalizeRunId(scope?.runId);
-  return history.filter((record) => normalizeRunId(record.runId) === runId);
-}
 
 function asPositiveInt(value: number | undefined, fallback: number): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
@@ -107,10 +86,6 @@ function resolveLoopDetectionConfig(config?: ToolLoopDetectionConfig): ResolvedL
     enabled: config?.enabled ?? DEFAULT_LOOP_DETECTION_CONFIG.enabled,
     historySize: asPositiveInt(config?.historySize, DEFAULT_LOOP_DETECTION_CONFIG.historySize),
     warningThreshold,
-    unknownToolThreshold: asPositiveInt(
-      config?.unknownToolThreshold,
-      DEFAULT_LOOP_DETECTION_CONFIG.unknownToolThreshold,
-    ),
     criticalThreshold,
     globalCircuitBreakerThreshold,
     detectors: {
@@ -207,152 +182,51 @@ function formatErrorForHash(error: unknown): string {
   return stableStringify(error);
 }
 
-function extractUnknownToolName(error: unknown): string | undefined {
-  const raw = formatErrorForHash(error).trim();
-  if (!raw) {
-    return undefined;
-  }
-  const match =
-    raw.match(/unknown tool[:\s]+["']?([a-z0-9_.-]+)["']?/i) ??
-    raw.match(/tool\s+["']?([a-z0-9_.-]+)["']?\s+(?:not found|is not available)/i);
-  const toolName = match?.[1]?.trim();
-  return toolName ? toolName.toLowerCase() : undefined;
-}
-
-function stringField(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
-}
-
-function nonEmptyStringField(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function hashExecToolOutcome(details: Record<string, unknown>, text: string): string | undefined {
-  const status = stringField(details.status);
-  if (!status) {
-    return undefined;
-  }
-
-  if (status === "running") {
-    return digestStable({
-      status,
-      tail: stringField(details.tail) ?? "",
-    });
-  }
-
-  if (status === "completed" || status === "failed") {
-    return digestStable({
-      status,
-      exitCode: typeof details.exitCode === "number" ? details.exitCode : null,
-      timedOut: details.timedOut === true,
-      output: nonEmptyStringField(details.aggregated) ?? text,
-    });
-  }
-
-  if (status === "approval-pending" || status === "approval-unavailable") {
-    return digestStable({
-      status,
-      reason: stringField(details.reason),
-      host: stringField(details.host),
-      command: stringField(details.command) ?? "",
-      warningText: stringField(details.warningText) ?? "",
-    });
-  }
-
-  return undefined;
-}
-
 function hashToolOutcome(
   toolName: string,
   params: unknown,
   result: unknown,
   error: unknown,
-): { resultHash?: string; unknownToolName?: string } {
+): string | undefined {
   if (error !== undefined) {
-    const unknownToolName = extractUnknownToolName(error);
-    return {
-      resultHash: `error:${digestStable(formatErrorForHash(error))}`,
-      unknownToolName,
-    };
+    return `error:${digestStable(formatErrorForHash(error))}`;
   }
   if (!isPlainObject(result)) {
-    return { resultHash: result === undefined ? undefined : digestStable(result) };
+    return result === undefined ? undefined : digestStable(result);
   }
 
   const details = isPlainObject(result.details) ? result.details : {};
   const text = extractTextContent(result);
-  if (toolName === "exec") {
-    const execHash = hashExecToolOutcome(details, text);
-    if (execHash) {
-      return { resultHash: execHash };
-    }
-  }
   if (isKnownPollToolCall(toolName, params) && toolName === "process" && isPlainObject(params)) {
     const action = params.action;
     if (action === "poll") {
-      return {
-        resultHash: digestStable({
-          action,
-          status: details.status,
-          exitCode: details.exitCode ?? null,
-          exitSignal: details.exitSignal ?? null,
-          aggregated: details.aggregated ?? null,
-          text,
-        }),
-      };
+      return digestStable({
+        action,
+        status: details.status,
+        exitCode: details.exitCode ?? null,
+        exitSignal: details.exitSignal ?? null,
+        aggregated: details.aggregated ?? null,
+        text,
+      });
     }
     if (action === "log") {
-      return {
-        resultHash: digestStable({
-          action,
-          status: details.status,
-          totalLines: details.totalLines ?? null,
-          totalChars: details.totalChars ?? null,
-          truncated: details.truncated ?? null,
-          exitCode: details.exitCode ?? null,
-          exitSignal: details.exitSignal ?? null,
-          text,
-        }),
-      };
+      return digestStable({
+        action,
+        status: details.status,
+        totalLines: details.totalLines ?? null,
+        totalChars: details.totalChars ?? null,
+        truncated: details.truncated ?? null,
+        exitCode: details.exitCode ?? null,
+        exitSignal: details.exitSignal ?? null,
+        text,
+      });
     }
   }
 
-  return {
-    resultHash: digestStable({
-      details,
-      text,
-    }),
-  };
-}
-
-function getUnknownToolRepeatStreak(
-  history: Array<{ toolName: string; unknownToolName?: string }>,
-  toolName: string,
-): { count: number; unknownToolName?: string } {
-  let streak = 0;
-  let repeatedUnknownToolName: string | undefined;
-
-  for (let i = history.length - 1; i >= 0; i -= 1) {
-    const record = history[i];
-    if (!record || record.toolName !== toolName || !record.unknownToolName) {
-      break;
-    }
-    if (!repeatedUnknownToolName) {
-      repeatedUnknownToolName = record.unknownToolName;
-      streak = 1;
-      continue;
-    }
-    if (record.unknownToolName !== repeatedUnknownToolName) {
-      break;
-    }
-    streak += 1;
-  }
-
-  return { count: streak, unknownToolName: repeatedUnknownToolName };
+  return digestStable({
+    details,
+    text,
+  });
 }
 
 function getNoProgressStreak(
@@ -500,30 +374,17 @@ export function detectToolCallLoop(
   toolName: string,
   params: unknown,
   config?: ToolLoopDetectionConfig,
-  scope?: ToolLoopDetectionScope,
 ): LoopDetectionResult {
   const resolvedConfig = resolveLoopDetectionConfig(config);
   if (!resolvedConfig.enabled) {
     return { stuck: false };
   }
-  const history = selectHistoryForScope(state.toolCallHistory ?? [], scope);
+  const history = state.toolCallHistory ?? [];
   const currentHash = hashToolCall(toolName, params);
-  const unknownToolStreak = getUnknownToolRepeatStreak(history, toolName);
   const noProgress = getNoProgressStreak(history, toolName, currentHash);
   const noProgressStreak = noProgress.count;
   const knownPollTool = isKnownPollToolCall(toolName, params);
   const pingPong = getPingPongStreak(history, currentHash);
-
-  if (unknownToolStreak.count >= resolvedConfig.unknownToolThreshold) {
-    return {
-      stuck: true,
-      level: "critical",
-      detector: "unknown_tool_repeat",
-      count: unknownToolStreak.count,
-      message: `CRITICAL: attempted unavailable tool ${unknownToolStreak.unknownToolName ?? toolName} ${unknownToolStreak.count} times. Stop retrying that missing tool and answer without it.`,
-      warningKey: `unknown-tool:${toolName}:${unknownToolStreak.unknownToolName ?? "unknown"}`,
-    };
-  }
 
   if (noProgressStreak >= resolvedConfig.globalCircuitBreakerThreshold) {
     log.error(
@@ -643,10 +504,8 @@ export function recordToolCall(
   params: unknown,
   toolCallId?: string,
   config?: ToolLoopDetectionConfig,
-  scope?: ToolLoopDetectionScope,
 ): void {
   const resolvedConfig = resolveLoopDetectionConfig(config);
-  const runId = normalizeRunId(scope?.runId);
   if (!state.toolCallHistory) {
     state.toolCallHistory = [];
   }
@@ -655,12 +514,11 @@ export function recordToolCall(
     toolName,
     argsHash: hashToolCall(toolName, params),
     toolCallId,
-    ...(runId && { runId }),
     timestamp: Date.now(),
   });
 
   if (state.toolCallHistory.length > resolvedConfig.historySize) {
-    state.toolCallHistory.splice(0, state.toolCallHistory.length - resolvedConfig.historySize);
+    state.toolCallHistory.shift();
   }
 }
 
@@ -676,15 +534,17 @@ export function recordToolCallOutcome(
     result?: unknown;
     error?: unknown;
     config?: ToolLoopDetectionConfig;
-    runId?: string;
   },
-): ToolCallRecord | undefined {
+): void {
   const resolvedConfig = resolveLoopDetectionConfig(params.config);
-  const runId = normalizeRunId(params.runId);
-  const outcome = hashToolOutcome(params.toolName, params.toolParams, params.result, params.error);
-  const resultHash = outcome.resultHash;
+  const resultHash = hashToolOutcome(
+    params.toolName,
+    params.toolParams,
+    params.result,
+    params.error,
+  );
   if (!resultHash) {
-    return undefined;
+    return;
   }
 
   if (!state.toolCallHistory) {
@@ -693,13 +553,9 @@ export function recordToolCallOutcome(
 
   const argsHash = hashToolCall(params.toolName, params.toolParams);
   let matched = false;
-  let recordedOutcome: ToolCallRecord | undefined;
   for (let i = state.toolCallHistory.length - 1; i >= 0; i -= 1) {
     const call = state.toolCallHistory[i];
     if (!call) {
-      continue;
-    }
-    if (normalizeRunId(call.runId) !== runId) {
       continue;
     }
     if (params.toolCallId && call.toolCallId !== params.toolCallId) {
@@ -712,30 +568,23 @@ export function recordToolCallOutcome(
       continue;
     }
     call.resultHash = resultHash;
-    call.unknownToolName = outcome.unknownToolName;
     matched = true;
-    recordedOutcome = call;
     break;
   }
 
   if (!matched) {
-    const record: ToolCallRecord = {
+    state.toolCallHistory.push({
       toolName: params.toolName,
       argsHash,
       toolCallId: params.toolCallId,
-      ...(runId && { runId }),
       resultHash,
-      unknownToolName: outcome.unknownToolName,
       timestamp: Date.now(),
-    };
-    state.toolCallHistory.push(record);
-    recordedOutcome = record;
+    });
   }
 
   if (state.toolCallHistory.length > resolvedConfig.historySize) {
     state.toolCallHistory.splice(0, state.toolCallHistory.length - resolvedConfig.historySize);
   }
-  return recordedOutcome;
 }
 
 /**

@@ -1,5 +1,10 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { mockNormalizeMessageContent } from "../../../../test/mocks/baileys.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  mockExtractMessageContent,
+  mockGetContentType,
+  mockIsJidGroup,
+  mockNormalizeMessageContent,
+} from "../../../../test/mocks/baileys.js";
 
 type MockMessageInput = Parameters<typeof mockNormalizeMessageContent>[0];
 
@@ -8,9 +13,15 @@ const { normalizeMessageContent, downloadMediaMessage } = vi.hoisted(() => ({
   downloadMediaMessage: vi.fn().mockResolvedValue(Buffer.from("fake-media-data")),
 }));
 
-vi.mock("baileys", async () => {
+vi.mock("@whiskeysockets/baileys", async () => {
+  const actual =
+    await vi.importActual<typeof import("@whiskeysockets/baileys")>("@whiskeysockets/baileys");
   return {
-    DisconnectReason: { loggedOut: 401 },
+    ...actual,
+    DisconnectReason: actual.DisconnectReason ?? { loggedOut: 401 },
+    extractMessageContent: vi.fn((message: MockMessageInput) => mockExtractMessageContent(message)),
+    getContentType: vi.fn((message: MockMessageInput) => mockGetContentType(message)),
+    isJidGroup: vi.fn((jid: string | undefined | null) => mockIsJidGroup(jid)),
     normalizeMessageContent,
     downloadMediaMessage,
   };
@@ -25,15 +36,14 @@ const mockSock = {
 
 async function expectMimetype(message: Record<string, unknown>, expected: string) {
   const result = await downloadInboundMedia({ message } as never, mockSock as never);
-  expect(result).toMatchObject({ mimetype: expected });
+  expect(result).toBeDefined();
+  expect(result?.mimetype).toBe(expected);
 }
 
 describe("downloadInboundMedia", () => {
-  beforeAll(async () => {
+  beforeEach(async () => {
+    vi.resetModules();
     ({ downloadInboundMedia } = await import("./media.js"));
-  });
-
-  beforeEach(() => {
     normalizeMessageContent.mockClear();
     downloadMediaMessage.mockClear();
     mockSock.updateMediaMessage.mockClear();
@@ -75,9 +85,8 @@ describe("downloadInboundMedia", () => {
       },
     } as never;
     const result = await downloadInboundMedia(msg, mockSock as never);
-    expect(result).toMatchObject({
-      mimetype: "application/pdf",
-      fileName: "report.pdf",
-    });
+    expect(result).toBeDefined();
+    expect(result?.mimetype).toBe("application/pdf");
+    expect(result?.fileName).toBe("report.pdf");
   });
 });

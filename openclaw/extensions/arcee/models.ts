@@ -45,7 +45,6 @@ export const ARCEE_MODEL_CATALOG: ModelDefinitionConfig[] = [
       cacheWrite: 0.25,
     },
     compat: {
-      supportsTools: false,
       supportsReasoningEffort: false,
     },
   },

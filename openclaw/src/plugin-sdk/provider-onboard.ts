@@ -1,19 +1,16 @@
 // Keep provider onboarding helpers dependency-light so bundled provider plugins
 // do not pull heavyweight runtime graphs at activation time.
 
-import { ensureStaticModelAllowlistEntry } from "../agents/model-allowlist-entry.js";
+import { DEFAULT_PROVIDER } from "../agents/defaults.js";
+import { resolveStaticAllowlistModelKey } from "../agents/model-ref-shared.js";
 import { findNormalizedProviderKey } from "../agents/provider-id.js";
-import {
-  normalizeAgentModelMapForConfig,
-  normalizeAgentModelRefForConfig,
-} from "../config/model-input.js";
+import type { OpenClawConfig } from "../config/config.js";
 import type { AgentModelEntryConfig } from "../config/types.agent-defaults.js";
 import type {
   ModelApi,
   ModelDefinitionConfig,
   ModelProviderConfig,
 } from "../config/types.models.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolvePrimaryStringValue } from "../shared/string-coerce.js";
 
 export type { OpenClawConfig, ModelApi, ModelDefinitionConfig, ModelProviderConfig };
@@ -168,13 +165,12 @@ export function withAgentModelAliases(
   existing: Record<string, AgentModelEntryConfig> | undefined,
   aliases: readonly AgentModelAliasEntry[],
 ): Record<string, AgentModelEntryConfig> {
-  const next = normalizeAgentModelMapForConfig({ ...existing });
+  const next = { ...existing };
   for (const entry of aliases) {
     const normalized = normalizeAgentModelAliasEntry(entry);
-    const modelRef = normalizeAgentModelRefForConfig(normalized.modelRef);
-    next[modelRef] = {
-      ...next[modelRef],
-      ...(normalized.alias ? { alias: next[modelRef]?.alias ?? normalized.alias } : {}),
+    next[normalized.modelRef] = {
+      ...next[normalized.modelRef],
+      ...(normalized.alias ? { alias: next[normalized.modelRef]?.alias ?? normalized.alias } : {}),
     };
   }
   return next;
@@ -187,17 +183,13 @@ export function applyOnboardAuthAgentModelsAndProviders(
     providers: Record<string, ModelProviderConfig>;
   },
 ): OpenClawConfig {
-  const mergedAgentModels = normalizeAgentModelMapForConfig({
-    ...cfg.agents?.defaults?.models,
-    ...params.agentModels,
-  });
   return {
     ...cfg,
     agents: {
       ...cfg.agents,
       defaults: {
         ...cfg.agents?.defaults,
-        models: mergedAgentModels,
+        models: params.agentModels,
       },
     },
     models: {
@@ -212,9 +204,6 @@ export function applyAgentDefaultModelPrimary(
   primary: string,
 ): OpenClawConfig {
   const existingFallbacks = extractAgentDefaultModelFallbacks(cfg.agents?.defaults?.model);
-  const normalizedFallbacks = existingFallbacks?.map((fallback) =>
-    normalizeAgentModelRefForConfig(fallback),
-  );
   return {
     ...cfg,
     agents: {
@@ -222,8 +211,8 @@ export function applyAgentDefaultModelPrimary(
       defaults: {
         ...cfg.agents?.defaults,
         model: {
-          ...(normalizedFallbacks ? { fallbacks: normalizedFallbacks } : undefined),
-          primary: normalizeAgentModelRefForConfig(primary),
+          ...(existingFallbacks ? { fallbacks: existingFallbacks } : undefined),
+          primary,
         },
       },
     },
@@ -464,5 +453,35 @@ export function ensureModelAllowlistEntry(params: {
   modelRef: string;
   defaultProvider?: string;
 }): OpenClawConfig {
-  return ensureStaticModelAllowlistEntry(params);
+  const rawModelRef = params.modelRef.trim();
+  if (!rawModelRef) {
+    return params.cfg;
+  }
+
+  const models = { ...params.cfg.agents?.defaults?.models };
+  const keySet = new Set<string>([rawModelRef]);
+  const canonicalKey = resolveStaticAllowlistModelKey(
+    rawModelRef,
+    params.defaultProvider ?? DEFAULT_PROVIDER,
+  );
+  if (canonicalKey) {
+    keySet.add(canonicalKey);
+  }
+
+  for (const key of keySet) {
+    models[key] = {
+      ...models[key],
+    };
+  }
+
+  return {
+    ...params.cfg,
+    agents: {
+      ...params.cfg.agents,
+      defaults: {
+        ...params.cfg.agents?.defaults,
+        models,
+      },
+    },
+  };
 }

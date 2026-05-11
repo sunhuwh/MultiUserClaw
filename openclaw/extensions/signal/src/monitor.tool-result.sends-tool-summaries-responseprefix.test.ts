@@ -1,11 +1,12 @@
-import { expectPairingReplyText } from "openclaw/plugin-sdk/channel-test-helpers";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { resolveAgentRoute } from "openclaw/plugin-sdk/routing";
-import { normalizeE164 } from "openclaw/plugin-sdk/text-utility-runtime";
+import { normalizeE164 } from "openclaw/plugin-sdk/text-runtime";
 import { describe, expect, it, vi } from "vitest";
+import { expectPairingReplyText } from "../../../test/helpers/pairing-reply.js";
 import {
   createSignalToolResultConfig,
   config,
+  flush,
   getSignalToolResultTestMocks,
   installSignalToolResultTestHooks,
   setSignalToolResultTestConfig,
@@ -59,6 +60,8 @@ async function receiveSignalPayloads(params: {
     abortSignal: abortController.signal,
     ...params.opts,
   });
+
+  await flush();
 }
 
 function hasQueuedReactionEventFor(sender: string) {
@@ -75,8 +78,7 @@ function hasQueuedReactionEventFor(sender: string) {
       typeof options === "object" &&
       options !== null &&
       "sessionKey" in options &&
-      (options as { sessionKey?: string; trusted?: boolean }).sessionKey === route.sessionKey &&
-      (options as { trusted?: boolean }).trusted === false
+      (options as { sessionKey?: string }).sessionKey === route.sessionKey
     );
   });
 }

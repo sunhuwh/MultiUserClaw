@@ -1,40 +1,60 @@
-import type { OpenClawConfig } from "../../../config/types.openclaw.js";
+import type { OpenClawConfig } from "../../../config/config.js";
 import { runPluginSetupConfigMigrations } from "../../../plugins/setup-registry.js";
-import { migrateLegacySecretRefEnvMarkers } from "../../../secrets/legacy-secretref-env-marker.js";
-import { applyChannelDoctorCompatibilityMigrations } from "./channel-legacy-config-migrate.js";
-import { normalizeBaseCompatibilityConfigValues } from "./legacy-config-compatibility-base.js";
+import { collectChannelDoctorCompatibilityMutations } from "./channel-doctor.js";
 import {
-  normalizeLegacyCommandsConfig,
-  normalizeLegacyOpenAICodexModelsAddMetadata,
+  normalizeLegacyBrowserConfig,
+  normalizeLegacyCrossContextMessageConfig,
+  normalizeLegacyMediaProviderOptions,
+  normalizeLegacyMistralModelMaxTokens,
+  normalizeLegacyNanoBananaSkill,
+  normalizeLegacyTalkConfig,
+  seedMissingDefaultAccountsFromSingleAccountBase,
 } from "./legacy-config-core-normalizers.js";
+import { migrateLegacyWebFetchConfig } from "./legacy-web-fetch-migrate.js";
+import { migrateLegacyWebSearchConfig } from "./legacy-web-search-migrate.js";
+import { migrateLegacyXSearchConfig } from "./legacy-x-search-migrate.js";
 
 export function normalizeCompatibilityConfigValues(cfg: OpenClawConfig): {
   config: OpenClawConfig;
   changes: string[];
 } {
   const changes: string[] = [];
-  let next = normalizeBaseCompatibilityConfigValues(cfg, changes, (config) => {
-    const setupMigration = runPluginSetupConfigMigrations({
-      config,
-    });
-    if (setupMigration.changes.length === 0) {
-      return config;
-    }
-    changes.push(...setupMigration.changes);
-    return setupMigration.config;
+  let next = seedMissingDefaultAccountsFromSingleAccountBase(cfg, changes);
+  next = normalizeLegacyBrowserConfig(next, changes);
+
+  const setupMigration = runPluginSetupConfigMigrations({
+    config: next,
   });
-  const channelMigrations = applyChannelDoctorCompatibilityMigrations(next);
-  if (channelMigrations.changes.length > 0) {
-    next = channelMigrations.next;
-    changes.push(...channelMigrations.changes);
+  if (setupMigration.changes.length > 0) {
+    next = setupMigration.config;
+    changes.push(...setupMigration.changes);
   }
-  const secretRefMarkers = migrateLegacySecretRefEnvMarkers(next);
-  if (secretRefMarkers.changes.length > 0) {
-    next = secretRefMarkers.config;
-    changes.push(...secretRefMarkers.changes);
+
+  for (const migrate of [
+    migrateLegacyWebSearchConfig,
+    migrateLegacyWebFetchConfig,
+    migrateLegacyXSearchConfig,
+  ]) {
+    const migrated = migrate(next);
+    if (migrated.changes.length === 0) {
+      continue;
+    }
+    next = migrated.config;
+    changes.push(...migrated.changes);
   }
-  next = normalizeLegacyCommandsConfig(next, changes);
-  next = normalizeLegacyOpenAICodexModelsAddMetadata(next, changes);
+
+  next = normalizeLegacyNanoBananaSkill(next, changes);
+  next = normalizeLegacyTalkConfig(next, changes);
+  next = normalizeLegacyCrossContextMessageConfig(next, changes);
+  next = normalizeLegacyMediaProviderOptions(next, changes);
+  next = normalizeLegacyMistralModelMaxTokens(next, changes);
+  for (const mutation of collectChannelDoctorCompatibilityMutations(next)) {
+    if (mutation.changes.length === 0) {
+      continue;
+    }
+    next = mutation.config;
+    changes.push(...mutation.changes);
+  }
 
   return { config: next, changes };
 }

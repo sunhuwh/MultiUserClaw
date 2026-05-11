@@ -43,12 +43,10 @@ describe("exec safe-bin runtime policy", () => {
         "jq",
         " C:\\Tools\\Python3.EXE ",
         "myfilter",
-        "busybox",
-        "toybox",
         "/usr/bin/node",
         "/opt/homebrew/bin/gawk",
       ]),
-    ).toEqual(["busybox", "gawk", "node", "python3", "toybox"]);
+    ).toEqual(["gawk", "node", "python3"]);
   });
 
   it("merges and normalizes safe-bin profile fixtures", () => {
@@ -156,9 +154,8 @@ describe("exec safe-bin runtime policy", () => {
             worldWritable: true,
           },
         ]);
-        expect(onWarning).toHaveBeenCalledExactlyOnceWith(
-          `exec: safeBinTrustedDirs includes world-writable directory '${path.resolve(dir)}'; remove trust or tighten permissions (for example chmod 755).`,
-        );
+        expect(onWarning).toHaveBeenCalledWith(expect.stringContaining(path.resolve(dir)));
+        expect(onWarning).toHaveBeenCalledWith(expect.stringContaining("world-writable"));
       } finally {
         await fs.chmod(dir, 0o755).catch(() => undefined);
       }

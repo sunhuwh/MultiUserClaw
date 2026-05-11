@@ -198,9 +198,11 @@ describe("message hooks", () => {
       });
       registerInternalHook("message:received", badHandler);
 
-      await triggerInternalHook(
-        createInternalHookEvent("message", "received", "s1", { content: "test" }),
-      );
+      await expect(
+        triggerInternalHook(
+          createInternalHookEvent("message", "received", "s1", { content: "test" }),
+        ),
+      ).resolves.not.toThrow();
       expect(badHandler).toHaveBeenCalledOnce();
     });
 
@@ -226,9 +228,9 @@ describe("message hooks", () => {
       });
       registerInternalHook("message:sent", asyncFailHandler);
 
-      await triggerInternalHook(
-        createInternalHookEvent("message", "sent", "s1", { content: "reply" }),
-      );
+      await expect(
+        triggerInternalHook(createInternalHookEvent("message", "sent", "s1", { content: "reply" })),
+      ).resolves.not.toThrow();
       expect(asyncFailHandler).toHaveBeenCalledOnce();
     });
   });

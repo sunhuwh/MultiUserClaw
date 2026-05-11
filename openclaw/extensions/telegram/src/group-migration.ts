@@ -1,13 +1,13 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
-import type { TelegramGroupConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
+import type { TelegramGroupConfig } from "openclaw/plugin-sdk/config-runtime";
 import { normalizeAccountId } from "openclaw/plugin-sdk/routing";
-import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 
 type TelegramGroups = Record<string, TelegramGroupConfig>;
 
 type MigrationScope = "account" | "global";
 
-type TelegramGroupMigrationResult = {
+export type TelegramGroupMigrationResult = {
   migrated: boolean;
   skippedExisting: boolean;
   scopes: MigrationScope[];

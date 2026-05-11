@@ -1,9 +1,9 @@
 import path from "node:path";
-import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 
 export const MAX_CONCEPT_TAGS = 8;
 
-type ConceptTagScriptFamily = "latin" | "cjk" | "mixed" | "other";
+export type ConceptTagScriptFamily = "latin" | "cjk" | "mixed" | "other";
 
 export type ConceptTagScriptCoverage = {
   latinEntryCount: number;
@@ -19,7 +19,6 @@ const LANGUAGE_STOP_WORDS = {
     "agent",
     "again",
     "also",
-    "assistant",
     "because",
     "before",
     "being",
@@ -65,8 +64,6 @@ const LANGUAGE_STOP_WORDS = {
     "should",
     "since",
     "some",
-    "subagent",
-    "system",
     "than",
     "that",
     "their",
@@ -76,14 +73,13 @@ const LANGUAGE_STOP_WORDS = {
     "this",
     "through",
     "today",
-    "user",
     "using",
     "with",
     "work",
     "workspace",
     "year",
   ],
-  english: ["and", "are", "for", "into", "its", "our", "the", "then", "were", "you", "your"],
+  english: ["and", "are", "for", "into", "its", "our", "then", "were"],
   spanish: [
     "al",
     "con",
@@ -468,3 +464,10 @@ export function summarizeConceptTagScriptCoverage(
 
   return coverage;
 }
+
+export const __testing = {
+  normalizeConceptToken,
+  collectGlossaryMatches,
+  collectCompoundTokens,
+  collectSegmentTokens,
+};

@@ -1,20 +1,19 @@
 import {
+  comparableChannelTargetsShareRoute,
   parseExplicitTargetForLoadedChannel,
-  resolveRouteTargetForLoadedChannel,
-} from "../../channels/plugins/target-parsing-loaded.js";
-import type { ChannelOutboundTargetMode } from "../../channels/plugins/types.public.js";
+  resolveComparableTargetForLoadedChannel,
+} from "../../channels/plugins/target-parsing.js";
+import type { ChannelOutboundTargetMode } from "../../channels/plugins/types.js";
 import type { SessionEntry } from "../../config/sessions.js";
-import { channelRouteTargetsShareConversation } from "../../plugin-sdk/channel-route.js";
-import { deliveryContextFromSession } from "../../utils/delivery-context.shared.js";
-import {
-  isDeliverableMessageChannel,
-  normalizeMessageChannel,
-} from "../../utils/message-channel-core.js";
+import { deliveryContextFromSession } from "../../utils/delivery-context.js";
 import type {
   DeliverableMessageChannel,
   GatewayMessageChannel,
-} from "../../utils/message-channel-normalize.js";
-import { resolveTargetPrefixedChannel } from "./channel-target-prefix.js";
+} from "../../utils/message-channel.js";
+import {
+  isDeliverableMessageChannel,
+  normalizeMessageChannel,
+} from "../../utils/message-channel.js";
 
 export type SessionDeliveryTarget = {
   channel?: DeliverableMessageChannel;
@@ -69,7 +68,7 @@ export function resolveSessionDeliveryTarget(params: {
   const sessionLastChannel =
     context?.channel && isDeliverableMessageChannel(context.channel) ? context.channel : undefined;
   const parsedSessionTarget = sessionLastChannel
-    ? resolveRouteTargetForLoadedChannel({
+    ? resolveComparableTargetForLoadedChannel({
         channel: sessionLastChannel,
         rawTarget: context?.to,
         fallbackThreadId: context?.threadId,
@@ -79,7 +78,7 @@ export function resolveSessionDeliveryTarget(params: {
   const hasTurnSourceChannel = params.turnSourceChannel != null;
   const parsedTurnSourceTarget =
     hasTurnSourceChannel && params.turnSourceChannel
-      ? resolveRouteTargetForLoadedChannel({
+      ? resolveComparableTargetForLoadedChannel({
           channel: params.turnSourceChannel,
           rawTarget: params.turnSourceTo,
           fallbackThreadId: params.turnSourceThreadId,
@@ -93,7 +92,7 @@ export function resolveSessionDeliveryTarget(params: {
     !params.turnSourceTo ||
     !context?.to ||
     (params.turnSourceChannel === sessionLastChannel &&
-      channelRouteTargetsShareConversation({
+      comparableChannelTargetsShareRoute({
         left: parsedTurnSourceTarget,
         right: parsedSessionTarget,
       }));
@@ -118,14 +117,7 @@ export function resolveSessionDeliveryTarget(params: {
       ? params.explicitTo.trim()
       : undefined;
 
-  const explicitPrefixedChannel =
-    requestedChannel === "last" ? resolveTargetPrefixedChannel(rawExplicitTo) : undefined;
-  let channel =
-    explicitPrefixedChannel && isDeliverableMessageChannel(explicitPrefixedChannel)
-      ? explicitPrefixedChannel
-      : requestedChannel === "last"
-        ? lastChannel
-        : requestedChannel;
+  let channel = requestedChannel === "last" ? lastChannel : requestedChannel;
   if (!channel && params.fallbackChannel && isDeliverableMessageChannel(params.fallbackChannel)) {
     channel = params.fallbackChannel;
   }

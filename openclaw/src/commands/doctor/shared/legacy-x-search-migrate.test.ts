@@ -131,7 +131,7 @@ describe("legacy x_search config migration", () => {
     const res = migrateLegacyXSearchConfig(config);
 
     expect(res.config).toEqual(config);
-    expect(res.changes).toStrictEqual([]);
+    expect(res.changes).toEqual([]);
     expect(res.config.plugins?.entries?.xai).toBeUndefined();
   });
 

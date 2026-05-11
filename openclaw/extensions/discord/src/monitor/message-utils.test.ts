@@ -1,11 +1,6 @@
-import {
-  ComponentType,
-  MessageFlags,
-  MessageReferenceType,
-  StickerFormatType,
-} from "discord-api-types/v10";
+import { ChannelType, type Client, type Message } from "@buape/carbon";
+import { MessageReferenceType, StickerFormatType } from "discord-api-types/v10";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ChannelType, type Client, type Message } from "../internal/discord.js";
 
 const fetchRemoteMedia = vi.fn();
 const saveMediaBuffer = vi.fn();
@@ -60,35 +55,13 @@ const DISCORD_CDN_HOSTNAMES = [
   "*.discordapp.net",
 ];
 
-function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  expect(value, label).toBeTypeOf("object");
-  expect(value, label).not.toBeNull();
-  return value as Record<string, unknown>;
-}
-
-function requireArray(value: unknown, label: string): Array<unknown> {
-  expect(Array.isArray(value), label).toBe(true);
-  return value as Array<unknown>;
-}
-
-function callArg(mock: unknown, callIndex: number, argIndex: number, label: string) {
-  const calls = (mock as { mock?: { calls?: Array<Array<unknown>> } }).mock?.calls ?? [];
-  const call = calls.at(callIndex);
-  expect(call, label).toBeDefined();
-  return call?.[argIndex];
-}
-
-function fetchParams(): Record<string, unknown> {
-  return requireRecord(callArg(fetchRemoteMedia, 0, 0, "fetch media params"), "fetch media params");
-}
-
 function expectDiscordCdnSsrFPolicy(policy: unknown) {
-  const policyRecord = requireRecord(policy, "ssrf policy");
-  expect(policyRecord.allowRfc2544BenchmarkRange).toBe(true);
-  const hostnameAllowlist = requireArray(policyRecord.hostnameAllowlist, "hostname allowlist");
-  for (const hostname of DISCORD_CDN_HOSTNAMES) {
-    expect(hostnameAllowlist).toContain(hostname);
-  }
+  expect(policy).toEqual(
+    expect.objectContaining({
+      allowRfc2544BenchmarkRange: true,
+      hostnameAllowlist: expect.arrayContaining(DISCORD_CDN_HOSTNAMES),
+    }),
+  );
 }
 
 function expectSinglePngDownload(params: {
@@ -99,18 +72,24 @@ function expectSinglePngDownload(params: {
   placeholder: "<media:image>" | "<media:sticker>";
 }) {
   expect(fetchRemoteMedia).toHaveBeenCalledTimes(1);
-  const call = fetchParams();
-  expect(call.url).toBe(params.expectedUrl);
-  expect(call.filePathHint).toBe(params.filePathHint);
-  expect(call.maxBytes).toBe(512);
-  expect(call.fetchImpl).toBeUndefined();
+  const call = fetchRemoteMedia.mock.calls[0]?.[0] as {
+    url?: string;
+    filePathHint?: string;
+    maxBytes?: number;
+    fetchImpl?: unknown;
+    readIdleTimeoutMs?: number;
+    requestInit?: { signal?: AbortSignal };
+    ssrfPolicy?: unknown;
+  };
+  expect(call).toMatchObject({
+    url: params.expectedUrl,
+    filePathHint: params.filePathHint,
+    maxBytes: 512,
+    fetchImpl: undefined,
+  });
   expectDiscordCdnSsrFPolicy(call.ssrfPolicy);
   expect(saveMediaBuffer).toHaveBeenCalledTimes(1);
-  expect(Buffer.isBuffer(callArg(saveMediaBuffer, 0, 0, "saved buffer"))).toBe(true);
-  expect(callArg(saveMediaBuffer, 0, 1, "saved content type")).toBe("image/png");
-  expect(callArg(saveMediaBuffer, 0, 2, "saved direction")).toBe("inbound");
-  expect(callArg(saveMediaBuffer, 0, 3, "saved max bytes")).toBe(512);
-  expect(callArg(saveMediaBuffer, 0, 4, "saved file path hint")).toBe(params.filePathHint);
+  expect(saveMediaBuffer).toHaveBeenCalledWith(expect.any(Buffer), "image/png", "inbound", 512);
   expect(params.result).toEqual([
     {
       path: params.expectedPath,
@@ -158,7 +137,6 @@ function asForwardedSnapshotMessage(params: {
 
 function asReferencedForwardMessage(params: {
   content?: string;
-  components?: Array<Record<string, unknown>>;
   embeds?: Array<{ title?: string; description?: string }>;
   attachments?: Array<Record<string, unknown>>;
   messageReferenceType?: MessageReferenceType;
@@ -174,10 +152,8 @@ function asReferencedForwardMessage(params: {
       id: "m0",
       channelId: "c1",
       content: params.content ?? "",
-      components: params.components ?? [],
       attachments: params.attachments ?? [],
       embeds: params.embeds ?? [],
-      flags: params.components ? MessageFlags.IsComponentsV2 : 0,
       stickers: [],
       author: {
         id: "u2",
@@ -282,7 +258,9 @@ describe("resolveForwardedMediaList", () => {
       { fetchImpl: proxyFetch },
     );
 
-    expect(fetchParams().fetchImpl).toBe(proxyFetch);
+    expect(fetchRemoteMedia).toHaveBeenCalledWith(
+      expect.objectContaining({ fetchImpl: proxyFetch }),
+    );
   });
 
   it("keeps forwarded attachment metadata when download fails", async () => {
@@ -342,7 +320,7 @@ describe("resolveForwardedMediaList", () => {
   it("returns empty when no snapshots are present", async () => {
     const result = await resolveForwardedMediaList(asMessage({}), 512);
 
-    expect(result).toStrictEqual([]);
+    expect(result).toEqual([]);
     expect(fetchRemoteMedia).not.toHaveBeenCalled();
   });
 
@@ -388,7 +366,7 @@ describe("resolveForwardedMediaList", () => {
       512,
     );
 
-    expect(result).toStrictEqual([]);
+    expect(result).toEqual([]);
     expect(fetchRemoteMedia).not.toHaveBeenCalled();
   });
 
@@ -418,7 +396,9 @@ describe("resolveForwardedMediaList", () => {
       { readIdleTimeoutMs: 60_000 },
     );
 
-    expect(fetchParams().readIdleTimeoutMs).toBe(60_000);
+    expect(fetchRemoteMedia).toHaveBeenCalledWith(
+      expect.objectContaining({ readIdleTimeoutMs: 60_000 }),
+    );
   });
 
   it("passes readIdleTimeoutMs to forwarded sticker downloads", async () => {
@@ -446,7 +426,9 @@ describe("resolveForwardedMediaList", () => {
       { readIdleTimeoutMs: 60_000 },
     );
 
-    expect(fetchParams().readIdleTimeoutMs).toBe(60_000);
+    expect(fetchRemoteMedia).toHaveBeenCalledWith(
+      expect.objectContaining({ readIdleTimeoutMs: 60_000 }),
+    );
   });
 });
 
@@ -511,7 +493,9 @@ describe("resolveMediaList", () => {
       { fetchImpl: proxyFetch },
     );
 
-    expect(fetchParams().fetchImpl).toBe(proxyFetch);
+    expect(fetchRemoteMedia).toHaveBeenCalledWith(
+      expect.objectContaining({ fetchImpl: proxyFetch }),
+    );
   });
 
   it("keeps attachment metadata when download fails", async () => {
@@ -531,75 +515,6 @@ describe("resolveMediaList", () => {
     );
 
     expectAttachmentImageFallback({ result, attachment });
-  });
-
-  it("skips attachments without a usable URL", async () => {
-    const result = await resolveMediaList(
-      asMessage({
-        attachments: [
-          {
-            id: "att-missing-url",
-            filename: "voice.ogg",
-            content_type: "audio/ogg",
-          },
-        ],
-      }),
-      512,
-    );
-
-    expect(fetchRemoteMedia).not.toHaveBeenCalled();
-    expect(saveMediaBuffer).not.toHaveBeenCalled();
-    expect(result).toStrictEqual([]);
-  });
-
-  it("classifies audio attachments by filename when content type is missing", async () => {
-    const attachment = {
-      id: "att-audio-fallback",
-      url: "https://cdn.discordapp.com/attachments/1/voice.ogg",
-      filename: "voice.ogg",
-    };
-    fetchRemoteMedia.mockRejectedValueOnce(new Error("blocked by ssrf guard"));
-
-    const result = await resolveMediaList(
-      asMessage({
-        attachments: [attachment],
-      }),
-      512,
-    );
-
-    expect(result).toEqual([
-      {
-        path: attachment.url,
-        contentType: undefined,
-        placeholder: "<media:audio>",
-      },
-    ]);
-  });
-
-  it("classifies Discord voice attachments by waveform metadata", async () => {
-    const attachment = {
-      id: "att-voice-metadata",
-      url: "https://cdn.discordapp.com/attachments/1/voice",
-      filename: "voice",
-      duration_secs: 1.5,
-      waveform: "AAAA",
-    };
-    fetchRemoteMedia.mockRejectedValueOnce(new Error("blocked by ssrf guard"));
-
-    const result = await resolveMediaList(
-      asMessage({
-        attachments: [attachment],
-      }),
-      512,
-    );
-
-    expect(result).toEqual([
-      {
-        path: attachment.url,
-        contentType: undefined,
-        placeholder: "<media:audio>",
-      },
-    ]);
   });
 
   it("falls back to URL when saveMediaBuffer fails", async () => {
@@ -728,7 +643,9 @@ describe("resolveMediaList", () => {
       { readIdleTimeoutMs: 60_000 },
     );
 
-    expect(fetchParams().readIdleTimeoutMs).toBe(60_000);
+    expect(fetchRemoteMedia).toHaveBeenCalledWith(
+      expect.objectContaining({ readIdleTimeoutMs: 60_000 }),
+    );
   });
 
   it("passes readIdleTimeoutMs to fetchRemoteMedia for stickers", async () => {
@@ -754,7 +671,9 @@ describe("resolveMediaList", () => {
       { readIdleTimeoutMs: 60_000 },
     );
 
-    expect(fetchParams().readIdleTimeoutMs).toBe(60_000);
+    expect(fetchRemoteMedia).toHaveBeenCalledWith(
+      expect.objectContaining({ readIdleTimeoutMs: 60_000 }),
+    );
   });
 
   it("times out slow attachment downloads and returns fallback", async () => {
@@ -832,8 +751,11 @@ describe("resolveMediaList", () => {
         placeholder: "<media:image>",
       },
     ]);
-    const requestInit = requireRecord(fetchParams().requestInit, "fetch request init");
-    expect(requestInit.signal).toBe(abortController.signal);
+    expect(fetchRemoteMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestInit: expect.objectContaining({ signal: abortController.signal }),
+      }),
+    );
   });
 });
 
@@ -888,17 +810,15 @@ describe("Discord media SSRF policy", () => {
       },
     );
 
-    const policy = requireRecord(fetchParams().ssrfPolicy, "ssrf policy");
-    expect(policy.allowPrivateNetwork).toBe(true);
-    expect(policy.allowRfc2544BenchmarkRange).toBe(true);
-    expect(requireArray(policy.allowedHostnames, "allowed hostnames")).toContain(
-      "assets.example.com",
+    const policy = fetchRemoteMedia.mock.calls[0]?.[0]?.ssrfPolicy;
+    expect(policy).toEqual(
+      expect.objectContaining({
+        allowPrivateNetwork: true,
+        allowRfc2544BenchmarkRange: true,
+        allowedHostnames: expect.arrayContaining(["assets.example.com"]),
+        hostnameAllowlist: expect.arrayContaining(["assets.example.com", ...DISCORD_CDN_HOSTNAMES]),
+      }),
     );
-    const hostnameAllowlist = requireArray(policy.hostnameAllowlist, "hostname allowlist");
-    expect(hostnameAllowlist).toContain("assets.example.com");
-    for (const hostname of DISCORD_CDN_HOSTNAMES) {
-      expect(hostnameAllowlist).toContain(hostname);
-    }
   });
 });
 
@@ -991,46 +911,6 @@ describe("resolveDiscordMessageText", () => {
     expect(text).toBe("Breaking");
   });
 
-  it("uses Components v2 text display content when normal message text is empty", () => {
-    const text = resolveDiscordMessageText(
-      asMessage({
-        content: "",
-        flags: MessageFlags.IsComponentsV2,
-        components: [
-          {
-            type: ComponentType.Container,
-            components: [
-              { type: ComponentType.TextDisplay, content: "Component headline" },
-              {
-                type: ComponentType.Section,
-                components: [{ type: ComponentType.TextDisplay, content: "Component body" }],
-                accessory: { type: ComponentType.Thumbnail, media: { url: "attachment://x.png" } },
-              },
-            ],
-          },
-        ],
-      }),
-    );
-
-    expect(text).toBe("Component headline\nComponent body");
-  });
-
-  it("uses Components v2 text display content from referenced reply messages", () => {
-    const text = resolveDiscordMessageText(
-      asReferencedForwardMessage({
-        components: [
-          {
-            type: ComponentType.Container,
-            components: [{ type: ComponentType.TextDisplay, content: "Referenced component text" }],
-          },
-        ],
-        messageReferenceType: MessageReferenceType.Default,
-      }).referencedMessage!,
-    );
-
-    expect(text).toBe("Referenced component text");
-  });
-
   it("uses embed description when content is empty", () => {
     const text = resolveDiscordMessageText(
       asMessage({
@@ -1075,42 +955,6 @@ describe("resolveDiscordMessageText", () => {
 
     expect(text).toContain("[Forwarded message from @Bob]");
     expect(text).toContain("Forwarded title\nForwarded details");
-  });
-
-  it("includes Components v2 text display content from forwarded snapshots", () => {
-    const text = resolveDiscordMessageText(
-      asMessage({
-        content: "",
-        rawData: {
-          message_snapshots: [
-            {
-              message: {
-                content: "",
-                embeds: [],
-                attachments: [],
-                components: [
-                  {
-                    type: ComponentType.Container,
-                    components: [
-                      { type: ComponentType.TextDisplay, content: "Forwarded component text" },
-                    ],
-                  },
-                ],
-                author: {
-                  id: "u2",
-                  username: "Bob",
-                  discriminator: "0",
-                },
-              },
-            },
-          ],
-        },
-      }),
-      { includeForwarded: true },
-    );
-
-    expect(text).toContain("[Forwarded message from @Bob]");
-    expect(text).toContain("Forwarded component text");
   });
 });
 

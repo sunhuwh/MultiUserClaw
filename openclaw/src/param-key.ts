@@ -7,24 +7,13 @@ function toSnakeCaseKey(key: string): string {
   return lowercasePreservingWhitespace(snakeKey);
 }
 
-export function resolveSnakeCaseParamKey(
-  params: Record<string, unknown>,
-  key: string,
-): string | undefined {
+export function readSnakeCaseParamRaw(params: Record<string, unknown>, key: string): unknown {
   if (Object.hasOwn(params, key)) {
-    return key;
+    return params[key];
   }
   const snakeKey = toSnakeCaseKey(key);
   if (snakeKey !== key && Object.hasOwn(params, snakeKey)) {
-    return snakeKey;
-  }
-  return undefined;
-}
-
-export function readSnakeCaseParamRaw(params: Record<string, unknown>, key: string): unknown {
-  const resolvedKey = resolveSnakeCaseParamKey(params, key);
-  if (resolvedKey) {
-    return params[resolvedKey];
+    return params[snakeKey];
   }
   return undefined;
 }

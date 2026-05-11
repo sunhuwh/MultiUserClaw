@@ -1,6 +1,7 @@
 import { resolveStorePath } from "../config/sessions/paths.js";
 import { loadSessionStore, updateSessionStore } from "../config/sessions/store.js";
 import type { SessionEntry } from "../config/sessions/types.js";
+import { LiveSessionModelSwitchError } from "./live-model-switch-error.js";
 import {
   normalizeStoredOverrideModel,
   resolveDefaultModelForAgent,

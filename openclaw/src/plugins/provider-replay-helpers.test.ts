@@ -11,18 +11,9 @@ import {
   buildStrictAnthropicReplayPolicy,
 } from "./provider-replay-helpers.js";
 
-function expectFields(actual: unknown, expected: Record<string, unknown>): void {
-  expect(actual).toBeDefined();
-  expect(typeof actual).toBe("object");
-  const record = actual as Record<string, unknown>;
-  for (const [key, value] of Object.entries(expected)) {
-    expect(record[key]).toEqual(value);
-  }
-}
-
 describe("provider replay helpers", () => {
   it("builds strict openai-completions replay policy", () => {
-    expectFields(buildOpenAICompatibleReplayPolicy("openai-completions"), {
+    expect(buildOpenAICompatibleReplayPolicy("openai-completions")).toMatchObject({
       sanitizeToolCallIds: true,
       toolCallIdMode: "strict",
       applyAssistantFirstOrderingFix: true,
@@ -31,59 +22,8 @@ describe("provider replay helpers", () => {
     });
   });
 
-  it("omits tool-call id sanitization when opted out for openai-completions", () => {
-    const policy = buildOpenAICompatibleReplayPolicy("openai-completions", {
-      sanitizeToolCallIds: false,
-    });
-    expectFields(policy, {
-      applyAssistantFirstOrderingFix: true,
-      validateGeminiTurns: true,
-      validateAnthropicTurns: true,
-    });
-    expect(policy).not.toHaveProperty("sanitizeToolCallIds");
-    expect(policy).not.toHaveProperty("toolCallIdMode");
-  });
-
-  it("drops historical reasoning for OpenAI-compatible chat completions replay", () => {
-    expect(
-      buildOpenAICompatibleReplayPolicy("openai-completions", {
-        modelId: "qwen3.6-27b",
-      }),
-    ).toHaveProperty("dropReasoningFromHistory", true);
-    expect(
-      buildOpenAICompatibleReplayPolicy("openai-completions", {
-        modelId: "google/gemma-3-27b-it",
-        dropReasoningFromHistory: false,
-      }),
-    ).not.toHaveProperty("dropReasoningFromHistory");
-    expect(
-      buildOpenAICompatibleReplayPolicy("openai-completions", {
-        modelId: "google/gemma-4-26b-a4b-it",
-        dropReasoningFromHistory: false,
-      }),
-    ).toHaveProperty("dropReasoningFromHistory", true);
-    expect(
-      buildOpenAICompatibleReplayPolicy("openai-responses", {
-        modelId: "google/gemma-4-26b-a4b-it",
-      }),
-    ).not.toHaveProperty("dropReasoningFromHistory");
-  });
-
-  it("omits tool-call id sanitization when opted out for openai-responses", () => {
-    const policy = buildOpenAICompatibleReplayPolicy("openai-responses", {
-      sanitizeToolCallIds: false,
-    });
-    expectFields(policy, {
-      applyAssistantFirstOrderingFix: false,
-      validateGeminiTurns: false,
-      validateAnthropicTurns: false,
-    });
-    expect(policy).not.toHaveProperty("sanitizeToolCallIds");
-    expect(policy).not.toHaveProperty("toolCallIdMode");
-  });
-
   it("builds strict anthropic replay policy", () => {
-    expectFields(buildStrictAnthropicReplayPolicy({ dropThinkingBlocks: true }), {
+    expect(buildStrictAnthropicReplayPolicy({ dropThinkingBlocks: true })).toMatchObject({
       sanitizeMode: "full",
       preserveSignatures: true,
       repairToolUseResultPairing: true,
@@ -94,7 +34,7 @@ describe("provider replay helpers", () => {
 
   it("derives claude-only anthropic replay policy from the model id", () => {
     // Sonnet 4.6 preserves thinking blocks (no drop)
-    expectFields(buildAnthropicReplayPolicyForModel("claude-sonnet-4-6"), {
+    expect(buildAnthropicReplayPolicyForModel("claude-sonnet-4-6")).toMatchObject({
       sanitizeToolCallIds: true,
       toolCallIdMode: "strict",
       validateAnthropicTurns: true,
@@ -103,10 +43,9 @@ describe("provider replay helpers", () => {
       "dropThinkingBlocks",
     );
     // Legacy models still drop thinking blocks
-    expect(buildAnthropicReplayPolicyForModel("claude-3-7-sonnet-20250219")).toHaveProperty(
-      "dropThinkingBlocks",
-      true,
-    );
+    expect(buildAnthropicReplayPolicyForModel("claude-3-7-sonnet-20250219")).toMatchObject({
+      dropThinkingBlocks: true,
+    });
     expect(buildAnthropicReplayPolicyForModel("amazon.nova-pro-v1")).not.toHaveProperty(
       "dropThinkingBlocks",
     );
@@ -128,14 +67,14 @@ describe("provider replay helpers", () => {
     // These legacy models SHOULD drop thinking blocks
     for (const modelId of ["claude-3-7-sonnet-20250219", "claude-3-5-sonnet-20240620"]) {
       const policy = buildAnthropicReplayPolicyForModel(modelId);
-      expect(policy.dropThinkingBlocks).toBe(true);
+      expect(policy).toMatchObject({ dropThinkingBlocks: true });
     }
   });
 
   it("builds native Anthropic replay policy with selective tool-call id preservation", () => {
     // Sonnet 4.6 preserves thinking blocks
     const policy46 = buildNativeAnthropicReplayPolicyForModel("claude-sonnet-4-6");
-    expectFields(policy46, {
+    expect(policy46).toMatchObject({
       sanitizeMode: "full",
       sanitizeToolCallIds: true,
       toolCallIdMode: "strict",
@@ -148,12 +87,13 @@ describe("provider replay helpers", () => {
     expect(policy46).not.toHaveProperty("dropThinkingBlocks");
 
     // Legacy model drops thinking blocks
-    expect(
-      buildNativeAnthropicReplayPolicyForModel("claude-3-7-sonnet-20250219").dropThinkingBlocks,
-    ).toBe(true);
+    expect(buildNativeAnthropicReplayPolicyForModel("claude-3-7-sonnet-20250219")).toMatchObject({
+      dropThinkingBlocks: true,
+    });
   });
 
   it("builds hybrid anthropic or openai replay policy", () => {
+    // Sonnet 4.6 preserves thinking blocks even when flag is set
     const sonnet46Policy = buildHybridAnthropicOrOpenAIReplayPolicy(
       {
         provider: "minimax",
@@ -162,12 +102,13 @@ describe("provider replay helpers", () => {
       } as never,
       { anthropicModelDropThinkingBlocks: true },
     );
-    expectFields(sonnet46Policy, {
+    expect(sonnet46Policy).toMatchObject({
       validateAnthropicTurns: true,
     });
     expect(sonnet46Policy).not.toHaveProperty("dropThinkingBlocks");
 
-    expectFields(
+    // Legacy model still drops
+    expect(
       buildHybridAnthropicOrOpenAIReplayPolicy(
         {
           provider: "minimax",
@@ -176,27 +117,25 @@ describe("provider replay helpers", () => {
         } as never,
         { anthropicModelDropThinkingBlocks: true },
       ),
-      {
-        validateAnthropicTurns: true,
-        dropThinkingBlocks: true,
-      },
-    );
+    ).toMatchObject({
+      validateAnthropicTurns: true,
+      dropThinkingBlocks: true,
+    });
 
-    expectFields(
+    expect(
       buildHybridAnthropicOrOpenAIReplayPolicy({
         provider: "minimax",
         modelApi: "openai-completions",
         modelId: "MiniMax-M2.7",
       } as never),
-      {
-        sanitizeToolCallIds: true,
-        applyAssistantFirstOrderingFix: true,
-      },
-    );
+    ).toMatchObject({
+      sanitizeToolCallIds: true,
+      applyAssistantFirstOrderingFix: true,
+    });
   });
 
   it("builds Gemini replay helpers and tagged reasoning mode", () => {
-    expectFields(buildGoogleGeminiReplayPolicy(), {
+    expect(buildGoogleGeminiReplayPolicy()).toMatchObject({
       validateGeminiTurns: true,
       allowSyntheticToolResults: true,
     });
@@ -204,7 +143,7 @@ describe("provider replay helpers", () => {
   });
 
   it("builds passthrough Gemini signature sanitization only when needed", () => {
-    expectFields(buildPassthroughGeminiSanitizingReplayPolicy("gemini-2.5-pro"), {
+    expect(buildPassthroughGeminiSanitizingReplayPolicy("gemini-2.5-pro")).toMatchObject({
       applyAssistantFirstOrderingFix: false,
       validateGeminiTurns: false,
       validateAnthropicTurns: false,
@@ -240,9 +179,10 @@ describe("provider replay helpers", () => {
       },
     } as never);
 
-    const bootstrapMessage = result[0] as { role?: string; content?: unknown } | undefined;
-    expect(bootstrapMessage?.role).toBe("user");
-    expect(bootstrapMessage?.content).toBe("(session bootstrap)");
+    expect(result[0]).toMatchObject({
+      role: "user",
+      content: "(session bootstrap)",
+    });
     expect(customEntries[0]?.customType).toBe("google-turn-ordering-bootstrap");
   });
 });

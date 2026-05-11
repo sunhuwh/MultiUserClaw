@@ -170,10 +170,9 @@ describe("matrix approval reactions", () => {
     expect(resolveMatrixApproval).not.toHaveBeenCalled();
     expect(core.system.enqueueSystemEvent).toHaveBeenCalledWith(
       "Matrix reaction added: 👍 by Owner on msg $msg-1",
-      {
-        sessionKey: "agent:main:matrix:channel:!ops:example.org",
+      expect.objectContaining({
         contextKey: "matrix:reaction:add:!ops:example.org:$msg-1:@owner:example.org:👍",
-      },
+      }),
     );
   });
 

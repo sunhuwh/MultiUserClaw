@@ -31,7 +31,6 @@ const DIR_ID_EXCEPTIONS = new Map<string, string>([
   // Historical directory name kept until a wider repo cleanup is worth the churn.
   ["kimi-coding", "kimi"],
 ]);
-const NON_PACKAGED_BUNDLED_PLUGIN_DIRS = new Set(["qa-channel", "qa-lab", "qa-matrix"]);
 const ALLOWED_PACKAGE_SUFFIXES = [
   "",
   "-provider",
@@ -41,7 +40,6 @@ const ALLOWED_PACKAGE_SUFFIXES = [
   "-media-understanding",
 ] as const;
 
-// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- Test helper lets assertions ascribe JSON file shape.
 function readJsonFile<T>(filePath: string): T {
   return JSON.parse(fs.readFileSync(filePath, "utf8")) as T;
 }
@@ -101,10 +99,7 @@ function expectNoBundledPluginNamingMismatches(params: {
   collectMismatches: (records: BundledPluginRecord[]) => string[];
 }) {
   const mismatches = resolveBundledPluginMismatches(params.collectMismatches);
-  expect(
-    mismatches,
-    `${params.message}\nFound: ${mismatches.join(", ") || "<none>"}`,
-  ).toStrictEqual([]);
+  expect(mismatches, `${params.message}\nFound: ${mismatches.join(", ") || "<none>"}`).toEqual([]);
 }
 
 describe("bundled plugin naming guardrails", () => {
@@ -148,18 +143,6 @@ describe("bundled plugin naming guardrails", () => {
             ({ dirName, packageName, installNpmSpec }) =>
               `${dirName}: package=${packageName}, npmSpec=${installNpmSpec}`,
           ),
-    },
-    {
-      name: "keeps non-packaged bundled plugins from advertising npm installs",
-      message:
-        "Non-packaged bundled plugins are source-only/private and must not advertise openclaw.install.npmSpec.",
-      collectMismatches: (records: BundledPluginRecord[]) =>
-        records
-          .filter(
-            ({ dirName, installNpmSpec }) =>
-              NON_PACKAGED_BUNDLED_PLUGIN_DIRS.has(dirName) && typeof installNpmSpec === "string",
-          )
-          .map(({ dirName, installNpmSpec }) => `${dirName}: npmSpec=${installNpmSpec}`),
     },
     {
       name: "keeps bundled channel ids aligned with the canonical plugin id",

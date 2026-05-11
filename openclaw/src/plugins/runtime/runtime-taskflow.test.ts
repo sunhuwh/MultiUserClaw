@@ -33,12 +33,16 @@ describe("runtime TaskFlow", () => {
       stateJson: { lane: "inbox" },
     });
 
-    expect(created.syncMode).toBe("managed");
-    expect(created.ownerKey).toBe("agent:main:main");
-    expect(created.controllerId).toBe("tests/runtime-taskflow");
-    expect(created.requesterOrigin?.channel).toBe("telegram");
-    expect(created.requesterOrigin?.to).toBe("telegram:123");
-    expect(created.goal).toBe("Triage inbox");
+    expect(created).toMatchObject({
+      syncMode: "managed",
+      ownerKey: "agent:main:main",
+      controllerId: "tests/runtime-taskflow",
+      requesterOrigin: {
+        channel: "telegram",
+        to: "telegram:123",
+      },
+      goal: "Triage inbox",
+    });
     expect(taskFlow.get(created.flowId)?.flowId).toBe(created.flowId);
     expect(taskFlow.findLatest()?.flowId).toBe(created.flowId);
     expect(taskFlow.resolve("agent:main:main")?.flowId).toBe(created.flowId);
@@ -60,9 +64,11 @@ describe("runtime TaskFlow", () => {
       goal: "Review queue",
     });
 
-    expect(created.requesterOrigin?.channel).toBe("discord");
-    expect(created.requesterOrigin?.to).toBe("channel:123");
-    expect(created.requesterOrigin?.threadId).toBe("thread:456");
+    expect(created.requesterOrigin).toMatchObject({
+      channel: "discord",
+      to: "channel:123",
+      threadId: "thread:456",
+    });
   });
 
   it("rejects tool contexts without a bound session key", () => {
@@ -90,7 +96,7 @@ describe("runtime TaskFlow", () => {
     });
 
     expect(otherTaskFlow.get(created.flowId)).toBeUndefined();
-    expect(otherTaskFlow.list()).toStrictEqual([]);
+    expect(otherTaskFlow.list()).toEqual([]);
 
     const child = ownerTaskFlow.runTask({
       flowId: created.flowId,
@@ -103,25 +109,30 @@ describe("runtime TaskFlow", () => {
       lastEventAt: 10,
     });
 
-    expect(child.created).toBe(true);
+    expect(child).toMatchObject({
+      created: true,
+      flow: expect.objectContaining({
+        flowId: created.flowId,
+      }),
+      task: expect.objectContaining({
+        parentFlowId: created.flowId,
+        ownerKey: "agent:main:main",
+        runId: "runtime-taskflow-child",
+      }),
+    });
     if (!child.created) {
       throw new Error("expected child task creation to succeed");
     }
-    expect(child.flow.flowId).toBe(created.flowId);
-    expect(child.task.parentFlowId).toBe(created.flowId);
-    expect(child.task.ownerKey).toBe("agent:main:main");
-    expect(child.task.runId).toBe("runtime-taskflow-child");
-
-    const storedTask = getTaskById(child.task.taskId);
-    expect(storedTask?.parentFlowId).toBe(created.flowId);
-    expect(storedTask?.ownerKey).toBe("agent:main:main");
-    expect(getTaskFlowById(created.flowId)?.flowId).toBe(created.flowId);
-    const summary = ownerTaskFlow.getTaskSummary(created.flowId);
-    expect(summary).toBeDefined();
-    if (!summary) {
-      throw new Error("expected task summary for created flow");
-    }
-    expect(summary.total).toBe(1);
-    expect(summary.active).toBe(1);
+    expect(getTaskById(child.task.taskId)).toMatchObject({
+      parentFlowId: created.flowId,
+      ownerKey: "agent:main:main",
+    });
+    expect(getTaskFlowById(created.flowId)).toMatchObject({
+      flowId: created.flowId,
+    });
+    expect(ownerTaskFlow.getTaskSummary(created.flowId)).toMatchObject({
+      total: 1,
+      active: 1,
+    });
   });
 });

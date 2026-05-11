@@ -1,8 +1,5 @@
-import type { ReplyPayload } from "../../auto-reply/reply-payload.js";
-import { deriveDurableFinalDeliveryRequirements } from "../../channels/message/capabilities.js";
-import { sendDurableMessageBatch } from "../../channels/message/runtime.js";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import type { OutboundMediaAccess } from "../../media/load-options.js";
+import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
+import type { OpenClawConfig } from "../../config/config.js";
 import type { PollInput } from "../../polls.js";
 import { normalizePollInput } from "../../polls.js";
 import {
@@ -14,18 +11,12 @@ import {
 import { resolveOutboundChannelPlugin } from "./channel-resolution.js";
 import { resolveMessageChannelSelection } from "./channel-selection.js";
 import {
-  resolveOutboundDurableFinalDeliverySupport,
-  type DurableFinalDeliveryRequirements,
+  deliverOutboundPayloads,
   type OutboundDeliveryResult,
-  type OutboundDeliveryQueuePolicy,
   type OutboundSendDeps,
 } from "./deliver.js";
 import type { OutboundMirror } from "./mirror.js";
-import {
-  createOutboundPayloadPlan,
-  projectOutboundPayloadPlanForDelivery,
-  projectOutboundPayloadPlanForMirror,
-} from "./payloads.js";
+import { normalizeReplyPayloadsForDelivery } from "./payloads.js";
 import { buildOutboundSessionContext } from "./session-context.js";
 import { resolveOutboundTarget } from "./targets.js";
 
@@ -73,7 +64,6 @@ type MessageSendParams = {
   channel?: string;
   mediaUrl?: string;
   mediaUrls?: string[];
-  asVoice?: boolean;
   gifPlayback?: boolean;
   forceDocument?: boolean;
   accountId?: string;
@@ -81,9 +71,6 @@ type MessageSendParams = {
   threadId?: string | number;
   dryRun?: boolean;
   bestEffort?: boolean;
-  queuePolicy?: OutboundDeliveryQueuePolicy;
-  payloads?: ReplyPayload[];
-  mediaAccess?: OutboundMediaAccess;
   deps?: OutboundSendDeps;
   cfg?: OpenClawConfig;
   gateway?: MessageGatewayOptions;
@@ -91,7 +78,6 @@ type MessageSendParams = {
   mirror?: OutboundMirror;
   abortSignal?: AbortSignal;
   silent?: boolean;
-  parseMode?: "HTML";
 };
 
 export type MessageSendResult = {
@@ -187,76 +173,6 @@ function resolveRequiredPlugin(channel: string, cfg: OpenClawConfig) {
   return plugin;
 }
 
-function payloadRequiresDurablePayloadTransport(payload: ReplyPayload): boolean {
-  return (
-    payload.presentation !== undefined ||
-    payload.delivery !== undefined ||
-    payload.interactive !== undefined ||
-    (payload.channelData !== undefined && Object.keys(payload.channelData).length > 0)
-  );
-}
-
-function mergeDurableRequirements(
-  target: DurableFinalDeliveryRequirements,
-  source: DurableFinalDeliveryRequirements,
-): DurableFinalDeliveryRequirements {
-  for (const [capability, required] of Object.entries(source) as Array<
-    [keyof DurableFinalDeliveryRequirements, boolean | undefined]
-  >) {
-    if (required === true) {
-      target[capability] = true;
-    }
-  }
-  return target;
-}
-
-function deriveRequiredMessageSendCapabilities(params: {
-  payloads: ReplyPayload[];
-  replyToId?: string | null;
-  threadId?: string | number | null;
-  silent?: boolean;
-}): DurableFinalDeliveryRequirements {
-  const requirements: DurableFinalDeliveryRequirements = { reconcileUnknownSend: true };
-  for (const payload of params.payloads) {
-    mergeDurableRequirements(
-      requirements,
-      deriveDurableFinalDeliveryRequirements({
-        payload,
-        replyToId: params.replyToId,
-        threadId: params.threadId,
-        silent: params.silent,
-        payloadTransport: payloadRequiresDurablePayloadTransport(payload),
-        batch: params.payloads.length > 1,
-        reconcileUnknownSend: true,
-      }),
-    );
-  }
-  return requirements;
-}
-
-async function assertRequiredMessageSendDurability(params: {
-  cfg: OpenClawConfig;
-  channel: Exclude<string, "none">;
-  payloads: ReplyPayload[];
-  replyToId?: string | null;
-  threadId?: string | number | null;
-  silent?: boolean;
-}): Promise<void> {
-  const support = await resolveOutboundDurableFinalDeliverySupport({
-    cfg: params.cfg,
-    channel: params.channel,
-    requirements: deriveRequiredMessageSendCapabilities(params),
-  });
-  if (support.ok) {
-    return;
-  }
-  const suffix =
-    support.reason === "capability_mismatch" && support.capability
-      ? `missing ${support.capability}`
-      : support.reason;
-  throw new Error(`Required durable message send is unsupported for ${params.channel}: ${suffix}`);
-}
-
 function resolveGatewayOptions(opts?: MessageGatewayOptions) {
   // Security: backend callers (tools/agents) must not accept user-controlled gateway URLs.
   // Use config-derived gateway target only.
@@ -301,8 +217,8 @@ async function resolveMessageConfig(cfg?: OpenClawConfig): Promise<OpenClawConfi
   if (cfg) {
     return cfg;
   }
-  const { getRuntimeConfig } = await loadMessageConfigRuntime();
-  return getRuntimeConfig();
+  const { loadConfig } = await loadMessageConfigRuntime();
+  return loadConfig();
 }
 
 async function resolveGatewayIdempotencyKey(idempotencyKey?: string): Promise<string> {
@@ -318,22 +234,20 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
   const channel = await resolveRequiredChannel({ cfg, channel: params.channel });
   const plugin = resolveRequiredPlugin(channel, cfg);
   const deliveryMode = plugin.outbound?.deliveryMode ?? "direct";
-  const outboundPayloads =
-    params.payloads && params.payloads.length > 0
-      ? params.payloads
-      : [
-          {
-            text: params.content,
-            mediaUrl: params.mediaUrl,
-            mediaUrls: params.mediaUrls,
-            audioAsVoice: params.asVoice === true,
-          },
-        ];
-  const outboundPlan = createOutboundPayloadPlan(outboundPayloads);
-  const normalizedPayloads = projectOutboundPayloadPlanForDelivery(outboundPlan);
-  const mirrorProjection = projectOutboundPayloadPlanForMirror(outboundPlan);
-  const mirrorText = mirrorProjection.text;
-  const mirrorMediaUrls = mirrorProjection.mediaUrls;
+  const normalizedPayloads = normalizeReplyPayloadsForDelivery([
+    {
+      text: params.content,
+      mediaUrl: params.mediaUrl,
+      mediaUrls: params.mediaUrls,
+    },
+  ]);
+  const mirrorText = normalizedPayloads
+    .map((payload) => payload.text)
+    .filter(Boolean)
+    .join("\n");
+  const mirrorMediaUrls = normalizedPayloads.flatMap(
+    (payload) => resolveSendableOutboundReplyParts(payload).mediaUrls,
+  );
   const primaryMediaUrl = mirrorMediaUrls[0] ?? params.mediaUrl ?? null;
 
   if (params.dryRun) {
@@ -370,17 +284,7 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
       requesterSenderUsername: params.requesterSenderUsername,
       requesterSenderE164: params.requesterSenderE164,
     });
-    if (params.queuePolicy === "required") {
-      await assertRequiredMessageSendDurability({
-        cfg,
-        channel: outboundChannel,
-        payloads: normalizedPayloads,
-        replyToId: params.replyToId,
-        threadId: params.threadId,
-        silent: params.silent,
-      });
-    }
-    const send = await sendDurableMessageBatch({
+    const results = await deliverOutboundPayloads({
       cfg,
       channel: outboundChannel,
       to: resolvedTarget.to,
@@ -393,12 +297,8 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
       forceDocument: params.forceDocument,
       deps: params.deps,
       bestEffort: params.bestEffort,
-      durability:
-        params.bestEffort || params.queuePolicy === "best_effort" ? "best_effort" : "required",
-      signal: params.abortSignal,
+      abortSignal: params.abortSignal,
       silent: params.silent,
-      mediaAccess: params.mediaAccess,
-      formatting: params.parseMode ? { parseMode: params.parseMode } : undefined,
       mirror: params.mirror
         ? {
             ...params.mirror,
@@ -408,10 +308,6 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
           }
         : undefined,
     });
-    if (!params.bestEffort && (send.status === "failed" || send.status === "partial_failed")) {
-      throw send.error;
-    }
-    const results = send.status === "sent" || send.status === "partial_failed" ? send.results : [];
 
     return {
       channel,
@@ -431,16 +327,10 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
       message: params.content,
       mediaUrl: params.mediaUrl,
       mediaUrls: mirrorMediaUrls.length ? mirrorMediaUrls : params.mediaUrls,
-      asVoice: params.asVoice,
       gifPlayback: params.gifPlayback,
       accountId: params.accountId,
       agentId: params.agentId,
       channel,
-      replyToId: params.replyToId,
-      threadId: params.threadId != null ? String(params.threadId) : undefined,
-      forceDocument: params.forceDocument,
-      silent: params.silent,
-      parseMode: params.parseMode,
       sessionKey: params.mirror?.sessionKey,
       idempotencyKey: await resolveGatewayIdempotencyKey(params.idempotencyKey),
     },

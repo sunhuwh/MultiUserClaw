@@ -1,18 +1,17 @@
 {
   "name": "@openclaw/zalo",
-  "version": "2026.5.10-beta.3",
+  "version": "2026.4.10",
   "description": "OpenClaw Zalo channel plugin",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/openclaw/openclaw"
-  },
   "type": "module",
+  "dependencies": {
+    "undici": "8.0.2"
+  },
   "devDependencies": {
     "@openclaw/plugin-sdk": "workspace:*",
     "openclaw": "workspace:*"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.5.10-beta.3"
+    "openclaw": ">=2026.4.10"
   },
   "peerDependenciesMeta": {
     "openclaw": {
@@ -43,17 +42,14 @@
       "minHostVersion": ">=2026.4.10"
     },
     "compat": {
-      "pluginApi": ">=2026.5.10-beta.3"
+      "pluginApi": ">=2026.4.10"
     },
     "build": {
-      "openclawVersion": "2026.5.10-beta.3"
+      "openclawVersion": "2026.4.10"
     },
     "release": {
       "publishToClawHub": true,
       "publishToNpm": true
     }
-  },
-  "dependencies": {
-    "zod": "^4.4.3"
   }
 }

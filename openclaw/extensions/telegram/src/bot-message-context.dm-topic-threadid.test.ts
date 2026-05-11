@@ -20,7 +20,7 @@ vi.mock("./bot-message-context.body.js", () => ({
 }));
 
 let buildTelegramMessageContextForTest: typeof import("./bot-message-context.test-harness.js").buildTelegramMessageContextForTest;
-let clearRuntimeConfigSnapshot: typeof import("openclaw/plugin-sdk/runtime-config-snapshot").clearRuntimeConfigSnapshot;
+let clearRuntimeConfigSnapshot: typeof import("openclaw/plugin-sdk/config-runtime").clearRuntimeConfigSnapshot;
 
 describe("buildTelegramMessageContext DM topic threadId in deliveryContext (#8891)", () => {
   async function buildCtx(params: {
@@ -39,11 +39,9 @@ describe("buildTelegramMessageContext DM topic threadId in deliveryContext (#889
     const updateLastRoute = getRecordedUpdateLastRoute(0) as
       | { threadId?: string; to?: string }
       | undefined;
-    if (!updateLastRoute) {
-      throw new Error("expected recorded Telegram route");
-    }
-    expect(updateLastRoute.to).toBe(params.to);
-    expect(updateLastRoute.threadId).toBe(params.threadId);
+    expect(updateLastRoute).toBeDefined();
+    expect(updateLastRoute?.to).toBe(params.to);
+    expect(updateLastRoute?.threadId).toBe(params.threadId);
   }
 
   afterEach(() => {
@@ -67,9 +65,7 @@ describe("buildTelegramMessageContext DM topic threadId in deliveryContext (#889
       },
     });
 
-    if (!ctx?.ctxPayload) {
-      throw new Error("expected Telegram DM topic context payload");
-    }
+    expect(ctx).not.toBeNull();
     expect(recordInboundSessionMock).toHaveBeenCalled();
 
     expectRecordedRoute({ to: "telegram:1234", threadId: "42" });
@@ -82,9 +78,7 @@ describe("buildTelegramMessageContext DM topic threadId in deliveryContext (#889
       },
     });
 
-    if (!ctx?.ctxPayload) {
-      throw new Error("expected Telegram DM context payload");
-    }
+    expect(ctx).not.toBeNull();
     expect(recordInboundSessionMock).toHaveBeenCalled();
 
     expectRecordedRoute({ to: "telegram:1234" });
@@ -101,9 +95,7 @@ describe("buildTelegramMessageContext DM topic threadId in deliveryContext (#889
       resolveGroupActivation: () => true,
     });
 
-    if (!ctx?.ctxPayload) {
-      throw new Error("expected Telegram forum topic context payload");
-    }
+    expect(ctx).not.toBeNull();
     expect(recordInboundSessionMock).toHaveBeenCalled();
 
     expectRecordedRoute({ to: "telegram:-1001234567890:topic:99", threadId: "99" });
@@ -119,9 +111,7 @@ describe("buildTelegramMessageContext DM topic threadId in deliveryContext (#889
       resolveGroupActivation: () => true,
     });
 
-    if (!ctx?.ctxPayload) {
-      throw new Error("expected Telegram General topic context payload");
-    }
+    expect(ctx).not.toBeNull();
     expect(recordInboundSessionMock).toHaveBeenCalled();
 
     expectRecordedRoute({ to: "telegram:-1001234567890:topic:1", threadId: "1" });

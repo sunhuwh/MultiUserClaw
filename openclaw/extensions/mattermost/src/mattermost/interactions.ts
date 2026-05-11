@@ -1,18 +1,13 @@
 import { createHmac } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { safeEqualSecret } from "openclaw/plugin-sdk/security-runtime";
+import { safeEqualSecret } from "openclaw/plugin-sdk/browser-security-runtime";
 import {
   normalizeOptionalString,
   normalizeStringifiedOptionalString,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
+} from "openclaw/plugin-sdk/text-runtime";
 import { getMattermostRuntime } from "../runtime.js";
 import { updateMattermostPost, type MattermostClient, type MattermostPost } from "./client.js";
-import {
-  isTrustedProxyAddress,
-  readRequestBodyWithLimit,
-  resolveClientIp,
-  type OpenClawConfig,
-} from "./runtime-api.js";
+import { isTrustedProxyAddress, resolveClientIp, type OpenClawConfig } from "./runtime-api.js";
 
 const INTERACTION_MAX_BODY_BYTES = 64 * 1024;
 const INTERACTION_BODY_TIMEOUT_MS = 10_000;
@@ -23,7 +18,7 @@ const SIGNED_CHANNEL_ID_CONTEXT_KEY = "__openclaw_channel_id";
  * Sent by Mattermost when a user clicks an action button.
  * See: https://developers.mattermost.com/integrate/plugins/interactive-messages/
  */
-type MattermostInteractionPayload = {
+export type MattermostInteractionPayload = {
   user_id: string;
   user_name?: string;
   channel_id: string;
@@ -43,7 +38,7 @@ export type MattermostInteractionResponse = {
   ephemeral_text?: string;
 };
 
-type MattermostInteractionAuthorizationResult =
+export type MattermostInteractionAuthorizationResult =
   | { ok: true }
   | { ok: false; statusCode?: number; response?: MattermostInteractionResponse };
 
@@ -240,7 +235,7 @@ export function verifyInteractionToken(
 
 // ── Button builder helpers ─────────────────────────────────────────────
 
-type MattermostButton = {
+export type MattermostButton = {
   id: string;
   type: "button" | "select";
   name: string;
@@ -251,7 +246,7 @@ type MattermostButton = {
   };
 };
 
-type MattermostAttachment = {
+export type MattermostAttachment = {
   text?: string;
   actions?: MattermostButton[];
   [key: string]: unknown;
@@ -358,9 +353,35 @@ export function buildButtonProps(params: {
 // ── Request body reader ────────────────────────────────────────────────
 
 function readInteractionBody(req: IncomingMessage): Promise<string> {
-  return readRequestBodyWithLimit(req, {
-    maxBytes: INTERACTION_MAX_BODY_BYTES,
-    timeoutMs: INTERACTION_BODY_TIMEOUT_MS,
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+
+    const timer = setTimeout(() => {
+      req.destroy();
+      reject(new Error("Request body read timeout"));
+    }, INTERACTION_BODY_TIMEOUT_MS);
+
+    req.on("data", (chunk: Buffer) => {
+      totalBytes += chunk.length;
+      if (totalBytes > INTERACTION_MAX_BODY_BYTES) {
+        req.destroy();
+        clearTimeout(timer);
+        reject(new Error("Request body too large"));
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    req.on("end", () => {
+      clearTimeout(timer);
+      resolve(Buffer.concat(chunks).toString("utf8"));
+    });
+
+    req.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
   });
 }
 

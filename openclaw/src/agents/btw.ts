@@ -7,32 +7,45 @@ import {
   type Model,
   type TextContent,
 } from "@mariozechner/pi-ai";
-import type { GetReplyOptions } from "../auto-reply/get-reply-options.types.js";
-import type { ReplyPayload } from "../auto-reply/reply-payload.js";
+import { SessionManager } from "@mariozechner/pi-coding-agent";
 import type { ReasoningLevel, ThinkLevel } from "../auto-reply/thinking.js";
-import type { SessionEntry as StoredSessionEntry } from "../config/sessions.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { GetReplyOptions, ReplyPayload } from "../auto-reply/types.js";
+import type { OpenClawConfig } from "../config/config.js";
+import {
+  resolveSessionFilePath,
+  resolveSessionFilePathOptions,
+  type SessionEntry,
+} from "../config/sessions.js";
+import { diagnosticLogger as diag } from "../logging/diagnostic.js";
 import { prepareProviderRuntimeAuth } from "../plugins/provider-runtime.js";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { resolveAgentWorkspaceDir, resolveSessionAgentId } from "./agent-scope.js";
 import { resolveSessionAuthProfileOverride } from "./auth-profiles/session-override.js";
-import { readBtwTranscriptMessages, resolveBtwSessionTranscriptPath } from "./btw-transcript.js";
-import { resolveAgentHarnessPolicy } from "./harness/selection.js";
 import {
   resolveImageSanitizationLimits,
   type ImageSanitizationLimits,
 } from "./image-sanitization.js";
 import { getApiKeyForModel, requireApiKey } from "./model-auth.js";
 import { ensureOpenClawModelsJson } from "./models-config.js";
-import { listOpenAIAuthProfileProvidersForAgentRuntime } from "./openai-codex-routing.js";
 import { EmbeddedBlockChunker, type BlockReplyChunking } from "./pi-embedded-block-chunker.js";
 import { resolveModelWithRegistry } from "./pi-embedded-runner/model.js";
 import { getActiveEmbeddedRunSnapshot } from "./pi-embedded-runner/runs.js";
 import { streamWithPayloadPatch } from "./pi-embedded-runner/stream-payload-utils.js";
 import { discoverAuthStorage, discoverModels } from "./pi-model-discovery.js";
-import { registerProviderStreamForModel } from "./provider-stream.js";
 import { stripToolResultDetails } from "./session-transcript-repair.js";
 import { sanitizeImageBlocks } from "./tool-images.js";
+
+type SessionManagerLike = {
+  getLeafEntry?: () => {
+    id?: string;
+    type?: string;
+    parentId?: string | null;
+    message?: { role?: string };
+  } | null;
+  branch?: (parentId: string) => void;
+  resetLeaf?: () => void;
+  buildSessionContext: () => { messages?: unknown[] };
+};
 
 function collectTextContent(content: Array<{ type?: string; text?: string }>): string {
   return content
@@ -213,15 +226,34 @@ async function toSimpleContextMessages(params: {
   ) as Message[];
 }
 
+function resolveSessionTranscriptPath(params: {
+  sessionId: string;
+  sessionEntry?: SessionEntry;
+  sessionKey?: string;
+  storePath?: string;
+}): string | undefined {
+  try {
+    const agentId = params.sessionKey?.split(":")[1];
+    const pathOpts = resolveSessionFilePathOptions({
+      agentId,
+      storePath: params.storePath,
+    });
+    return resolveSessionFilePath(params.sessionId, params.sessionEntry, pathOpts);
+  } catch (error) {
+    diag.debug(
+      `resolveSessionTranscriptPath failed: sessionId=${params.sessionId} err=${String(error)}`,
+    );
+    return undefined;
+  }
+}
+
 async function resolveRuntimeModel(params: {
   cfg: OpenClawConfig;
   provider: string;
   model: string;
-  agentId?: string;
   agentDir: string;
-  workspaceDir?: string;
-  sessionEntry?: StoredSessionEntry;
-  sessionStore?: Record<string, StoredSessionEntry>;
+  sessionEntry?: SessionEntry;
+  sessionStore?: Record<string, SessionEntry>;
   sessionKey?: string;
   storePath?: string;
   isNewSession: boolean;
@@ -230,8 +262,7 @@ async function resolveRuntimeModel(params: {
   authProfileId?: string;
   authProfileIdSource?: "auto" | "user";
 }> {
-  const modelsOptions = params.workspaceDir ? { workspaceDir: params.workspaceDir } : undefined;
-  await ensureOpenClawModelsJson(params.cfg, params.agentDir, modelsOptions);
+  await ensureOpenClawModelsJson(params.cfg, params.agentDir);
   const authStorage = discoverAuthStorage(params.agentDir);
   const modelRegistry = discoverModels(authStorage, params.agentDir);
   const model = resolveModelWithRegistry({
@@ -247,16 +278,6 @@ async function resolveRuntimeModel(params: {
   const authProfileId = await resolveSessionAuthProfileOverride({
     cfg: params.cfg,
     provider: params.provider,
-    acceptedProviderIds: listOpenAIAuthProfileProvidersForAgentRuntime({
-      provider: params.provider,
-      harnessRuntime: resolveAgentHarnessPolicy({
-        provider: params.provider,
-        modelId: params.model,
-        config: params.cfg,
-        agentId: params.agentId,
-        sessionKey: params.sessionKey,
-      }).runtime,
-    }),
     agentDir: params.agentDir,
     sessionEntry: params.sessionEntry,
     sessionStore: params.sessionStore,
@@ -277,8 +298,8 @@ type RunBtwSideQuestionParams = {
   provider: string;
   model: string;
   question: string;
-  sessionEntry: StoredSessionEntry;
-  sessionStore?: Record<string, StoredSessionEntry>;
+  sessionEntry: SessionEntry;
+  sessionStore?: Record<string, SessionEntry>;
   sessionKey?: string;
   storePath?: string;
   resolvedThinkLevel?: ThinkLevel;
@@ -297,7 +318,7 @@ export async function runBtwSideQuestion(
     throw new Error("No active session context.");
   }
 
-  const sessionFile = resolveBtwSessionTranscriptPath({
+  const sessionFile = resolveSessionTranscriptPath({
     sessionId,
     sessionEntry: params.sessionEntry,
     sessionKey: params.sessionKey,
@@ -307,6 +328,7 @@ export async function runBtwSideQuestion(
     throw new Error("No active session transcript.");
   }
 
+  const sessionManager = SessionManager.open(sessionFile) as SessionManagerLike;
   const activeRunSnapshot = getActiveEmbeddedRunSnapshot(sessionId);
   const imageLimits = resolveImageSanitizationLimits(params.cfg);
   let messages: Message[] = [];
@@ -319,14 +341,32 @@ export async function runBtwSideQuestion(
     inFlightPrompt = activeRunSnapshot.inFlightPrompt;
   } else if (activeRunSnapshot) {
     inFlightPrompt = activeRunSnapshot.inFlightPrompt;
+    if (activeRunSnapshot.transcriptLeafId && sessionManager.branch) {
+      try {
+        sessionManager.branch(activeRunSnapshot.transcriptLeafId);
+      } catch (error) {
+        diag.debug(
+          `btw snapshot leaf unavailable: sessionId=${sessionId} leaf=${activeRunSnapshot.transcriptLeafId} err=${String(error)}`,
+        );
+        sessionManager.resetLeaf?.();
+      }
+    } else {
+      sessionManager.resetLeaf?.();
+    }
+  } else {
+    const leafEntry = sessionManager.getLeafEntry?.();
+    if (leafEntry?.type === "message" && leafEntry.message?.role === "user") {
+      if (leafEntry.parentId && sessionManager.branch) {
+        sessionManager.branch(leafEntry.parentId);
+      } else {
+        sessionManager.resetLeaf?.();
+      }
+    }
   }
   if (messages.length === 0) {
+    const sessionContext = sessionManager.buildSessionContext();
     messages = await toSimpleContextMessages({
-      messages: await readBtwTranscriptMessages({
-        sessionFile,
-        sessionId,
-        snapshotLeafId: activeRunSnapshot?.transcriptLeafId,
-      }),
+      messages: Array.isArray(sessionContext.messages) ? sessionContext.messages : [],
       imageLimits,
     });
   }
@@ -334,18 +374,11 @@ export async function runBtwSideQuestion(
     throw new Error("No active session context.");
   }
 
-  const sessionAgentId = resolveSessionAgentId({
-    sessionKey: params.sessionKey,
-    config: params.cfg,
-  });
-  const workspaceDir = resolveAgentWorkspaceDir(params.cfg, sessionAgentId);
   const { model, authProfileId } = await resolveRuntimeModel({
     cfg: params.cfg,
     provider: params.provider,
     model: params.model,
-    agentId: sessionAgentId,
     agentDir: params.agentDir,
-    workspaceDir,
     sessionEntry: params.sessionEntry,
     sessionStore: params.sessionStore,
     sessionKey: params.sessionKey,
@@ -364,6 +397,11 @@ export async function runBtwSideQuestion(
       ? undefined
       : requireApiKey(apiKeyInfo, model.provider);
   if (apiKey) {
+    const sessionAgentId = resolveSessionAgentId({
+      sessionKey: params.sessionKey,
+      config: params.cfg,
+    });
+    const workspaceDir = resolveAgentWorkspaceDir(params.cfg, sessionAgentId);
     const preparedAuth = await prepareProviderRuntimeAuth({
       provider: model.provider,
       config: params.cfg,
@@ -393,18 +431,6 @@ export async function runBtwSideQuestion(
     }
   }
 
-  // Use the provider's own stream fn so providers like Ollama (which build
-  // `/api/chat` or `/v1/chat/completions` paths based on api mode) construct
-  // URLs correctly. Without this, streamSimple hits the provider's baseUrl
-  // directly and 404s on endpoints like Ollama Cloud (#68336).
-  const providerStreamFn = registerProviderStreamForModel({
-    model: runtimeModel,
-    cfg: params.cfg,
-    agentDir: params.agentDir,
-    workspaceDir,
-    env: process.env,
-  });
-
   const chunker =
     params.opts?.onBlockReply && params.blockReplyChunking
       ? new EmbeddedBlockChunker(params.blockReplyChunking)
@@ -432,7 +458,7 @@ export async function runBtwSideQuestion(
   };
 
   const stream = await streamWithPayloadPatch(
-    providerStreamFn ?? streamSimple,
+    streamSimple,
     runtimeModel,
     {
       systemPrompt: buildBtwSystemPrompt(),

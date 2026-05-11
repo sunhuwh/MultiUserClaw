@@ -8,8 +8,8 @@ describe("pi-model-discovery module compatibility", () => {
   it("loads when InMemoryAuthStorageBackend is not exported", async () => {
     vi.resetModules();
     vi.doMock("@mariozechner/pi-coding-agent", () => {
-      function MockAuthStorage() {}
-      function MockModelRegistry() {}
+      class MockAuthStorage {}
+      class MockModelRegistry {}
 
       return {
         AuthStorage: MockAuthStorage,
@@ -17,8 +17,9 @@ describe("pi-model-discovery module compatibility", () => {
       };
     });
 
-    const module = await import("./pi-model-discovery.js");
-    expect(typeof module.discoverAuthStorage).toBe("function");
-    expect(typeof module.discoverModels).toBe("function");
+    await expect(import("./pi-model-discovery.js")).resolves.toMatchObject({
+      discoverAuthStorage: expect.any(Function),
+      discoverModels: expect.any(Function),
+    });
   });
 });

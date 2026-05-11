@@ -75,13 +75,17 @@ describe("secrets configure plan helpers", () => {
         },
       },
     });
-    const openaiCandidate = candidates.find(
-      (entry) => entry.path === "profiles.openai:default.key",
+    expect(candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "auth-profiles.api_key.key",
+          path: "profiles.openai:default.key",
+          agentId: "main",
+          configFile: "auth-profiles.json",
+          authProfileProvider: "openai",
+        }),
+      ]),
     );
-    expect(openaiCandidate?.type).toBe("auth-profiles.api_key.key");
-    expect(openaiCandidate?.agentId).toBe("main");
-    expect(openaiCandidate?.configFile).toBe("auth-profiles.json");
-    expect(openaiCandidate?.authProfileProvider).toBe("openai");
   });
 
   it("captures existing refs for prefilled configure prompts", () => {
@@ -118,23 +122,26 @@ describe("secrets configure plan helpers", () => {
       },
     });
 
-    const talkCandidate = candidates.find(
-      (entry) => entry.path === TALK_TEST_PROVIDER_API_KEY_PATH,
+    expect(candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: TALK_TEST_PROVIDER_API_KEY_PATH,
+          existingRef: {
+            source: "env",
+            provider: "default",
+            id: "TALK_API_KEY",
+          },
+        }),
+        expect.objectContaining({
+          path: "profiles.openai:default.key",
+          existingRef: {
+            source: "env",
+            provider: "default",
+            id: "OPENAI_API_KEY", // pragma: allowlist secret
+          },
+        }),
+      ]),
     );
-    expect(talkCandidate?.existingRef).toStrictEqual({
-      source: "env",
-      provider: "default",
-      id: "TALK_API_KEY",
-    });
-
-    const openaiCandidate = candidates.find(
-      (entry) => entry.path === "profiles.openai:default.key",
-    );
-    expect(openaiCandidate?.existingRef).toStrictEqual({
-      source: "env",
-      provider: "default",
-      id: "OPENAI_API_KEY", // pragma: allowlist secret
-    });
   });
 
   it("marks normalized alias paths as derived when not authored directly", () => {
@@ -201,9 +208,7 @@ describe("secrets configure plan helpers", () => {
     });
     expect(plan.targets).toHaveLength(1);
     expect(plan.targets[0]?.path).toBe(TALK_TEST_PROVIDER_API_KEY_PATH);
-    expect(plan.providerUpserts).toEqual({
-      default: { source: "env" },
-    });
+    expect(plan.providerUpserts).toBeDefined();
     expect(plan.options).toEqual({
       scrubEnv: true,
       scrubAuthProfilesForProviderTargets: true,

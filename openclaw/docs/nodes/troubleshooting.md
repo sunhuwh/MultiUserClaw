@@ -3,8 +3,10 @@ summary: "Troubleshoot node pairing, foreground requirements, permissions, and t
 read_when:
   - Node is connected but camera/canvas/screen/exec tools fail
   - You need the node pairing versus approvals mental model
-title: "Node troubleshooting"
+title: "Node Troubleshooting"
 ---
+
+# Node troubleshooting
 
 Use this page when a node is visible in status but node tools fail.
 
@@ -112,12 +114,10 @@ If still stuck:
 - Re-grant OS permissions.
 - Recreate/adjust exec approval policy.
 
-## Related
+Related:
 
-- [Nodes overview](/nodes)
-- [Camera nodes](/nodes/camera)
-- [Location command](/nodes/location-command)
-- [Exec approvals](/tools/exec-approvals)
-- [Gateway pairing](/gateway/pairing)
-- [Gateway troubleshooting](/gateway/troubleshooting)
-- [Channel troubleshooting](/channels/troubleshooting)
+- [/nodes/index](/nodes/index)
+- [/nodes/camera](/nodes/camera)
+- [/nodes/location-command](/nodes/location-command)
+- [/tools/exec-approvals](/tools/exec-approvals)
+- [/gateway/pairing](/gateway/pairing)
