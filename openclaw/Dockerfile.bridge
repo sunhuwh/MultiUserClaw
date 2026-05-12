@@ -103,6 +103,8 @@ WORKDIR /app
 COPY .npmrc package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY patches/ ./patches/
 COPY scripts/postinstall-bundled-plugins.mjs scripts/npm-runner.mjs scripts/windows-cmd-helpers.mjs ./scripts/
+# 3. 关键：拷贝脚本目录 (解决现在的报错)
+COPY scripts ./scripts
 
 RUN pnpm config set registry https://registry.npmmirror.com && \
     pnpm config set fetch-retries 5 && \
