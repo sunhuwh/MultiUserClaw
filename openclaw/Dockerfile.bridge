@@ -111,11 +111,9 @@ RUN pnpm config set registry https://registry.npmmirror.com && \
     pnpm config get registry && \
     pnpm config get @tloncorp:registry
 
-RUN pnpm config set minimum-release-age 0
-RUN pnpm config set ignore-workspace-root-check true
-
-    # Pre-fetch external packages into the shared pnpm store so source-only changes
+# Pre-fetch external packages into the shared pnpm store so source-only changes
 # can reuse downloaded dependencies.
+ENV PNPM_IGNORE_WORKSPACE_ROOT_CHECK=true
 RUN --mount=type=cache,id=openclaw-bridge-pnpm-store,target=/root/.local/share/pnpm/store,sharing=locked \
     --mount=type=cache,id=openclaw-bridge-pnpm-metadata,target=/root/.cache/pnpm,sharing=locked \
     pnpm fetch --frozen-lockfile --reporter=append-only
