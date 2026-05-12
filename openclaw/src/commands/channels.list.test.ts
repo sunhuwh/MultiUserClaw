@@ -128,26 +128,26 @@ describe("channels list", () => {
     mocks.listReadOnlyChannelPluginsForConfig.mockReturnValue([
       createMockChannelPlugin({ accountIds: ["alerts", "default"] }),
     ]);
-    const config = {
-      channels: {
-        telegram: {
-          accounts: {
-            default: { botToken: "123:abc" },
-            alerts: { botToken: "456:def" },
+    mocks.readConfigFileSnapshot.mockResolvedValue({
+      ...baseConfigSnapshot,
+      config: {
+        channels: {
+          telegram: {
+            accounts: {
+              default: { botToken: "123:abc" },
+              alerts: { botToken: "456:def" },
+            },
           },
         },
       },
-    };
-    mocks.readConfigFileSnapshot.mockResolvedValue({
-      ...baseConfigSnapshot,
-      config,
     });
 
     await channelsListCommand({ json: true }, runtime);
 
-    expect(mocks.listReadOnlyChannelPluginsForConfig).toHaveBeenCalledWith(config, {
-      includeSetupFallbackPlugins: true,
-    });
+    expect(mocks.listReadOnlyChannelPluginsForConfig).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ includeSetupFallbackPlugins: true }),
+    );
     const payload = JSON.parse(runtime.log.mock.calls[0]?.[0] as string) as {
       chat?: Record<string, { accounts: string[]; installed: boolean; origin: string }>;
     };
@@ -185,25 +185,25 @@ describe("channels list", () => {
       tokenSource: "config",
       enabled: true,
     });
-    const config = {
-      channels: {
-        telegram: {
-          accounts: {
-            default: { botToken: "123:abc" },
+    mocks.readConfigFileSnapshot.mockResolvedValue({
+      ...baseConfigSnapshot,
+      config: {
+        channels: {
+          telegram: {
+            accounts: {
+              default: { botToken: "123:abc" },
+            },
           },
         },
       },
-    };
-    mocks.readConfigFileSnapshot.mockResolvedValue({
-      ...baseConfigSnapshot,
-      config,
     });
 
     await channelsListCommand({}, runtime);
 
-    expect(mocks.listReadOnlyChannelPluginsForConfig).toHaveBeenCalledWith(config, {
-      includeSetupFallbackPlugins: true,
-    });
+    expect(mocks.listReadOnlyChannelPluginsForConfig).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ includeSetupFallbackPlugins: true }),
+    );
     const output = stripAnsi(runtime.log.mock.calls[0]?.[0] as string);
     expect(output).toContain("Chat channels:");
     expect(output).toContain("Telegram default:");
@@ -314,12 +314,9 @@ describe("channels list", () => {
     const payload = JSON.parse(runtime.log.mock.calls[0]?.[0] as string) as {
       chat: Record<string, { origin: string; installed: boolean }>;
     };
-    expect(payload.chat.telegram?.origin).toBe("configured");
-    expect(payload.chat.telegram?.installed).toBe(true);
-    expect(payload.chat.discord?.origin).toBe("available");
-    expect(payload.chat.discord?.installed).toBe(true);
-    expect(payload.chat.qqbot?.origin).toBe("installable");
-    expect(payload.chat.qqbot?.installed).toBe(false);
+    expect(payload.chat.telegram).toMatchObject({ origin: "configured", installed: true });
+    expect(payload.chat.discord).toMatchObject({ origin: "available", installed: true });
+    expect(payload.chat.qqbot).toMatchObject({ origin: "installable", installed: false });
   });
 
   it(
@@ -358,8 +355,10 @@ describe("channels list", () => {
       const payload = JSON.parse(runtime.log.mock.calls[0]?.[0] as string) as {
         chat: Record<string, { origin: string; installed: boolean }>;
       };
-      expect(payload.chat.wecom?.origin).toBe("available");
-      expect(payload.chat.wecom?.installed).toBe(true);
+      expect(payload.chat.wecom).toMatchObject({
+        origin: "available",
+        installed: true,
+      });
     },
   );
 });

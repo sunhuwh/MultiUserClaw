@@ -12,7 +12,6 @@ type FormatChannelPrimerLine = typeof import("../channels/registry.js").formatCh
 type FormatChannelSelectionLine =
   typeof import("../channels/registry.js").formatChannelSelectionLine;
 type IsChannelConfigured = typeof import("../config/channel-configured.js").isChannelConfigured;
-type ChannelSetupStatusModule = typeof import("./channel-setup.status.js");
 type NoteChannelPrimerChannels = Parameters<
   typeof import("./channel-setup.status.js").noteChannelPrimer
 >[1];
@@ -74,18 +73,19 @@ vi.mock("../plugins/bundled-sources.js", () => ({
   findBundledPluginSourceInMap: () => undefined,
 }));
 
-let collectChannelStatus: ChannelSetupStatusModule["collectChannelStatus"];
-let noteChannelPrimer: ChannelSetupStatusModule["noteChannelPrimer"];
-let resolveChannelSelectionNoteLines: ChannelSetupStatusModule["resolveChannelSelectionNoteLines"];
-let resolveChannelSetupSelectionContributions: ChannelSetupStatusModule["resolveChannelSetupSelectionContributions"];
+import {
+  collectChannelStatus,
+  noteChannelPrimer,
+  resolveChannelSelectionNoteLines,
+  resolveChannelSetupSelectionContributions,
+} from "./channel-setup.status.js";
 
 describe("resolveChannelSetupSelectionContributions", () => {
-  beforeEach(async () => {
-    vi.resetModules();
+  beforeEach(() => {
     vi.clearAllMocks();
     listChatChannels.mockReturnValue([
       makeMeta("discord", "Discord"),
-      makeMeta("imessage", "iMessage"),
+      makeMeta("bluebubbles", "BlueBubbles"),
     ]);
     resolveChannelSetupEntries.mockReturnValue(makeChannelSetupEntries());
     formatChannelPrimerLine.mockImplementation(
@@ -93,12 +93,6 @@ describe("resolveChannelSetupSelectionContributions", () => {
     );
     formatChannelSelectionLine.mockImplementation((meta) => `${meta.label} — ${meta.blurb}`);
     isChannelConfigured.mockReturnValue(false);
-    ({
-      collectChannelStatus,
-      noteChannelPrimer,
-      resolveChannelSelectionNoteLines,
-      resolveChannelSetupSelectionContributions,
-    } = await import("./channel-setup.status.js"));
   });
 
   it("sorts channels alphabetically by picker label", () => {
@@ -121,11 +115,11 @@ describe("resolveChannelSetupSelectionContributions", () => {
           },
         },
         {
-          id: "imessage",
+          id: "bluebubbles",
           meta: {
-            id: "imessage",
-            label: "iMessage",
-            selectionLabel: "iMessage (macOS app)",
+            id: "bluebubbles",
+            label: "BlueBubbles",
+            selectionLabel: "BlueBubbles (macOS app)",
           },
         },
       ],
@@ -134,8 +128,8 @@ describe("resolveChannelSetupSelectionContributions", () => {
     });
 
     expect(contributions.map((contribution) => contribution.option.label)).toEqual([
+      "BlueBubbles (macOS app)",
       "Discord (Bot API)",
-      "iMessage (macOS app)",
       "Zalo (Bot API)",
     ]);
   });
@@ -266,12 +260,14 @@ describe("resolveChannelSetupSelectionContributions", () => {
       ] as NoteChannelPrimerChannels,
     );
 
-    expect(formatChannelPrimerLine).toHaveBeenCalledOnce();
-    const [primerMeta] = formatChannelPrimerLine.mock.calls[0] ?? [];
-    expect(primerMeta?.id).toBe("bad\\nid");
-    expect(primerMeta?.label).toBe("bad\\nid");
-    expect(primerMeta?.selectionLabel).toBe("bad\\nid");
-    expect(primerMeta?.blurb).toBe("Blurb\\nline");
+    expect(formatChannelPrimerLine).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "bad\\nid",
+        label: "bad\\nid",
+        selectionLabel: "bad\\nid",
+        blurb: "Blurb\\nline",
+      }),
+    );
     expect(note).toHaveBeenCalledWith(
       expect.stringContaining("bad\\nid: Blurb\\nline"),
       "How channels work",
@@ -305,17 +301,16 @@ describe("resolveChannelSetupSelectionContributions", () => {
       selection: ["zalo"],
     });
 
-    expect(formatChannelSelectionLine).toHaveBeenCalledOnce();
-    const [selectionMeta, docsLink] = formatChannelSelectionLine.mock.calls[0] ?? [];
-    expect(selectionMeta?.label).toBe("Zalo\\nBot");
-    expect(selectionMeta?.blurb).toBe("Setup\\nhelp");
-    expect(selectionMeta?.docsLabel).toBe("Docs\\nLabel");
-    expect(selectionMeta?.selectionDocsPrefix).toBe("Docs\\nPrefix");
-    expect(selectionMeta?.selectionExtras).toEqual(["Extra\\nOne"]);
-    if (typeof docsLink !== "function") {
-      throw new Error("Expected docs link formatter");
-    }
-    expect(docsLink("/channels/zalo", "Docs")).toContain("https://docs.openclaw.ai/channels/zalo");
+    expect(formatChannelSelectionLine).toHaveBeenCalledWith(
+      expect.objectContaining({
+        label: "Zalo\\nBot",
+        blurb: "Setup\\nhelp",
+        docsLabel: "Docs\\nLabel",
+        selectionDocsPrefix: "Docs\\nPrefix",
+        selectionExtras: ["Extra\\nOne"],
+      }),
+      expect.any(Function),
+    );
     expect(lines).toEqual(["Zalo\\nBot — Setup\\nhelp"]);
   });
 });

@@ -9,6 +9,6 @@ describeLive("microsoft plugin live", () => {
     const voices = await listMicrosoftVoices();
 
     expect(voices.length).toBeGreaterThan(100);
-    expect(voices.map((voice) => voice.id)).toContain("en-US-MichelleNeural");
+    expect(voices.some((voice) => voice.id === "en-US-MichelleNeural")).toBe(true);
   }, 60_000);
 });

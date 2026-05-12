@@ -145,11 +145,9 @@ describe("attachGatewayWsMessageHandler post-connect health refresh", () => {
       logWsControl: createLogger() as never,
     });
 
-    if (onMessage === undefined) {
-      throw new Error("expected websocket message handler");
-    }
+    expect(onMessage).toBeDefined();
 
-    onMessage(
+    onMessage?.(
       JSON.stringify({
         type: "req",
         id: "connect-1",

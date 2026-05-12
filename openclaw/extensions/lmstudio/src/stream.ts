@@ -156,14 +156,7 @@ function couldStillBePlainTextToolCall(text: string): boolean {
     return false;
   }
   const trimmed = text.trimStart();
-  return (
-    trimmed.length === 0 ||
-    trimmed.startsWith("[") ||
-    trimmed.startsWith("<|channel|>") ||
-    trimmed.startsWith("commentary") ||
-    trimmed.startsWith("analysis") ||
-    trimmed.startsWith("final")
-  );
+  return trimmed.length === 0 || trimmed.startsWith("[");
 }
 
 function createLmstudioToolCallBlock(parsed: {

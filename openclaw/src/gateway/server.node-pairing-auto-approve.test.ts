@@ -154,7 +154,7 @@ describe("gateway trusted CIDR node pairing auto-approve", () => {
       expect(pending).toHaveLength(0);
       const paired = await getPairedDevice(loaded.identity.deviceId);
       expect(paired?.role).toBe("node");
-      expect(paired?.approvedScopes ?? []).toStrictEqual([]);
+      expect(paired?.approvedScopes ?? []).toEqual([]);
     } finally {
       ws?.close();
       await started.server.close();

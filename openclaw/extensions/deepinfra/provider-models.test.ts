@@ -59,14 +59,9 @@ async function withFetchPathTest(
 describe("discoverDeepInfraModels", () => {
   it("returns static catalog in test environment", async () => {
     const models = await discoverDeepInfraModels();
-    const modelIds = models.map((m) => m.id);
-    const streamingUsageIncompatibleModelIds = models
-      .filter((m) => !m.compat?.supportsUsageInStreaming)
-      .map((m) => m.id);
-
     expect(DEEPINFRA_DEFAULT_MODEL_REF).toBe("deepinfra/deepseek-ai/DeepSeek-V3.2");
-    expect(modelIds).toContain("deepseek-ai/DeepSeek-V3.2");
-    expect(streamingUsageIncompatibleModelIds).toStrictEqual([]);
+    expect(models.some((m) => m.id === "deepseek-ai/DeepSeek-V3.2")).toBe(true);
+    expect(models.every((m) => m.compat?.supportsUsageInStreaming)).toBe(true);
   });
 
   it("fetches DeepInfra's curated LLM catalog and parses model metadata", async () => {
@@ -77,17 +72,14 @@ describe("discoverDeepInfraModels", () => {
 
     await withFetchPathTest(mockFetch, async () => {
       const models = await discoverDeepInfraModels();
-      expect(mockFetch).toHaveBeenCalledOnce();
-      const [fetchUrl, fetchInit] = mockFetch.mock.calls[0] ?? [];
-      const fetchSignal = Reflect.get(fetchInit ?? {}, "signal");
-      expect(fetchUrl).toBe(DEEPINFRA_MODELS_URL);
-      expect(fetchSignal).toBeInstanceOf(AbortSignal);
-      expect(fetchInit).toEqual({
-        headers: { Accept: "application/json" },
-        signal: fetchSignal,
-      });
+      expect(mockFetch).toHaveBeenCalledWith(
+        DEEPINFRA_MODELS_URL,
+        expect.objectContaining({
+          headers: { Accept: "application/json" },
+        }),
+      );
       expect(models).toEqual([
-        {
+        expect.objectContaining({
           id: "openai/gpt-oss-120b",
           name: "openai/gpt-oss-120b",
           reasoning: true,
@@ -95,8 +87,8 @@ describe("discoverDeepInfraModels", () => {
           contextWindow: 131072,
           maxTokens: 65536,
           cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
-          compat: { supportsUsageInStreaming: true },
-        },
+          compat: expect.objectContaining({ supportsUsageInStreaming: true }),
+        }),
       ]);
     });
   });
@@ -136,15 +128,13 @@ describe("discoverDeepInfraModels", () => {
 
     await withFetchPathTest(mockFetch, async () => {
       const [model] = await discoverDeepInfraModels();
-      expect(model).toEqual({
+      expect(model).toMatchObject({
         id: "some/model",
-        name: "some/model",
         reasoning: false,
         input: ["text"],
         contextWindow: 128000,
         maxTokens: 8192,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        compat: { supportsUsageInStreaming: true },
       });
     });
   });
@@ -154,7 +144,7 @@ describe("discoverDeepInfraModels", () => {
 
     await withFetchPathTest(mockFetch, async () => {
       const models = await discoverDeepInfraModels();
-      expect(models.map((m) => m.id)).toContain("deepseek-ai/DeepSeek-V3.2");
+      expect(models.some((m) => m.id === "deepseek-ai/DeepSeek-V3.2")).toBe(true);
     });
   });
 

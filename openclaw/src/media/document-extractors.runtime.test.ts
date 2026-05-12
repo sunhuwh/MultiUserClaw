@@ -42,7 +42,7 @@ describe("extractDocumentContent", () => {
           },
         },
       }),
-    ).resolves.toStrictEqual({ text: "pdf text", images: [], extractor: "pdf" });
+    ).resolves.toMatchObject({ text: "pdf text", extractor: "pdf" });
 
     expect(extract).toHaveBeenCalledWith({
       buffer: Buffer.from("pdf"),
@@ -65,23 +65,17 @@ describe("extractDocumentContent", () => {
       },
     ]);
 
-    let extractionError: unknown;
-    try {
-      await extractDocumentContent({
+    await expect(
+      extractDocumentContent({
         buffer: Buffer.from("pdf"),
         mimeType: "application/pdf",
         maxPages: 1,
         maxPixels: 100,
         minTextChars: 10,
-      });
-    } catch (error) {
-      extractionError = error;
-    }
-    expect(extractionError).toBeInstanceOf(Error);
-    if (!(extractionError instanceof Error)) {
-      throw new Error("expected extraction error");
-    }
-    expect(extractionError.message).toBe("Document extraction failed for application/pdf");
-    expect(extractionError.cause).toBe(cause);
+      }),
+    ).rejects.toMatchObject({
+      message: "Document extraction failed for application/pdf",
+      cause,
+    });
   });
 });

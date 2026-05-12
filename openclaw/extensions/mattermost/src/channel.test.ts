@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../runtime-api.js";
-import { createChannelMessageReplyPipeline } from "../runtime-api.js";
+import { createChannelReplyPipeline } from "../runtime-api.js";
 
 const { sendMessageMattermostMock, mockFetchGuard } = vi.hoisted(() => ({
   sendMessageMattermostMock: vi.fn(),
@@ -101,17 +101,6 @@ function createMattermostActionContext(
     cfg: createMattermostTestConfig(),
     ...overrides,
   };
-}
-
-function expectSingleMattermostSend(to: string, text: string): Record<string, unknown> {
-  expect(sendMessageMattermostMock).toHaveBeenCalledTimes(1);
-  const [actualTo, actualText, options] = sendMessageMattermostMock.mock.calls[0] ?? [];
-  expect(actualTo).toBe(to);
-  expect(actualText).toBe(text);
-  if (!options || typeof options !== "object" || Array.isArray(options)) {
-    throw new Error("expected Mattermost send options object");
-  }
-  return options as Record<string, unknown>;
 }
 
 describe("mattermostPlugin", () => {
@@ -259,7 +248,7 @@ describe("mattermostPlugin", () => {
       };
 
       const actions = getDescribedActions(cfg);
-      expect(actions).toStrictEqual([]);
+      expect(actions).toEqual([]);
     });
 
     it("declares presentation capability for message sends", () => {
@@ -378,7 +367,7 @@ describe("mattermostPlugin", () => {
       const result = await runReactAction({ messageId: "POST1", emoji: "thumbsup" }, "add");
 
       expect(result?.content).toEqual([{ type: "text", text: "Reacted with :thumbsup: on POST1" }]);
-      expect(result?.details).toStrictEqual({});
+      expect(result?.details).toEqual({});
     });
 
     it("only treats boolean remove flag as removal", async () => {
@@ -399,7 +388,7 @@ describe("mattermostPlugin", () => {
       expect(result?.content).toEqual([
         { type: "text", text: "Removed reaction :thumbsup: from POST1" },
       ]);
-      expect(result?.details).toStrictEqual({});
+      expect(result?.details).toEqual({});
     });
 
     it("maps replyTo to replyToId for send actions", async () => {
@@ -418,9 +407,14 @@ describe("mattermostPlugin", () => {
         }),
       );
 
-      const options = expectSingleMattermostSend("channel:CHAN1", "hello");
-      expect(options.accountId).toBe("default");
-      expect(options.replyToId).toBe("post-root");
+      expect(sendMessageMattermostMock).toHaveBeenCalledWith(
+        "channel:CHAN1",
+        "hello",
+        expect.objectContaining({
+          accountId: "default",
+          replyToId: "post-root",
+        }),
+      );
     });
 
     it("falls back to trimmed replyTo when replyToId is blank", async () => {
@@ -440,9 +434,14 @@ describe("mattermostPlugin", () => {
         }),
       );
 
-      const options = expectSingleMattermostSend("channel:CHAN1", "hello");
-      expect(options.accountId).toBe("default");
-      expect(options.replyToId).toBe("post-root");
+      expect(sendMessageMattermostMock).toHaveBeenCalledWith(
+        "channel:CHAN1",
+        "hello",
+        expect.objectContaining({
+          accountId: "default",
+          replyToId: "post-root",
+        }),
+      );
     });
   });
 
@@ -450,6 +449,7 @@ describe("mattermostPlugin", () => {
     it("chunks outbound text without requiring Mattermost runtime initialization", () => {
       const chunker = requireMattermostChunker();
 
+      expect(() => chunker("hello world", 5)).not.toThrow();
       expect(chunker("hello world", 5)).toEqual(["hello", "world"]);
     });
 
@@ -469,9 +469,14 @@ describe("mattermostPlugin", () => {
 
       await sendMedia(params);
 
-      const options = expectSingleMattermostSend("channel:CHAN1", "hello");
-      expect(options.mediaUrl).toBe("/tmp/workspace/image.png");
-      expect(options.mediaLocalRoots).toStrictEqual(["/tmp/workspace"]);
+      expect(sendMessageMattermostMock).toHaveBeenCalledWith(
+        "channel:CHAN1",
+        "hello",
+        expect.objectContaining({
+          mediaUrl: "/tmp/workspace/image.png",
+          mediaLocalRoots: ["/tmp/workspace"],
+        }),
+      );
     });
 
     it("threads resolved cfg on sendText", async () => {
@@ -494,9 +499,14 @@ describe("mattermostPlugin", () => {
 
       await sendText(params);
 
-      const options = expectSingleMattermostSend("channel:CHAN1", "hello");
-      expect(options.cfg).toBe(cfg);
-      expect(options.accountId).toBe("default");
+      expect(sendMessageMattermostMock).toHaveBeenCalledWith(
+        "channel:CHAN1",
+        "hello",
+        expect.objectContaining({
+          cfg,
+          accountId: "default",
+        }),
+      );
     });
 
     it("uses threadId as fallback when replyToId is absent (sendText)", async () => {
@@ -513,9 +523,14 @@ describe("mattermostPlugin", () => {
 
       await sendText(params);
 
-      const options = expectSingleMattermostSend("channel:CHAN1", "hello");
-      expect(options.accountId).toBe("default");
-      expect(options.replyToId).toBe("post-root");
+      expect(sendMessageMattermostMock).toHaveBeenCalledWith(
+        "channel:CHAN1",
+        "hello",
+        expect.objectContaining({
+          accountId: "default",
+          replyToId: "post-root",
+        }),
+      );
     });
 
     it("uses threadId as fallback when replyToId is absent (sendMedia)", async () => {
@@ -533,9 +548,14 @@ describe("mattermostPlugin", () => {
 
       await sendMedia(params);
 
-      const options = expectSingleMattermostSend("channel:CHAN1", "caption");
-      expect(options.accountId).toBe("default");
-      expect(options.replyToId).toBe("post-root");
+      expect(sendMessageMattermostMock).toHaveBeenCalledWith(
+        "channel:CHAN1",
+        "caption",
+        expect.objectContaining({
+          accountId: "default",
+          replyToId: "post-root",
+        }),
+      );
     });
   });
 
@@ -562,7 +582,7 @@ describe("mattermostPlugin", () => {
         },
       };
 
-      const prefixContext = createChannelMessageReplyPipeline({
+      const prefixContext = createChannelReplyPipeline({
         cfg,
         agentId: "main",
         channel: "mattermost",

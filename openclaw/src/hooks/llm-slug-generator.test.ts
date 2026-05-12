@@ -22,14 +22,6 @@ vi.mock("../agents/pi-embedded.js", () => ({
 
 import { generateSlugViaLLM } from "./llm-slug-generator.js";
 
-function requireFirstRunOptions(): Record<string, unknown> {
-  const options = runEmbeddedPiAgentMock.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
-  if (!options) {
-    throw new Error("expected embedded Pi agent run options");
-  }
-  return options;
-}
-
 describe("generateSlugViaLLM", () => {
   beforeEach(() => {
     runEmbeddedPiAgentMock.mockReset();
@@ -45,9 +37,12 @@ describe("generateSlugViaLLM", () => {
     });
 
     expect(runEmbeddedPiAgentMock).toHaveBeenCalledOnce();
-    const options = requireFirstRunOptions();
-    expect(options.timeoutMs).toBe(15_000);
-    expect(options.cleanupBundleMcpOnRunEnd).toBe(true);
+    expect(runEmbeddedPiAgentMock.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        timeoutMs: 15_000,
+        cleanupBundleMcpOnRunEnd: true,
+      }),
+    );
   });
 
   it("honors configured agent timeoutSeconds for slow local providers", async () => {
@@ -63,7 +58,11 @@ describe("generateSlugViaLLM", () => {
     });
 
     expect(runEmbeddedPiAgentMock).toHaveBeenCalledOnce();
-    expect(requireFirstRunOptions().timeoutMs).toBe(500_000);
+    expect(runEmbeddedPiAgentMock.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        timeoutMs: 500_000,
+      }),
+    );
   });
 
   it("infers provider metadata for bare configured agent models", async () => {
@@ -97,8 +96,11 @@ describe("generateSlugViaLLM", () => {
     });
 
     expect(runEmbeddedPiAgentMock).toHaveBeenCalledOnce();
-    const options = requireFirstRunOptions();
-    expect(options.provider).toBe("openai-codex");
-    expect(options.model).toBe("gpt-5.5");
+    expect(runEmbeddedPiAgentMock.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        provider: "openai-codex",
+        model: "gpt-5.5",
+      }),
+    );
   });
 });

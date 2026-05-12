@@ -1,5 +1,4 @@
 export { explainShellCommand } from "./extract.js";
-export { formatCommandSpans } from "./format.js";
 export type {
   CommandContext,
   CommandExplanation,

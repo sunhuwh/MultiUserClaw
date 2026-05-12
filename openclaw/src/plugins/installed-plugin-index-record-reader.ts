@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { PluginInstallRecord } from "../config/types.plugins.js";
-import { tryReadJson, tryReadJsonSync } from "../infra/json-files.js";
+import { readJsonFile, readJsonFileSync } from "../infra/json-files.js";
 import { resolveDefaultPluginNpmDir, validatePluginId } from "./install-paths.js";
 import {
   resolveInstalledPluginIndexStorePath,
@@ -34,8 +34,12 @@ function readRecordMap(value: unknown): Record<string, PluginInstallRecord> | nu
 }
 
 function readJsonObjectFileSync(filePath: string): Record<string, unknown> | null {
-  const parsed = tryReadJsonSync(filePath);
-  return isRecord(parsed) ? parsed : null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as unknown;
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function readStringRecord(value: unknown): Record<string, string> {
@@ -159,14 +163,14 @@ function extractPluginInstallRecordsFromPersistedInstalledPluginIndex(
 export async function readPersistedInstalledPluginIndexInstallRecords(
   options: InstalledPluginIndexStoreOptions = {},
 ): Promise<Record<string, PluginInstallRecord> | null> {
-  const parsed = await tryReadJson<unknown>(resolveInstalledPluginIndexStorePath(options));
+  const parsed = await readJsonFile<unknown>(resolveInstalledPluginIndexStorePath(options));
   return extractPluginInstallRecordsFromPersistedInstalledPluginIndex(parsed);
 }
 
 export function readPersistedInstalledPluginIndexInstallRecordsSync(
   options: InstalledPluginIndexStoreOptions = {},
 ): Record<string, PluginInstallRecord> | null {
-  const parsed = tryReadJsonSync(resolveInstalledPluginIndexStorePath(options));
+  const parsed = readJsonFileSync(resolveInstalledPluginIndexStorePath(options));
   return extractPluginInstallRecordsFromPersistedInstalledPluginIndex(parsed);
 }
 

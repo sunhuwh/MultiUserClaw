@@ -7,7 +7,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { appendRegularFileSync, replaceFileAtomicSync } from "openclaw/plugin-sdk/security-runtime";
 import { formatErrorMessage } from "../utils/format.js";
 import { debugLog, debugError } from "../utils/log.js";
 import { getQQBotDataDir, getQQBotDataPath } from "../utils/platform.js";
@@ -89,7 +88,7 @@ function ensureDir(): void {
 function appendLine(line: RefIndexLine): void {
   try {
     ensureDir();
-    appendRegularFileSync({ filePath: getRefIndexFile(), content: JSON.stringify(line) + "\n" });
+    fs.appendFileSync(getRefIndexFile(), JSON.stringify(line) + "\n", "utf-8");
     totalLinesOnDisk++;
   } catch (err) {
     debugError(`[ref-index-store] Failed to append: ${formatErrorMessage(err)}`);
@@ -110,6 +109,7 @@ function compactFile(): void {
   try {
     ensureDir();
     const refIndexFile = getRefIndexFile();
+    const tmpPath = refIndexFile + ".tmp";
     const lines: string[] = [];
     for (const [key, entry] of cache) {
       lines.push(
@@ -127,11 +127,8 @@ function compactFile(): void {
         }),
       );
     }
-    replaceFileAtomicSync({
-      filePath: refIndexFile,
-      content: `${lines.join("\n")}\n`,
-      tempPrefix: ".qqbot-ref-index",
-    });
+    fs.writeFileSync(tmpPath, lines.join("\n") + "\n", "utf-8");
+    fs.renameSync(tmpPath, refIndexFile);
     totalLinesOnDisk = cache.size;
     debugLog(`[ref-index-store] Compacted: ${before} lines → ${totalLinesOnDisk} lines`);
   } catch (err) {

@@ -49,9 +49,7 @@ describe("memory-wiki cli metadata entry", () => {
     const register = registerCli.mock.calls[0]?.[0];
 
     expect(registerCli).toHaveBeenCalledTimes(1);
-    if (!register) {
-      throw new Error("expected memory-wiki CLI registrar to be registered");
-    }
+    expect(typeof register).toBe("function");
 
     await register({
       program,

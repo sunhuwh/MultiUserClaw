@@ -1,4 +1,3 @@
-import { escapeRegExp } from "openclaw/plugin-sdk/text-utility-runtime";
 import { QA_PROVIDER_SECRET_ENV_VARS } from "./providers/env.js";
 
 const QA_GATEWAY_DEBUG_SECRET_ENV_VARS = Object.freeze([
@@ -15,7 +14,7 @@ const QA_GATEWAY_DEBUG_SECRET_VALUE_KEYS = Object.freeze([
 export function redactQaGatewayDebugText(text: string) {
   let redacted = text;
   for (const envVar of QA_GATEWAY_DEBUG_SECRET_ENV_VARS) {
-    const escapedEnvVar = escapeRegExp(envVar);
+    const escapedEnvVar = envVar.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
     redacted = redacted.replace(
       new RegExp(`\\b(${escapedEnvVar})(\\s*[=:]\\s*)([^\\s"';,]+|"[^"]*"|'[^']*')`, "g"),
       `$1$2<redacted>`,
@@ -26,7 +25,7 @@ export function redactQaGatewayDebugText(text: string) {
     );
   }
   for (const key of QA_GATEWAY_DEBUG_SECRET_VALUE_KEYS) {
-    const escapedKey = escapeRegExp(key);
+    const escapedKey = key.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
     redacted = redacted.replace(
       new RegExp(`\\b(${escapedKey})(\\s*[=:]\\s*)([^\\s"';,]+|"[^"]*"|'[^']*')`, "gi"),
       `$1$2<redacted>`,

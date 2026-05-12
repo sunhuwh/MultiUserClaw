@@ -8,7 +8,6 @@ export type ModelCatalogEntry = {
   provider: string;
   alias?: string;
   contextWindow?: number;
-  contextTokens?: number;
   reasoning?: boolean;
   input?: ModelInputType[];
   compat?: ModelCompatConfig;

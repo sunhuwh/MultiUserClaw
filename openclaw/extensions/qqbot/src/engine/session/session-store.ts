@@ -7,7 +7,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { privateFileStoreSync } from "openclaw/plugin-sdk/security-runtime";
 import { formatErrorMessage } from "../utils/format.js";
 import { debugLog, debugError } from "../utils/log.js";
 import { getQQBotDataDir, getQQBotDataPath } from "../utils/platform.js";
@@ -67,20 +66,18 @@ function getCandidateSessionPaths(accountId: string): string[] {
 export function loadSession(accountId: string, expectedAppId?: string): SessionState | null {
   try {
     let filePath: string | null = null;
-    let state: SessionState | null = null;
     for (const candidatePath of getCandidateSessionPaths(accountId)) {
-      state = privateFileStoreSync(path.dirname(candidatePath)).readJsonIfExists<SessionState>(
-        path.basename(candidatePath),
-      );
-      if (state) {
+      if (fs.existsSync(candidatePath)) {
         filePath = candidatePath;
         break;
       }
     }
-    if (!filePath || !state) {
+    if (!filePath) {
       return null;
     }
 
+    const data = fs.readFileSync(filePath, "utf-8");
+    const state = JSON.parse(data) as SessionState;
     const now = Date.now();
 
     if (now - state.savedAt > SESSION_EXPIRE_TIME) {
@@ -165,7 +162,7 @@ function doSaveSession(state: SessionState): void {
   try {
     ensureDir();
     const stateToSave: SessionState = { ...state, savedAt: Date.now() };
-    privateFileStoreSync(path.dirname(filePath)).writeJson(path.basename(filePath), stateToSave);
+    fs.writeFileSync(filePath, JSON.stringify(stateToSave, null, 2), "utf-8");
     if (legacyPath !== filePath && fs.existsSync(legacyPath)) {
       fs.unlinkSync(legacyPath);
     }

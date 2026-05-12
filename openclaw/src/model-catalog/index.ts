@@ -25,8 +25,5 @@ export type {
   ModelCatalogSuppression,
   ModelCatalogTieredCost,
   NormalizedModelCatalogRow,
-  UnifiedModelCatalogEntry,
-  UnifiedModelCatalogKind,
-  UnifiedModelCatalogSource,
 } from "./types.js";
 export type { OpenClawProviderIndexProvider } from "./provider-index/index.js";

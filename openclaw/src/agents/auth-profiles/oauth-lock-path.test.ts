@@ -5,16 +5,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { captureEnv } from "../../test-utils/env.js";
 import { resolveOAuthRefreshLockPath } from "./paths.js";
 
-async function expectPathMissing(targetPath: string): Promise<void> {
-  try {
-    await fs.stat(targetPath);
-  } catch (error) {
-    expect((error as NodeJS.ErrnoException).code).toBe("ENOENT");
-    return;
-  }
-  throw new Error(`Expected missing path: ${targetPath}`);
-}
-
 describe("resolveOAuthRefreshLockPath", () => {
   const envSnapshot = captureEnv(["OPENCLAW_STATE_DIR"]);
   let stateDir = "";
@@ -90,13 +80,13 @@ describe("resolveOAuthRefreshLockPath", () => {
     // fail loudly.
     const locksDir = path.join(stateDir, "locks", "oauth-refresh");
     // Sanity precondition: parent dir must not exist yet.
-    await expectPathMissing(locksDir);
+    await expect(fs.stat(locksDir)).rejects.toThrow();
 
     const resolved = resolveOAuthRefreshLockPath("openai-codex", "openai-codex:default");
     expect(path.dirname(resolved)).toBe(locksDir);
     expect(path.basename(resolved)).toMatch(/^sha256-[0-9a-f]{64}$/);
     // Function itself must not create the directory (path resolver only).
-    await expectPathMissing(locksDir);
+    await expect(fs.stat(locksDir)).rejects.toThrow();
   });
 
   it("never embeds path separators or .. in the basename", () => {

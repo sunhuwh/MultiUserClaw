@@ -24,16 +24,14 @@ describe("AgentRuntimePlan tool diagnostics legacy fallback", () => {
       workspaceDir: "/tmp/openclaw-runtime-plan-tools",
     });
 
-    expect(mocks.logProviderToolSchemaDiagnostics).toHaveBeenCalledTimes(1);
-    expect(mocks.logProviderToolSchemaDiagnostics.mock.calls[0]?.[0]).toEqual({
-      tools,
-      provider: "openai",
-      config: undefined,
-      workspaceDir: "/tmp/openclaw-runtime-plan-tools",
-      env: process.env,
-      modelId: "gpt-5.4",
-      modelApi: "openai-responses",
-      model: undefined,
-    });
+    expect(mocks.logProviderToolSchemaDiagnostics).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tools,
+        provider: "openai",
+        modelId: "gpt-5.4",
+        modelApi: "openai-responses",
+        workspaceDir: "/tmp/openclaw-runtime-plan-tools",
+      }),
+    );
   });
 });

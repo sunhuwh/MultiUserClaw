@@ -85,10 +85,6 @@
             "command": {
               "type": "string",
               "minLength": 1
-            },
-            "args": {
-              "type": "array",
-              "items": { "type": "string" }
             }
           },
           "required": ["command"]

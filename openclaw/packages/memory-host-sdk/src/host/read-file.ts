@@ -6,13 +6,7 @@ import {
   resolveMemorySearchConfig,
   type OpenClawConfig,
 } from "./config-utils.js";
-import {
-  isFileMissingError,
-  isPathInside,
-  readRegularFile,
-  root,
-  statRegularFile,
-} from "./fs-utils.js";
+import { isFileMissingError, statRegularFile } from "./fs-utils.js";
 import { isMemoryPath, normalizeExtraMemoryPaths } from "./internal.js";
 import {
   buildMemoryReadResult,
@@ -49,11 +43,7 @@ export async function readMemoryFile(params: {
           continue;
         }
         if (stat.isDirectory()) {
-          if (isPathInside(additionalPath, absPath)) {
-            const candidateStat = await fs.lstat(absPath).catch(() => null);
-            if (candidateStat?.isSymbolicLink()) {
-              continue;
-            }
+          if (absPath === additionalPath || absPath.startsWith(`${additionalPath}${path.sep}`)) {
             allowedAdditional = true;
             break;
           }
@@ -72,24 +62,13 @@ export async function readMemoryFile(params: {
   if (!absPath.endsWith(".md")) {
     throw new Error("path required");
   }
-  if (allowedWorkspace) {
-    try {
-      const workspaceRoot = await root(params.workspaceDir);
-      await workspaceRoot.resolve(relPath);
-    } catch (err) {
-      if (isFileMissingError(err)) {
-        return { text: "", path: relPath };
-      }
-      throw err;
-    }
-  }
   const statResult = await statRegularFile(absPath);
   if (statResult.missing) {
     return { text: "", path: relPath };
   }
   let content: string;
   try {
-    content = (await readRegularFile({ filePath: absPath })).buffer.toString("utf-8");
+    content = await fs.readFile(absPath, "utf-8");
   } catch (err) {
     if (isFileMissingError(err)) {
       return { text: "", path: relPath };

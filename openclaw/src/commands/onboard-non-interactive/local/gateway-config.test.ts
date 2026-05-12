@@ -186,10 +186,7 @@ describe("applyNonInteractiveGatewayConfig token resolution chain", () => {
       });
 
       const newToken = result?.nextConfig.gateway?.auth?.token;
-      expect(typeof newToken).toBe("object");
-      const newTokenRef = typeof newToken === "object" && newToken !== null ? newToken : undefined;
-      expect(newTokenRef?.source).toBe("env");
-      expect(newTokenRef?.id).toBe(newRefId);
+      expect(newToken).toMatchObject({ source: "env", id: newRefId });
       expect(newToken).not.toEqual(SAMPLE_SECRET_REF);
       expect(randomToken).not.toHaveBeenCalled();
     } finally {
@@ -207,7 +204,7 @@ describe("applyNonInteractiveGatewayConfig token resolution chain", () => {
 
     expect(result).toBeNull();
     expect(runtime.error).toHaveBeenCalledWith(
-      'Environment variable "MISSING_GATEWAY_TOKEN_ENV" is missing or empty. Export it first, then rerun openclaw onboard --non-interactive.',
+      'Environment variable "MISSING_GATEWAY_TOKEN_ENV" is missing or empty.',
     );
     expect(runtime.exit).toHaveBeenCalledWith(1);
     expect(randomToken).not.toHaveBeenCalled();

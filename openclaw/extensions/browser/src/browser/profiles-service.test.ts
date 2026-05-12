@@ -66,12 +66,6 @@ async function createWorkProfileWithConfig(params: {
   return { result, state };
 }
 
-function writtenBrowserConfig(): Record<string, unknown> {
-  const cfg = writeConfigFile.mock.calls[0]?.[0] as { browser?: Record<string, unknown> };
-  expect(cfg?.browser).toBeDefined();
-  return cfg.browser ?? {};
-}
-
 describe("BrowserProfilesService", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -141,8 +135,17 @@ describe("BrowserProfilesService", () => {
     expect(result.cdpUrl).toBe("http://10.0.0.42:9222");
     expect(result.cdpPort).toBe(9222);
     expect(result.isRemote).toBe(true);
-    const profiles = writtenBrowserConfig().profiles as Record<string, { cdpUrl?: string }>;
-    expect(profiles.remote?.cdpUrl).toBe("http://10.0.0.42:9222");
+    expect(writeConfigFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        browser: expect.objectContaining({
+          profiles: expect.objectContaining({
+            remote: expect.objectContaining({
+              cdpUrl: "http://10.0.0.42:9222",
+            }),
+          }),
+        }),
+      }),
+    );
   });
 
   it("rejects private-network cdpUrl when strict SSRF mode is enabled", async () => {
@@ -185,16 +188,23 @@ describe("BrowserProfilesService", () => {
     expect(result.cdpUrl).toBeNull();
     expect(result.userDataDir).toBeNull();
     expect(result.isRemote).toBe(false);
-    const resolvedProfile = state.resolved.profiles["chrome-live"];
-    expect(resolvedProfile?.driver).toBe("existing-session");
-    expect(resolvedProfile?.attachOnly).toBe(true);
-    expect(typeof resolvedProfile?.color).toBe("string");
-    const profiles = writtenBrowserConfig().profiles as Record<
-      string,
-      { attachOnly?: boolean; driver?: string }
-    >;
-    expect(profiles["chrome-live"]?.driver).toBe("existing-session");
-    expect(profiles["chrome-live"]?.attachOnly).toBe(true);
+    expect(state.resolved.profiles["chrome-live"]).toEqual({
+      driver: "existing-session",
+      attachOnly: true,
+      color: expect.any(String),
+    });
+    expect(writeConfigFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        browser: expect.objectContaining({
+          profiles: expect.objectContaining({
+            "chrome-live": expect.objectContaining({
+              driver: "existing-session",
+              attachOnly: true,
+            }),
+          }),
+        }),
+      }),
+    );
   });
 
   it("rejects driver=existing-session when cdpUrl is provided", async () => {
@@ -231,11 +241,12 @@ describe("BrowserProfilesService", () => {
 
     expect(result.transport).toBe("chrome-mcp");
     expect(result.userDataDir).toBe(userDataDir);
-    const resolvedProfile = state.resolved.profiles["brave-live"];
-    expect(resolvedProfile?.driver).toBe("existing-session");
-    expect(resolvedProfile?.attachOnly).toBe(true);
-    expect(resolvedProfile?.userDataDir).toBe(userDataDir);
-    expect(typeof resolvedProfile?.color).toBe("string");
+    expect(state.resolved.profiles["brave-live"]).toEqual({
+      driver: "existing-session",
+      attachOnly: true,
+      userDataDir,
+      color: expect.any(String),
+    });
   });
 
   it("rejects userDataDir for non-existing-session profiles", async () => {

@@ -32,7 +32,7 @@ function resolveElevenLabsAcceptHeader(outputFormat: string): string | undefined
   return undefined;
 }
 
-type ElevenLabsTtsRequestParams = {
+export async function elevenLabsTTS(params: {
   text: string;
   apiKey: string;
   baseUrl: string;
@@ -51,16 +51,10 @@ type ElevenLabsTtsRequestParams = {
     speed: number;
   };
   timeoutMs: number;
-};
-
-function prepareElevenLabsTtsRequest(params: ElevenLabsTtsRequestParams & { stream: boolean }): {
-  url: URL;
-  normalizedBaseUrl: string;
-  acceptHeader?: string;
-  body: string;
-} {
+}): Promise<Buffer> {
   const {
     text,
+    apiKey,
     baseUrl,
     voiceId,
     modelId,
@@ -70,6 +64,7 @@ function prepareElevenLabsTtsRequest(params: ElevenLabsTtsRequestParams & { stre
     languageCode,
     latencyTier,
     voiceSettings,
+    timeoutMs,
   } = params;
   if (!isValidElevenLabsVoiceId(voiceId)) {
     throw new Error("Invalid voiceId format");
@@ -79,51 +74,11 @@ function prepareElevenLabsTtsRequest(params: ElevenLabsTtsRequestParams & { stre
   const normalizedNormalization = normalizeApplyTextNormalization(applyTextNormalization);
   const normalizedSeed = normalizeSeed(seed);
   const normalizedBaseUrl = normalizeElevenLabsBaseUrl(baseUrl);
-  const normalizedLatencyTier =
-    typeof latencyTier === "number" && Number.isFinite(latencyTier)
-      ? Math.trunc(latencyTier)
-      : undefined;
-  if (normalizedLatencyTier !== undefined) {
-    requireInRange(normalizedLatencyTier, 0, 4, "latencyTier");
-  }
-  const url = new URL(
-    `${normalizedBaseUrl}/v1/text-to-speech/${voiceId}${params.stream ? "/stream" : ""}`,
-  );
+  const url = new URL(`${normalizedBaseUrl}/v1/text-to-speech/${voiceId}`);
   if (outputFormat) {
     url.searchParams.set("output_format", outputFormat);
   }
-  const supportsStreamingLatency = modelId.trim().toLowerCase() !== "eleven_v3";
-  if (normalizedLatencyTier !== undefined && supportsStreamingLatency) {
-    url.searchParams.set("optimize_streaming_latency", normalizedLatencyTier.toString());
-  }
   const acceptHeader = resolveElevenLabsAcceptHeader(outputFormat);
-  return {
-    url,
-    normalizedBaseUrl,
-    acceptHeader,
-    body: JSON.stringify({
-      text,
-      model_id: modelId,
-      seed: normalizedSeed,
-      apply_text_normalization: normalizedNormalization,
-      language_code: normalizedLanguage,
-      voice_settings: {
-        stability: voiceSettings.stability,
-        similarity_boost: voiceSettings.similarityBoost,
-        style: voiceSettings.style,
-        use_speaker_boost: voiceSettings.useSpeakerBoost,
-        speed: voiceSettings.speed,
-      },
-    }),
-  };
-}
-
-export async function elevenLabsTTS(params: ElevenLabsTtsRequestParams): Promise<Buffer> {
-  const { apiKey, timeoutMs } = params;
-  const { url, normalizedBaseUrl, acceptHeader, body } = prepareElevenLabsTtsRequest({
-    ...params,
-    stream: false,
-  });
 
   const { response, release } = await fetchWithSsrFGuard({
     url: url.toString(),
@@ -134,7 +89,21 @@ export async function elevenLabsTTS(params: ElevenLabsTtsRequestParams): Promise
         "Content-Type": "application/json",
         ...(acceptHeader ? { Accept: acceptHeader } : {}),
       },
-      body,
+      body: JSON.stringify({
+        text,
+        model_id: modelId,
+        seed: normalizedSeed,
+        apply_text_normalization: normalizedNormalization,
+        language_code: normalizedLanguage,
+        latency_optimization_level: latencyTier,
+        voice_settings: {
+          stability: voiceSettings.stability,
+          similarity_boost: voiceSettings.similarityBoost,
+          style: voiceSettings.style,
+          use_speaker_boost: voiceSettings.useSpeakerBoost,
+          speed: voiceSettings.speed,
+        },
+      }),
     },
     timeoutMs,
     policy: ssrfPolicyFromHttpBaseUrlAllowedHostname(normalizedBaseUrl),
@@ -146,48 +115,5 @@ export async function elevenLabsTTS(params: ElevenLabsTtsRequestParams): Promise
     return Buffer.from(await response.arrayBuffer());
   } finally {
     await release();
-  }
-}
-
-export async function elevenLabsTTSStream(params: ElevenLabsTtsRequestParams): Promise<{
-  audioStream: ReadableStream<Uint8Array>;
-  release: () => Promise<void>;
-}> {
-  const { apiKey, timeoutMs } = params;
-  const { url, normalizedBaseUrl, acceptHeader, body } = prepareElevenLabsTtsRequest({
-    ...params,
-    stream: true,
-  });
-
-  const { response, release } = await fetchWithSsrFGuard({
-    url: url.toString(),
-    init: {
-      method: "POST",
-      headers: {
-        "xi-api-key": apiKey,
-        "Content-Type": "application/json",
-        ...(acceptHeader ? { Accept: acceptHeader } : {}),
-      },
-      body,
-    },
-    timeoutMs,
-    policy: ssrfPolicyFromHttpBaseUrlAllowedHostname(normalizedBaseUrl),
-    auditContext: "elevenlabs.tts.stream",
-  });
-  let handedOff = false;
-  try {
-    await assertOkOrThrowProviderError(response, "ElevenLabs API error");
-    if (!response.body) {
-      throw new Error("ElevenLabs API response missing audio stream");
-    }
-    handedOff = true;
-    return {
-      audioStream: response.body,
-      release,
-    };
-  } finally {
-    if (!handedOff) {
-      await release();
-    }
   }
 }

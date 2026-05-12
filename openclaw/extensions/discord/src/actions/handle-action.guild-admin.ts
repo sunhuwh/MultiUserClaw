@@ -5,7 +5,7 @@ import {
   readStringParam,
 } from "openclaw/plugin-sdk/agent-runtime";
 import type { ChannelMessageActionContext } from "openclaw/plugin-sdk/channel-contract";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import { handleDiscordAction } from "../../action-runtime-api.js";
 import {
   isDiscordModerationAction,
@@ -19,13 +19,7 @@ import {
 
 type Ctx = Pick<
   ChannelMessageActionContext,
-  | "action"
-  | "params"
-  | "cfg"
-  | "accountId"
-  | "requesterSenderId"
-  | "mediaLocalRoots"
-  | "mediaReadFile"
+  "action" | "params" | "cfg" | "accountId" | "requesterSenderId" | "mediaLocalRoots"
 >;
 
 export async function tryHandleDiscordMessageActionGuildAdmin(params: {
@@ -371,10 +365,7 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
     const content = readStringParam(actionParams, "message", {
       required: true,
     });
-    const mediaUrl =
-      readStringParam(actionParams, "media", { trim: false }) ??
-      readStringParam(actionParams, "path", { trim: false }) ??
-      readStringParam(actionParams, "filePath", { trim: false });
+    const mediaUrl = readStringParam(actionParams, "media", { trim: false });
     const replyTo = readStringParam(actionParams, "replyTo");
 
     // `message.thread-reply` (tool) uses `threadId`, while the CLI historically used `to`/`channelId`.
@@ -392,7 +383,6 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
         replyTo: replyTo ?? undefined,
       },
       cfg,
-      { mediaLocalRoots: ctx.mediaLocalRoots, mediaReadFile: ctx.mediaReadFile },
     );
   }
 

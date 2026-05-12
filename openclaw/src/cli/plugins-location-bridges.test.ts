@@ -181,6 +181,6 @@ describe("listPersistedBundledPluginLocationBridges", () => {
     );
     loadPluginManifestRegistryForInstalledIndexMock.mockReturnValue(makeRegistry("local-only"));
 
-    await expect(listPersistedBundledPluginLocationBridges({})).resolves.toStrictEqual([]);
+    await expect(listPersistedBundledPluginLocationBridges({})).resolves.toEqual([]);
   });
 });

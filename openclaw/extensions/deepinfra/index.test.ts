@@ -11,7 +11,7 @@ describe("deepinfra augmentModelCatalog", () => {
 
     const entries = await provider.augmentModelCatalog?.({} as never);
 
-    expect(entries).toStrictEqual([]);
+    expect(entries).toEqual([]);
   });
 
   it("returns configured catalog entries from config", async () => {

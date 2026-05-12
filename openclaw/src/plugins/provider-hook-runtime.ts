@@ -22,9 +22,8 @@ import type {
 } from "./types.js";
 
 const providerRuntimePluginCache: ConfigScopedRuntimeCache<ProviderPlugin | null> = new WeakMap();
-const PREPARED_PROVIDER_RUNTIME_SURFACES = ["channel"] as const;
 
-export type ProviderRuntimePluginLookupParams = {
+type ProviderRuntimePluginLookupParams = {
   provider: string;
   config?: OpenClawConfig;
   workspaceDir?: string;
@@ -32,14 +31,6 @@ export type ProviderRuntimePluginLookupParams = {
   applyAutoEnable?: boolean;
   bundledProviderAllowlistCompat?: boolean;
   bundledProviderVitestCompat?: boolean;
-};
-
-export type ProviderRuntimePluginHandle = ProviderRuntimePluginLookupParams & {
-  plugin?: ProviderPlugin;
-};
-
-export type ProviderRuntimePluginHandleParams = ProviderRuntimePluginLookupParams & {
-  runtimeHandle?: ProviderRuntimePluginHandle;
 };
 
 function matchesProviderId(provider: ProviderPlugin, providerId: string): boolean {
@@ -77,42 +68,13 @@ function matchesProviderLiteralId(provider: ProviderPlugin, providerId: string):
   return !!normalized && normalizeLowercaseStringOrEmpty(provider.id) === normalized;
 }
 
-function findProviderRuntimePluginInLoadedRegistries(params: {
-  lookup: ProviderRuntimePluginLookupParams;
-  apiOwnerHint?: string;
-}): ProviderPlugin | undefined {
-  const activeRegistry = getLoadedRuntimePluginRegistry({
-    env: params.lookup.env,
-    workspaceDir: params.lookup.workspaceDir,
+function resolveCompatibleActiveProviderRegistry(
+  params: ProviderRuntimePluginLookupParams,
+): PluginRegistry | undefined {
+  return getLoadedRuntimePluginRegistry({
+    env: params.env,
+    workspaceDir: params.workspaceDir,
   });
-  const activePlugin = activeRegistry
-    ? findProviderRuntimePluginInRegistry({
-        registry: activeRegistry,
-        provider: params.lookup.provider,
-        apiOwnerHint: params.apiOwnerHint,
-      })
-    : undefined;
-  if (activePlugin) {
-    return activePlugin;
-  }
-  for (const surface of PREPARED_PROVIDER_RUNTIME_SURFACES) {
-    const registry = getLoadedRuntimePluginRegistry({
-      env: params.lookup.env,
-      workspaceDir: params.lookup.workspaceDir,
-      surface,
-    });
-    const plugin = registry
-      ? findProviderRuntimePluginInRegistry({
-          registry,
-          provider: params.lookup.provider,
-          apiOwnerHint: params.apiOwnerHint,
-        })
-      : undefined;
-    if (plugin) {
-      return plugin;
-    }
-  }
-  return undefined;
 }
 
 function findProviderRuntimePluginInRegistry(params: {
@@ -138,7 +100,7 @@ export function resolveProviderPluginsForHooks(params: {
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
   onlyPluginIds?: string[];
-  providerRefs?: readonly string[];
+  providerRefs?: string[];
   applyAutoEnable?: boolean;
   bundledProviderAllowlistCompat?: boolean;
   bundledProviderVitestCompat?: boolean;
@@ -177,12 +139,16 @@ export function resolveProviderRuntimePlugin(
     provider: params.provider,
     config: params.config,
   });
-  const loadedPlugin = findProviderRuntimePluginInLoadedRegistries({
-    lookup: params,
-    apiOwnerHint,
-  });
-  if (loadedPlugin) {
-    return loadedPlugin;
+  const activeRegistry = resolveCompatibleActiveProviderRegistry(params);
+  const activePlugin = activeRegistry
+    ? findProviderRuntimePluginInRegistry({
+        registry: activeRegistry,
+        provider: params.provider,
+        apiOwnerHint,
+      })
+    : undefined;
+  if (activePlugin) {
+    return activePlugin;
   }
   const cacheConfig = params.env && params.env !== process.env ? undefined : params.config;
   const plugin = resolveConfigScopedRuntimeCacheValue({
@@ -230,43 +196,14 @@ export function resolveProviderHookPlugin(params: {
   );
 }
 
-export function resolveProviderRuntimePluginHandle(
-  params: ProviderRuntimePluginLookupParams,
-): ProviderRuntimePluginHandle {
-  const workspaceDir = params.workspaceDir ?? getActivePluginRegistryWorkspaceDirFromState();
-  const env = params.env;
-  const runtimePlugin = resolveProviderRuntimePlugin({
-    ...params,
-    workspaceDir,
-    env,
-  });
-
-  return {
-    ...params,
-    workspaceDir,
-    env,
-    plugin: runtimePlugin,
-  };
-}
-
-export function ensureProviderRuntimePluginHandle(
-  params: ProviderRuntimePluginHandleParams,
-): ProviderRuntimePluginHandle {
-  return params.runtimeHandle ?? resolveProviderRuntimePluginHandle(params);
-}
-
 export function prepareProviderExtraParams(params: {
   provider: string;
   config?: OpenClawConfig;
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
-  runtimeHandle?: ProviderRuntimePluginHandle;
   context: ProviderPrepareExtraParamsContext;
 }) {
-  return (
-    ensureProviderRuntimePluginHandle(params).plugin?.prepareExtraParams?.(params.context) ??
-    undefined
-  );
+  return resolveProviderRuntimePlugin(params)?.prepareExtraParams?.(params.context) ?? undefined;
 }
 
 export function resolveProviderExtraParamsForTransport(params: {
@@ -274,12 +211,10 @@ export function resolveProviderExtraParamsForTransport(params: {
   config?: OpenClawConfig;
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
-  runtimeHandle?: ProviderRuntimePluginHandle;
   context: ProviderExtraParamsForTransportContext;
 }) {
   return (
-    ensureProviderRuntimePluginHandle(params).plugin?.extraParamsForTransport?.(params.context) ??
-    undefined
+    resolveProviderRuntimePlugin(params)?.extraParamsForTransport?.(params.context) ?? undefined
   );
 }
 
@@ -288,12 +223,9 @@ export function resolveProviderAuthProfileId(params: {
   config?: OpenClawConfig;
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
-  runtimeHandle?: ProviderRuntimePluginHandle;
   context: ProviderResolveAuthProfileIdContext;
 }): string | undefined {
-  const resolved = ensureProviderRuntimePluginHandle(params).plugin?.resolveAuthProfileId?.(
-    params.context,
-  );
+  const resolved = resolveProviderRuntimePlugin(params)?.resolveAuthProfileId?.(params.context);
   return typeof resolved === "string" && resolved.trim() ? resolved.trim() : undefined;
 }
 
@@ -302,13 +234,9 @@ export function resolveProviderFollowupFallbackRoute(params: {
   config?: OpenClawConfig;
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
-  runtimeHandle?: ProviderRuntimePluginHandle;
   context: ProviderFollowupFallbackRouteContext;
 }): ProviderFollowupFallbackRouteResult | undefined {
-  return (
-    ensureProviderRuntimePluginHandle(params).plugin?.followupFallbackRoute?.(params.context) ??
-    undefined
-  );
+  return resolveProviderHookPlugin(params)?.followupFallbackRoute?.(params.context) ?? undefined;
 }
 
 export function wrapProviderStreamFn(params: {
@@ -316,10 +244,7 @@ export function wrapProviderStreamFn(params: {
   config?: OpenClawConfig;
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
-  runtimeHandle?: ProviderRuntimePluginHandle;
   context: ProviderWrapStreamFnContext;
 }) {
-  return (
-    ensureProviderRuntimePluginHandle(params).plugin?.wrapStreamFn?.(params.context) ?? undefined
-  );
+  return resolveProviderRuntimePlugin(params)?.wrapStreamFn?.(params.context) ?? undefined;
 }

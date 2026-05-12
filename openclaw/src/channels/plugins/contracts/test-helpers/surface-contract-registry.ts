@@ -11,6 +11,7 @@ type DirectoryContractRef = {
 };
 
 const threadingContractPluginIds = new Set<ChannelId>([
+  "bluebubbles",
   "discord",
   "googlechat",
   "matrix",

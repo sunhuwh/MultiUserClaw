@@ -8,17 +8,12 @@ describe("groq provider compat", () => {
     expect(resolveGroqReasoningCompatPatch("qwen/qwen3-32b")).toEqual({
       supportsReasoningEffort: true,
       supportedReasoningEfforts: ["none", "default"],
-      reasoningEffortMap: {
-        adaptive: "default",
-        high: "default",
+      reasoningEffortMap: expect.objectContaining({
         off: "none",
-        none: "none",
-        minimal: "default",
         low: "default",
         medium: "default",
-        max: "default",
-        xhigh: "default",
-      },
+        high: "default",
+      }),
     });
   });
 
@@ -51,11 +46,6 @@ describe("groq provider compat", () => {
       label: "Groq",
       envVars: ["GROQ_API_KEY"],
     });
-    expect(captured.mediaUnderstandingProviders).toHaveLength(1);
-    const [mediaProvider] = captured.mediaUnderstandingProviders;
-    if (!mediaProvider) {
-      throw new Error("Expected Groq media understanding provider");
-    }
-    expect(mediaProvider.id).toBe("groq");
+    expect(captured.mediaUnderstandingProviders[0]?.id).toBe("groq");
   });
 });

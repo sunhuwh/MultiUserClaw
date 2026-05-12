@@ -22,19 +22,6 @@ import {
 
 const { createSessionStoreDir, openClient, getHarness } = setupGatewaySessionsTestHarness();
 
-function requireRecord(value: unknown): Record<string, unknown> {
-  expect(value).toBeTruthy();
-  expect(typeof value).toBe("object");
-  expect(Array.isArray(value)).toBe(false);
-  return value as Record<string, unknown>;
-}
-
-function requireFirstCallArg(mock: { mock: { calls: readonly (readonly unknown[])[] } }) {
-  const call = mock.mock.calls[0];
-  expect(call).toBeTruthy();
-  return call?.[0];
-}
-
 test("webchat clients cannot patch, delete, compact, or restore sessions", async () => {
   const { dir } = await createSessionStoreDir();
   const fixture = await createCheckpointFixture(dir);
@@ -140,16 +127,23 @@ test("session:patch hook fires with correct context", async () => {
   });
 
   expect(patched.ok).toBe(true);
-  const event = requireRecord(requireFirstCallArg(sessionHookMocks.triggerInternalHook));
-  expect(event.type).toBe("session");
-  expect(event.action).toBe("patch");
-  expect(event.sessionKey).toBe("agent:main:main");
-  const context = requireRecord(event.context);
-  const sessionEntry = requireRecord(context.sessionEntry);
-  expect(sessionEntry.sessionId).toBe("sess-hook-test");
-  expect(sessionEntry.label).toBe("updated-label");
-  expect(requireRecord(context.patch).label).toBe("updated-label");
-  requireRecord(context.cfg);
+  expect(sessionHookMocks.triggerInternalHook).toHaveBeenCalledWith(
+    expect.objectContaining({
+      type: "session",
+      action: "patch",
+      sessionKey: expect.stringMatching(/agent:main:main/),
+      context: expect.objectContaining({
+        sessionEntry: expect.objectContaining({
+          sessionId: "sess-hook-test",
+          label: "updated-label",
+        }),
+        patch: expect.objectContaining({
+          label: "updated-label",
+        }),
+        cfg: expect.any(Object),
+      }),
+    }),
+  );
 
   ws.close();
 });
@@ -224,9 +218,12 @@ test("session:patch hook only fires after successful patch", async () => {
   });
 
   expect(validPatch.ok).toBe(true);
-  const event = requireRecord(requireFirstCallArg(sessionHookMocks.triggerInternalHook));
-  expect(event.type).toBe("session");
-  expect(event.action).toBe("patch");
+  expect(sessionHookMocks.triggerInternalHook).toHaveBeenCalledWith(
+    expect.objectContaining({
+      type: "session",
+      action: "patch",
+    }),
+  );
 
   ws.close();
 });
@@ -242,14 +239,13 @@ test("session:patch skips clone and dispatch when no hooks listen", async () => 
   });
 
   expect(patched.ok).toBe(true);
-  const clonedHookContexts = structuredCloneSpy.mock.calls.filter(([value]) => {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      return false;
-    }
-    const record = value as Record<string, unknown>;
-    return Boolean(record.cfg && record.patch && record.sessionEntry);
-  });
-  expect(clonedHookContexts).toHaveLength(0);
+  expect(structuredCloneSpy).not.toHaveBeenCalledWith(
+    expect.objectContaining({
+      cfg: expect.any(Object),
+      patch: expect.any(Object),
+      sessionEntry: expect.any(Object),
+    }),
+  );
   expect(sessionHookMocks.triggerInternalHook).not.toHaveBeenCalled();
 
   structuredCloneSpy.mockRestore();
@@ -295,7 +291,7 @@ test("session:patch hook mutations cannot change the response path", async () =>
   expect(patched.payload?.resolved).toEqual({
     modelProvider: "anthropic",
     model: "claude-opus-4-6",
-    agentRuntime: { id: "auto", source: "implicit" },
+    agentRuntime: { id: "pi", source: "implicit" },
   });
   expect(patched.payload?.entry.label).toBe("cfg-isolation");
 

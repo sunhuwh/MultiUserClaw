@@ -109,9 +109,8 @@ describe("listBundledChannelCatalogEntries", () => {
 
     const entries = listBundledChannelCatalogEntries();
 
-    const ids = new Set(entries.map((entry) => entry.id));
-    expect(ids.has("imessage")).toBe(true);
-    expect(ids.has("telegram")).toBe(true);
+    const ids = entries.map((entry) => entry.id);
+    expect(ids).toEqual(expect.arrayContaining(["imessage", "telegram"]));
     const telegram = entries.find((entry) => entry.id === "telegram");
     expect(telegram?.channel.docsPath).toBe("/channels/telegram");
     expect(telegram?.channel.label).toBe("Telegram");
@@ -143,9 +142,7 @@ describe("listBundledChannelCatalogEntries", () => {
     useBundledPluginsDir(extensionsRoot);
 
     const entries = listBundledChannelCatalogEntries();
-    const ids = new Set(entries.map((entry) => entry.id));
-    expect(ids.has("qqbot")).toBe(true);
-    expect(ids.has("telegram")).toBe(true);
+    expect(entries.map((entry) => entry.id)).toEqual(expect.arrayContaining(["qqbot", "telegram"]));
   });
 
   it("falls back to dist/channel-catalog.json when the resolver returns undefined", () => {

@@ -1,16 +1,11 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
-import { beforeEach, describe, expect, it } from "vitest";
-import { _resetIMessageShortIdState } from "./monitor-reply-cache.js";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
+import { describe, expect, it } from "vitest";
 import {
   buildIMessageInboundContext,
   resolveIMessageInboundDecision,
 } from "./monitor/inbound-processing.js";
 import { parseIMessageNotification } from "./monitor/parse-notification.js";
 import type { IMessagePayload } from "./monitor/types.js";
-
-beforeEach(() => {
-  _resetIMessageShortIdState();
-});
 
 function baseCfg(): OpenClawConfig {
   return {
@@ -29,7 +24,7 @@ function baseCfg(): OpenClawConfig {
   } as unknown as OpenClawConfig;
 }
 
-async function resolve(params: {
+function resolve(params: {
   cfg?: OpenClawConfig;
   message: IMessagePayload;
   storeAllowFrom?: string[];
@@ -53,7 +48,7 @@ async function resolve(params: {
   });
 }
 
-async function resolveDispatchDecision(params: {
+function resolveDispatchDecision(params: {
   cfg: OpenClawConfig;
   message: IMessagePayload;
   groupHistories?: Parameters<typeof resolveIMessageInboundDecision>[0]["groupHistories"];
@@ -63,7 +58,7 @@ async function resolveDispatchDecision(params: {
   dmPolicy?: "open" | "pairing" | "allowlist" | "disabled";
 }) {
   const groupHistories = params.groupHistories ?? new Map();
-  const decision = await resolveIMessageInboundDecision({
+  const decision = resolveIMessageInboundDecision({
     cfg: params.cfg,
     accountId: "default",
     message: params.message,
@@ -85,12 +80,9 @@ async function resolveDispatchDecision(params: {
   return { decision, groupHistories };
 }
 
-async function buildDispatchContextPayload(params: {
-  cfg: OpenClawConfig;
-  message: IMessagePayload;
-}) {
+function buildDispatchContextPayload(params: { cfg: OpenClawConfig; message: IMessagePayload }) {
   const { cfg, message } = params;
-  const { decision, groupHistories } = await resolveDispatchDecision({ cfg, message });
+  const { decision, groupHistories } = resolveDispatchDecision({ cfg, message });
 
   const { ctxPayload } = buildIMessageInboundContext({
     cfg,
@@ -128,8 +120,8 @@ describe("imessage monitor gating + envelope builders", () => {
     });
   });
 
-  it("drops group messages without mention by default", async () => {
-    const decision = await resolve({
+  it("drops group messages without mention by default", () => {
+    const decision = resolve({
       message: {
         id: 1,
         chat_id: 99,
@@ -146,7 +138,7 @@ describe("imessage monitor gating + envelope builders", () => {
     expect(decision.reason).toBe("no mention");
   });
 
-  it("dispatches group messages with mention and builds a group envelope", async () => {
+  it("dispatches group messages with mention and builds a group envelope", () => {
     const cfg = baseCfg();
     const message: IMessagePayload = {
       id: 3,
@@ -158,7 +150,7 @@ describe("imessage monitor gating + envelope builders", () => {
       chat_name: "Lobster Squad",
       participants: ["+1555", "+1556"],
     };
-    const ctxPayload = await buildDispatchContextPayload({ cfg, message });
+    const ctxPayload = buildDispatchContextPayload({ cfg, message });
 
     expect(ctxPayload.ChatType).toBe("group");
     expect(ctxPayload.SessionKey).toBe("agent:main:imessage:group:42");
@@ -167,28 +159,7 @@ describe("imessage monitor gating + envelope builders", () => {
     expect(ctxPayload.To).toBe("chat_id:42");
   });
 
-  it("uses short message ids in context and keeps the full guid for actions", async () => {
-    const cfg = baseCfg();
-    const message: IMessagePayload = {
-      id: 3,
-      guid: "full-message-guid",
-      chat_id: 42,
-      chat_guid: "iMessage;+;chat0000",
-      chat_identifier: "thread-42",
-      sender: "+15550002222",
-      is_from_me: false,
-      text: "@openclaw ping",
-      is_group: true,
-      chat_name: "Lobster Squad",
-      participants: ["+1555", "+1556"],
-    };
-    const ctxPayload = await buildDispatchContextPayload({ cfg, message });
-
-    expect(ctxPayload.MessageSid).toBe("1");
-    expect(ctxPayload.MessageSidFull).toBe("full-message-guid");
-  });
-
-  it("includes reply-to context fields + suffix", async () => {
+  it("includes reply-to context fields + suffix", () => {
     const cfg = baseCfg();
     const message: IMessagePayload = {
       id: 5,
@@ -201,7 +172,7 @@ describe("imessage monitor gating + envelope builders", () => {
       reply_to_text: "original message",
       reply_to_sender: "+15559998888",
     };
-    const ctxPayload = await buildDispatchContextPayload({ cfg, message });
+    const ctxPayload = buildDispatchContextPayload({ cfg, message });
 
     expect(ctxPayload.ReplyToId).toBe("9001");
     expect(ctxPayload.ReplyToBody).toBe("original message");
@@ -210,7 +181,7 @@ describe("imessage monitor gating + envelope builders", () => {
     expect(ctxPayload.Body ?? "").toContain("original message");
   });
 
-  it("drops group reply context from non-allowlisted senders in allowlist mode", async () => {
+  it("drops group reply context from non-allowlisted senders in allowlist mode", () => {
     const cfg = baseCfg();
     cfg.channels ??= {};
     cfg.channels.imessage ??= {};
@@ -228,7 +199,7 @@ describe("imessage monitor gating + envelope builders", () => {
       reply_to_text: "blocked quote",
       reply_to_sender: "+15559998888",
     };
-    const { decision, groupHistories } = await resolveDispatchDecision({
+    const { decision, groupHistories } = resolveDispatchDecision({
       cfg,
       message,
       allowFrom: ["*"],
@@ -249,7 +220,7 @@ describe("imessage monitor gating + envelope builders", () => {
     expect(ctxPayload.Body ?? "").not.toContain("[Replying to");
   });
 
-  it("keeps group reply context in allowlist_quote mode", async () => {
+  it("keeps group reply context in allowlist_quote mode", () => {
     const cfg = baseCfg();
     cfg.channels ??= {};
     cfg.channels.imessage ??= {};
@@ -267,7 +238,7 @@ describe("imessage monitor gating + envelope builders", () => {
       reply_to_text: "quoted context",
       reply_to_sender: "+15559998888",
     };
-    const { decision, groupHistories } = await resolveDispatchDecision({
+    const { decision, groupHistories } = resolveDispatchDecision({
       cfg,
       message,
       allowFrom: ["*"],
@@ -288,7 +259,7 @@ describe("imessage monitor gating + envelope builders", () => {
     expect(ctxPayload.Body ?? "").toContain("[Replying to +15559998888 id:9001]");
   });
 
-  it("treats configured chat_id as a group session even when is_group is false", async () => {
+  it("treats configured chat_id as a group session even when is_group is false", () => {
     const cfg = baseCfg();
     cfg.channels ??= {};
     cfg.channels.imessage ??= {};
@@ -303,19 +274,19 @@ describe("imessage monitor gating + envelope builders", () => {
       text: "hello",
       is_group: false,
     };
-    const { decision } = await resolveDispatchDecision({ cfg, message, groupHistories });
+    const { decision } = resolveDispatchDecision({ cfg, message, groupHistories });
     expect(decision.isGroup).toBe(true);
     expect(decision.route.sessionKey).toBe("agent:main:imessage:group:2");
   });
 
-  it("allows group messages when requireMention is true but no mentionPatterns exist", async () => {
+  it("allows group messages when requireMention is true but no mentionPatterns exist", () => {
     const cfg = baseCfg();
     cfg.messages ??= {};
     cfg.messages.groupChat ??= {};
     cfg.messages.groupChat.mentionPatterns = [];
 
     const groupHistories = new Map();
-    const decision = await resolveIMessageInboundDecision({
+    const decision = resolveIMessageInboundDecision({
       cfg,
       accountId: "default",
       message: {
@@ -340,14 +311,14 @@ describe("imessage monitor gating + envelope builders", () => {
     expect(decision.kind).toBe("dispatch");
   });
 
-  it("blocks group messages when imessage.groups is set without a wildcard", async () => {
+  it("blocks group messages when imessage.groups is set without a wildcard", () => {
     const cfg = baseCfg();
     cfg.channels ??= {};
     cfg.channels.imessage ??= {};
     cfg.channels.imessage.groups = { "99": { requireMention: false } };
 
     const groupHistories = new Map();
-    const decision = await resolveIMessageInboundDecision({
+    const decision = resolveIMessageInboundDecision({
       cfg,
       accountId: "default",
       message: {
@@ -372,14 +343,14 @@ describe("imessage monitor gating + envelope builders", () => {
     expect(decision.kind).toBe("drop");
   });
 
-  it("honors group allowlist and ignores pairing-store senders in groups", async () => {
+  it("honors group allowlist and ignores pairing-store senders in groups", () => {
     const cfg = baseCfg();
     cfg.channels ??= {};
     cfg.channels.imessage ??= {};
     cfg.channels.imessage.groupPolicy = "allowlist";
 
     const groupHistories = new Map();
-    const denied = await resolveIMessageInboundDecision({
+    const denied = resolveIMessageInboundDecision({
       cfg,
       accountId: "default",
       message: {
@@ -403,7 +374,7 @@ describe("imessage monitor gating + envelope builders", () => {
     });
     expect(denied.kind).toBe("drop");
 
-    const allowed = await resolveIMessageInboundDecision({
+    const allowed = resolveIMessageInboundDecision({
       cfg,
       accountId: "default",
       message: {
@@ -428,14 +399,14 @@ describe("imessage monitor gating + envelope builders", () => {
     expect(allowed.kind).toBe("dispatch");
   });
 
-  it("blocks group messages when groupPolicy is disabled", async () => {
+  it("blocks group messages when groupPolicy is disabled", () => {
     const cfg = baseCfg();
     cfg.channels ??= {};
     cfg.channels.imessage ??= {};
     cfg.channels.imessage.groupPolicy = "disabled";
 
     const groupHistories = new Map();
-    const decision = await resolveIMessageInboundDecision({
+    const decision = resolveIMessageInboundDecision({
       cfg,
       accountId: "default",
       message: {

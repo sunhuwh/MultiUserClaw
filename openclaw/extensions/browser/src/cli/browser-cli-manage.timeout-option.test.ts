@@ -17,11 +17,9 @@ describe("browser manage start timeout option", () => {
     await program.parseAsync(["browser", "--timeout", "60000", "start"], { from: "user" });
 
     const startCall = findBrowserManageCall("/start");
-    if (!startCall) {
-      throw new Error("expected browser /start call");
-    }
-    expect(startCall[0]).toMatchObject({ timeout: "60000" });
-    expect(startCall[2]).toBeUndefined();
+    expect(startCall).toBeDefined();
+    expect(startCall?.[0]).toMatchObject({ timeout: "60000" });
+    expect(startCall?.[2]).toBeUndefined();
   });
 
   it("passes headless=true for browser start --headless", async () => {

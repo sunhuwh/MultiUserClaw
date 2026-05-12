@@ -81,11 +81,6 @@ the maintainer-only release runbook.
    dispatches all publishable plugin packages to npm and the same set to
    ClawHub in parallel, and then promotes the prepared OpenClaw npm preflight
    artifact with the matching dist-tag as soon as plugin npm publish succeeds.
-   After the OpenClaw npm publish child succeeds, it creates or updates the
-   matching GitHub release/prerelease page from the complete matching
-   `CHANGELOG.md` section. Stable releases published to npm `latest` become the
-   GitHub latest release; stable maintenance releases kept on npm `beta` are
-   created with GitHub `latest=false`.
    ClawHub publishing may still be running while OpenClaw npm publishes, but the
    release publish workflow prints the child run IDs immediately. By default it
    does not wait for ClawHub after dispatching it, so OpenClaw npm availability
@@ -105,13 +100,11 @@ the maintainer-only release runbook.
     `OpenClaw Release Publish`, reusing the successful preflight artifact via
     `preflight_run_id`; stable macOS release readiness also requires the
     packaged `.zip`, `.dmg`, `.dSYM.zip`, and updated `appcast.xml` on `main`.
-    The private macOS publish workflow publishes the signed appcast to public
-    `main` automatically after release assets verify; if branch protection blocks
-    the direct push, it opens or updates an appcast PR.
 11. After publish, run the npm post-publish verifier, optional standalone
     published-npm Telegram E2E when you need post-publish channel proof,
-    dist-tag promotion when needed, verify the generated GitHub release page,
-    and run the release announcement steps.
+    dist-tag promotion when needed, GitHub release/prerelease notes from the
+    complete matching `CHANGELOG.md` section, and the release announcement
+    steps.
 
 ## Release preflight
 
@@ -138,13 +131,11 @@ the maintainer-only release runbook.
   `run_release_soak=true`; `release_profile=full` forces soak on. With
   `release_profile=full` and `rerun_group=all`, it also runs package Telegram
   E2E against the `release-package-under-test` artifact from release checks.
-  Provide `release_package_spec` after publishing a beta to reuse the shipped
-  npm package across release checks, Package Acceptance, and package Telegram
-  E2E without rebuilding the release tarball. Provide
-  `npm_telegram_package_spec` only when Telegram should use a different
-  published package from the rest of release validation. Provide
-  `package_acceptance_package_spec` when Package Acceptance should use a
-  different published package from the release package spec. Provide
+  Provide `npm_telegram_package_spec` after publishing when the same
+  Telegram E2E should prove the published npm package too. Provide
+  `package_acceptance_package_spec` after publishing when Package Acceptance
+  should run its package/update matrix against the shipped npm package instead
+  of the SHA-built artifact. Provide
   `evidence_package_spec` when the private evidence report should prove that the
   validation matches a published npm package without forcing Telegram E2E.
   Example:
@@ -161,13 +152,11 @@ the maintainer-only release runbook.
   `telegram_mode=mock-openai` or `telegram_mode=live-frontier`. When the
   selected Docker lanes include `published-upgrade-survivor`, the package
   artifact is the candidate and `published_upgrade_survivor_baseline` selects
-  the published baseline. `update-restart-auth` uses the candidate package as
-  both the installed CLI and the package-under-test so it exercises the
-  candidate update command's managed restart path.
+  the published baseline.
   Example: `gh workflow run package-acceptance.yml --ref main -f workflow_ref=main -f source=npm -f package_spec=openclaw@beta -f suite_profile=product -f published_upgrade_survivor_baseline=openclaw@2026.4.26 -f telegram_mode=mock-openai`
   Common profiles:
   - `smoke`: install/channel/agent, gateway network, and config reload lanes
-  - `package`: artifact-native package/update/restart/plugin lanes without OpenWebUI or live ClawHub
+  - `package`: artifact-native package/update/plugin lanes without OpenWebUI or live ClawHub
   - `product`: package profile plus MCP channels, cron/subagent cleanup,
     OpenAI web search, and OpenWebUI
   - `full`: Docker release-path chunks with OpenWebUI
@@ -277,9 +266,7 @@ Validation` or from the `main`/release workflow ref so workflow logic and
   not describe a stale CI layout
 - Stable macOS release readiness also includes the updater surfaces:
   - the GitHub release must end up with the packaged `.zip`, `.dmg`, and `.dSYM.zip`
-  - `appcast.xml` on `main` must point at the new stable zip after publish; the
-    private macOS publish workflow commits it automatically, or opens an appcast
-    PR when direct push is blocked
+  - `appcast.xml` on `main` must point at the new stable zip after publish
   - the packaged app must keep a non-debug bundle id, a non-empty Sparkle feed
     URL, and a `CFBundleVersion` at or above the canonical Sparkle build floor
     for that release version
@@ -317,16 +304,14 @@ The workflow resolves the target ref, dispatches manual `CI` with
 `target_ref=<release-ref>`, dispatches `OpenClaw Release Checks`, prepares a
 parent `release-package-under-test` artifact for package-facing checks, and
 dispatches standalone package Telegram E2E when `release_profile=full` with
-`rerun_group=all` or when `release_package_spec` or
-`npm_telegram_package_spec` is set. `OpenClaw Release
+`rerun_group=all` or when `npm_telegram_package_spec` is set. `OpenClaw Release
 Checks` then fans out install smoke, cross-OS release checks, live/E2E Docker
 release-path coverage when soak is enabled, Package Acceptance with Telegram
 package QA, QA Lab parity, live Matrix, and live Telegram. A full run is only acceptable when the
 `Full Release Validation`
 summary shows `normal_ci` and `release_checks` as successful. In full/all mode,
 the `npm_telegram` child must also be successful; outside full/all it is skipped
-unless a published `release_package_spec` or `npm_telegram_package_spec` was
-provided. The final
+unless a published `npm_telegram_package_spec` was provided. The final
 verifier summary includes slowest-job tables for each child run, so the release
 manager can see the current critical path without downloading logs.
 See [Full release validation](/reference/full-release-validation) for the
@@ -348,20 +333,13 @@ Use `release_profile` to select live/provider breadth:
 
 Use `run_release_soak=true` with `stable` when the release-blocking lanes are
 green and you want the exhaustive live/E2E, Docker release-path, and
-bounded published upgrade-survivor sweep before promotion. That sweep covers
-the latest four stable packages plus pinned `2026.4.23` and `2026.5.2`
-baselines plus older `2026.4.15` coverage, with duplicate baselines removed and
-each baseline sharded into its own Docker runner job. `full` implies
+all-since-2026.4.23 upgrade-survivor sweep before promotion. `full` implies
 `run_release_soak=true`.
 
 `OpenClaw Release Checks` uses the trusted workflow ref to resolve the target
 ref once as `release-package-under-test` and reuses that artifact in cross-OS,
 Package Acceptance, and release-path Docker checks when soak runs. This keeps
 all package-facing boxes on the same bytes and avoids repeated package builds.
-After a beta is already on npm, set `release_package_spec=openclaw@YYYY.M.D-beta.N`
-so release checks download the shipped package once, extract its build source
-SHA from `dist/build-info.json`, and reuse that artifact for cross-OS,
-Package Acceptance, release-path Docker, and package Telegram lanes.
 The cross-OS OpenAI install smoke uses `OPENCLAW_CROSS_OS_OPENAI_MODEL` when the
 repo/org variable is set, otherwise `openai/gpt-5.4`, because this lane is
 proving package install, onboarding, gateway startup, and one live agent turn
@@ -393,8 +371,8 @@ gh workflow run full-release-validation.yml \
   -f provider=openai \
   -f mode=both \
   -f release_profile=full \
-  -f release_package_spec=openclaw@YYYY.M.D-beta.N \
   -f evidence_package_spec=openclaw@YYYY.M.D-beta.N \
+  -f npm_telegram_package_spec=openclaw@YYYY.M.D-beta.N \
   -f npm_telegram_provider_mode=mock-openai
 ```
 
@@ -411,9 +389,8 @@ release-candidate run, `ci` runs only the normal CI child, `plugin-prerelease`
 runs only the release-only plugin child, `release-checks` runs every release
 box, and the narrower release groups are `install-smoke`, `cross-os`,
 `live-e2e`, `package`, `qa`, `qa-parity`, `qa-live`, and `npm-telegram`.
-Focused `npm-telegram` reruns require `release_package_spec` or
-`npm_telegram_package_spec`; full/all runs with `release_profile=full` use the
-release-checks package artifact. Focused
+Focused `npm-telegram` reruns require `npm_telegram_package_spec`; full/all runs
+with `release_profile=full` use the release-checks package artifact. Focused
 cross-OS reruns can add `cross_os_suite_filter=windows/packaged-upgrade` or
 another OS/suite filter. QA release-check failures are advisory; a QA-only
 failure does not block release validation.
@@ -517,12 +494,11 @@ Supported candidate sources:
 
 `OpenClaw Release Checks` runs Package Acceptance with `source=artifact`, the
 prepared release package artifact, `suite_profile=custom`,
-`docker_lanes=doctor-switch update-channel-switch skill-install update-corrupt-plugin upgrade-survivor published-upgrade-survivor update-restart-auth plugins-offline plugin-update`,
-`telegram_mode=mock-openai`. Package Acceptance keeps migration, update,
-configured-auth update restart, live ClawHub skill install, stale plugin dependency cleanup, offline plugin
-fixtures, plugin update, and Telegram package QA against the same resolved
-tarball. Blocking release checks use the default latest published package
-baseline; `run_release_soak=true` or
+`docker_lanes=doctor-switch update-channel-switch upgrade-survivor published-upgrade-survivor plugins-offline plugin-update`,
+`telegram_mode=mock-openai`. Package Acceptance keeps migration, update, stale
+plugin dependency cleanup, offline plugin fixtures, plugin update, and Telegram
+package QA against the same resolved tarball. Blocking release checks use the
+default latest published package baseline; `run_release_soak=true` or
 `release_profile=full` expands to every stable npm-published baseline from
 `2026.4.23` through `latest` plus reported-issue fixtures. Use
 Package Acceptance with `source=npm` for an already shipped candidate, or
@@ -568,8 +544,8 @@ Common package profiles:
 
 - `smoke`: quick package install/channel/agent, gateway network, and config
   reload lanes
-- `package`: install/update/restart/plugin package contracts plus live ClawHub
-  skill install proof; this is the release-check default
+- `package`: install/update/plugin package contracts without live ClawHub; this is the release-check
+  default
 - `product`: `package` plus MCP channels, cron/subagent cleanup, OpenAI web
   search, and OpenWebUI
 - `full`: Docker release-path chunks with OpenWebUI

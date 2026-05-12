@@ -56,16 +56,8 @@ vi.mock("./reply-run-registry.js", () => ({
   },
 }));
 
-const formatAllowFrom = ({ allowFrom }: { allowFrom: Array<string | number> }) => {
-  const values: string[] = [];
-  for (const entry of allowFrom) {
-    const value = String(entry).trim();
-    if (value) {
-      values.push(value);
-    }
-  }
-  return values;
-};
+const formatAllowFrom = ({ allowFrom }: { allowFrom: Array<string | number> }) =>
+  allowFrom.map((entry) => String(entry).trim()).filter(Boolean);
 
 let previousPluginRegistry: ReturnType<typeof getActivePluginRegistry>;
 

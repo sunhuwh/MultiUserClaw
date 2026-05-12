@@ -1,17 +1,9 @@
-import type {
-  MigrationPlan,
-  MigrationProviderContext,
-  MigrationProviderPlugin,
-} from "openclaw/plugin-sdk/plugin-entry";
+import type { MigrationPlan, MigrationProviderPlugin } from "openclaw/plugin-sdk/plugin-entry";
 import { applyCodexMigrationPlan } from "./apply.js";
 import { buildCodexMigrationPlan } from "./plan.js";
 import { discoverCodexSource, hasCodexSource } from "./source.js";
 
-export function buildCodexMigrationProvider(
-  params: {
-    runtime?: MigrationProviderContext["runtime"];
-  } = {},
-): MigrationProviderPlugin {
+export function buildCodexMigrationProvider(): MigrationProviderPlugin {
   return {
     id: "codex",
     label: "Codex",
@@ -30,7 +22,7 @@ export function buildCodexMigrationProvider(
     },
     plan: buildCodexMigrationPlan,
     async apply(ctx, plan?: MigrationPlan) {
-      return await applyCodexMigrationPlan({ ctx, plan, runtime: params.runtime });
+      return await applyCodexMigrationPlan({ ctx, plan });
     },
   };
 }

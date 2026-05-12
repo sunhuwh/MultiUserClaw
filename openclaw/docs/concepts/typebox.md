@@ -5,6 +5,10 @@ read_when:
 title: "TypeBox"
 ---
 
+# TypeBox as protocol source of truth
+
+Last updated: 2026-01-10
+
 TypeBox is a TypeScript-first schema library. We use it to define the **Gateway
 WebSocket protocol** (handshake, request/response, server events). Those schemas
 drive **runtime validation**, **JSON Schema export**, and **Swift codegen** for
@@ -64,7 +68,7 @@ Authoritative advertised **discovery** inventory lives in
 ## Current pipeline
 
 - `pnpm protocol:gen`
-  - writes JSON Schema (draft-07) to `dist/protocol.schema.json`
+  - writes JSON Schema (draft‑07) to `dist/protocol.schema.json`
 - `pnpm protocol:gen:swift`
   - generates Swift gateway models
 - `pnpm protocol:check`
@@ -95,7 +99,7 @@ Connect (first message):
   "method": "connect",
   "params": {
     "minProtocol": 3,
-    "maxProtocol": 4,
+    "maxProtocol": 3,
     "client": {
       "id": "openclaw-macos",
       "displayName": "macos",
@@ -117,7 +121,7 @@ Hello-ok response:
   "ok": true,
   "payload": {
     "type": "hello-ok",
-    "protocol": 4,
+    "protocol": 3,
     "server": { "version": "dev", "connId": "ws-1" },
     "features": { "methods": ["health"], "events": ["tick"] },
     "snapshot": {
@@ -163,8 +167,8 @@ ws.on("open", () => {
       id: "c1",
       method: "connect",
       params: {
-        minProtocol: 4,
-        maxProtocol: 4,
+        minProtocol: 3,
+        maxProtocol: 3,
         client: {
           id: "cli",
           displayName: "example",
@@ -266,15 +270,14 @@ The Swift generator emits:
 
 - `GatewayFrame` enum with `req`, `res`, `event`, and `unknown` cases
 - Strongly typed payload structs/enums
-- `ErrorCode` values, `GATEWAY_PROTOCOL_VERSION`, and `GATEWAY_MIN_PROTOCOL_VERSION`
+- `ErrorCode` values and `GATEWAY_PROTOCOL_VERSION`
 
 Unknown frame types are preserved as raw payloads for forward compatibility.
 
 ## Versioning + compatibility
 
-- `PROTOCOL_VERSION` lives in `src/gateway/protocol/version.ts`.
-- Clients send `minProtocol` + `maxProtocol`; the server rejects ranges that
-  do not include its current protocol.
+- `PROTOCOL_VERSION` lives in `src/gateway/protocol/schema.ts`.
+- Clients send `minProtocol` + `maxProtocol`; the server rejects mismatches.
 - The Swift models keep unknown frame types to avoid breaking older clients.
 
 ## Schema patterns and conventions

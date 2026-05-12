@@ -23,18 +23,6 @@ const DEFAULT_LEGACY_CREDENTIALS = {
 
 const EXPECTS_POSIX_PRIVATE_FILE_MODE = process.platform !== "win32";
 
-type MatrixCredentials = NonNullable<ReturnType<typeof loadMatrixCredentials>>;
-
-function expectMatrixCredentials(
-  credentials: ReturnType<typeof loadMatrixCredentials>,
-): MatrixCredentials {
-  if (credentials === null) {
-    throw new Error("Expected Matrix credentials");
-  }
-  expect(typeof credentials.createdAt).toBe("string");
-  return credentials;
-}
-
 describe("matrix credentials storage", () => {
   const tempDirs: string[] = [];
 
@@ -108,15 +96,15 @@ describe("matrix credentials storage", () => {
         "default",
       );
       const initial = loadMatrixCredentials({}, "default");
-      const initialCredentials = expectMatrixCredentials(initial);
+      expect(initial).not.toBeNull();
 
       vi.setSystemTime(new Date("2026-03-01T10:05:00.000Z"));
       await touchMatrixCredentials({}, "default");
       const touched = loadMatrixCredentials({}, "default");
-      const touchedCredentials = expectMatrixCredentials(touched);
+      expect(touched).not.toBeNull();
 
-      expect(touchedCredentials.createdAt).toBe(initialCredentials.createdAt);
-      expect(touchedCredentials.lastUsedAt).toBe("2026-03-01T10:05:00.000Z");
+      expect(touched?.createdAt).toBe(initial?.createdAt);
+      expect(touched?.lastUsedAt).toBe("2026-03-01T10:05:00.000Z");
     } finally {
       vi.useRealTimers();
     }
@@ -253,7 +241,7 @@ describe("matrix credentials storage", () => {
     }
   });
 
-  it("migrates legacy matrix credential files on read", () => {
+  it("migrates legacy matrix credential files on read", async () => {
     const { legacyPath, currentPath } = setupLegacyCredentialsFile({
       cfg: {
         channels: {

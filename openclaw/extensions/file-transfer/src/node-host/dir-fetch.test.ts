@@ -20,37 +20,42 @@ afterEach(async () => {
 // platforms without it (Windows CI). They still register, just no-op.
 const HAS_TAR = process.platform !== "win32";
 
-async function expectDirFetchError(input: Parameters<typeof handleDirFetch>[0], code: string) {
-  const result = await handleDirFetch(input);
-  if (result.ok) {
-    throw new Error("expected directory fetch error");
-  }
-  expect(result.code).toBe(code);
-}
-
 describe("handleDirFetch — input validation", () => {
   it("rejects empty / non-string path", async () => {
-    await expectDirFetchError({ path: "" }, "INVALID_PATH");
+    expect(await handleDirFetch({ path: "" })).toMatchObject({
+      ok: false,
+      code: "INVALID_PATH",
+    });
   });
 
   it("rejects relative paths", async () => {
-    await expectDirFetchError({ path: "relative" }, "INVALID_PATH");
+    expect(await handleDirFetch({ path: "relative" })).toMatchObject({
+      ok: false,
+      code: "INVALID_PATH",
+    });
   });
 
   it("rejects paths with NUL bytes", async () => {
-    await expectDirFetchError({ path: "/tmp/foo\0bar" }, "INVALID_PATH");
+    expect(await handleDirFetch({ path: "/tmp/foo\0bar" })).toMatchObject({
+      ok: false,
+      code: "INVALID_PATH",
+    });
   });
 });
 
 describe("handleDirFetch — fs errors", () => {
   it.runIf(HAS_TAR)("returns NOT_FOUND for a missing directory", async () => {
-    await expectDirFetchError({ path: path.join(tmpRoot, "missing") }, "NOT_FOUND");
+    const r = await handleDirFetch({ path: path.join(tmpRoot, "missing") });
+    expect(r).toMatchObject({ ok: false, code: "NOT_FOUND" });
   });
 
   it.runIf(HAS_TAR)("returns IS_FILE when path resolves to a file", async () => {
     const f = path.join(tmpRoot, "f.txt");
     await fs.writeFile(f, "x");
-    await expectDirFetchError({ path: f }, "IS_FILE");
+    expect(await handleDirFetch({ path: f })).toMatchObject({
+      ok: false,
+      code: "IS_FILE",
+    });
   });
 });
 
@@ -67,11 +72,13 @@ describe("handleDirFetch — happy path", () => {
       throw new Error(`expected ok, got ${r.code}: ${r.message}`);
     }
 
-    expect(r.path).toBe(tmpRoot);
-    expect(r.tarBase64).toBe("");
-    expect(r.tarBytes).toBe(0);
-    expect(r.sha256).toBe("");
-    expect(r.preflightOnly).toBe(true);
+    expect(r).toMatchObject({
+      path: tmpRoot,
+      tarBase64: "",
+      tarBytes: 0,
+      sha256: "",
+      preflightOnly: true,
+    });
     expect(r.entries).toEqual([".ssh", ".ssh/id_rsa", "a.txt", "sub", "sub/b.txt"]);
     expect(r.fileCount).toBe(r.entries?.length);
   });
@@ -103,10 +110,7 @@ describe("handleDirFetch — happy path", () => {
     // file count covers the regular files we created (3); BSD tar may also
     // list directory entries, so be generous.
     expect(r.fileCount).toBeGreaterThanOrEqual(3);
-    expect(r.entries).toContain("a.txt");
-    expect(r.entries).toContain("b.txt");
-    expect(r.entries).toContain("sub");
-    expect(r.entries).toContain("sub/c.txt");
+    expect(r.entries).toEqual(expect.arrayContaining(["a.txt", "b.txt", "sub", "sub/c.txt"]));
     expect(r.fileCount).toBe(r.entries?.length);
   });
 });
@@ -123,7 +127,8 @@ describe("handleDirFetch — size cap", () => {
       await fs.writeFile(path.join(tmpRoot, "big3.bin"), big);
 
       // 64KB cap should trip either the du preflight or the streaming SIGTERM.
-      await expectDirFetchError({ path: tmpRoot, maxBytes: 64 * 1024 }, "TREE_TOO_LARGE");
+      const r = await handleDirFetch({ path: tmpRoot, maxBytes: 64 * 1024 });
+      expect(r).toMatchObject({ ok: false, code: "TREE_TOO_LARGE" });
     },
     30_000,
   );

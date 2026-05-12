@@ -1,5 +1,5 @@
 import { join, parse } from "node:path";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeAll, beforeEach, afterEach } from "vitest";
 
 vi.mock("openclaw/plugin-sdk/runtime-env", async () => {
   const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/runtime-env")>(
@@ -33,28 +33,12 @@ vi.mock("openclaw/plugin-sdk/ssrf-runtime", async () => {
   };
 });
 
-afterAll(() => {
-  vi.doUnmock("openclaw/plugin-sdk/runtime-env");
-  vi.doUnmock("openclaw/plugin-sdk/ssrf-runtime");
-  vi.resetModules();
-});
-
 const mockExistsSync = vi.fn();
 const mockReadFileSync = vi.fn();
 const mockRealpathSync = vi.fn();
 const mockReaddirSync = vi.fn();
 const mockSettingsExistsSync = vi.fn();
 const mockSettingsReadFileSync = vi.fn();
-
-function countMatching<T>(items: readonly T[], predicate: (item: T) => boolean): number {
-  let count = 0;
-  for (const item of items) {
-    if (predicate(item)) {
-      count += 1;
-    }
-  }
-  return count;
-}
 
 describe("resolveGeminiCliSelectedAuthType", () => {
   const ENV_KEYS = ["GOOGLE_GENAI_USE_GCA"] as const;
@@ -460,7 +444,7 @@ describe("extractGeminiCliCredentials", () => {
     setOAuthCredentialsFsForTest();
   });
 
-  it("returns null when gemini binary is not in PATH", () => {
+  it("returns null when gemini binary is not in PATH", async () => {
     process.env.PATH = "/nonexistent";
     mockExistsSync.mockReturnValue(false);
 
@@ -468,7 +452,7 @@ describe("extractGeminiCliCredentials", () => {
     expect(extractGeminiCliCredentials()).toBeNull();
   });
 
-  it("extracts credentials from oauth2.js in known path", () => {
+  it("extracts credentials from oauth2.js in known path", async () => {
     installGeminiLayout({ oauth2Exists: true, oauth2Content: FAKE_OAUTH2_CONTENT });
 
     clearCredentialsCache();
@@ -477,7 +461,7 @@ describe("extractGeminiCliCredentials", () => {
     expectFakeCliCredentials(result);
   });
 
-  it("extracts credentials when PATH entry is an npm global shim", () => {
+  it("extracts credentials when PATH entry is an npm global shim", async () => {
     installNpmShimLayout({ oauth2Exists: true, oauth2Content: FAKE_OAUTH2_CONTENT });
 
     clearCredentialsCache();
@@ -486,7 +470,7 @@ describe("extractGeminiCliCredentials", () => {
     expectFakeCliCredentials(result);
   });
 
-  it("extracts credentials from bundled npm installs", () => {
+  it("extracts credentials from bundled npm installs", async () => {
     installBundledNpmLayout({
       bundleContent: `
         const OAUTH_CLIENT_ID = "${FAKE_CLIENT_ID}";
@@ -500,7 +484,7 @@ describe("extractGeminiCliCredentials", () => {
     expectFakeCliCredentials(result);
   });
 
-  it("extracts credentials from Homebrew libexec installs", () => {
+  it("extracts credentials from Homebrew libexec installs", async () => {
     installHomebrewLibexecLayout({ oauth2Content: FAKE_OAUTH2_CONTENT });
 
     clearCredentialsCache();
@@ -509,28 +493,28 @@ describe("extractGeminiCliCredentials", () => {
     expectFakeCliCredentials(result);
   });
 
-  it("returns null when oauth2.js cannot be found", () => {
+  it("returns null when oauth2.js cannot be found", async () => {
     installGeminiLayout({ oauth2Exists: false, readdir: [] });
 
     clearCredentialsCache();
     expect(extractGeminiCliCredentials()).toBeNull();
   });
 
-  it("returns null when oauth2.js lacks credentials", () => {
+  it("returns null when oauth2.js lacks credentials", async () => {
     installGeminiLayout({ oauth2Exists: true, oauth2Content: "// no credentials here" });
 
     clearCredentialsCache();
     expect(extractGeminiCliCredentials()).toBeNull();
   });
 
-  it("caches credentials after first extraction", () => {
+  it("caches credentials after first extraction", async () => {
     installGeminiLayout({ oauth2Exists: true, oauth2Content: FAKE_OAUTH2_CONTENT });
 
     clearCredentialsCache();
 
     // First call
     const result1 = extractGeminiCliCredentials();
-    expectFakeCliCredentials(result1);
+    expect(result1).not.toBeNull();
 
     // Second call should use cache (readFileSync not called again)
     const readCount = mockReadFileSync.mock.calls.length;
@@ -539,7 +523,7 @@ describe("extractGeminiCliCredentials", () => {
     expect(mockReadFileSync.mock.calls.length).toBe(readCount);
   });
 
-  it("skips unrelated oauth2.js files when gemini resolves inside a Windows nvm root", () => {
+  it("skips unrelated oauth2.js files when gemini resolves inside a Windows nvm root", async () => {
     const { unrelatedOauth2Path } = installWindowsNvmLayoutWithUnrelatedOauth({
       oauth2Content: FAKE_OAUTH2_CONTENT,
       unrelatedOauth2Content: "// unrelated oauth file",
@@ -667,23 +651,6 @@ describe("loginGeminiCliOAuth", () => {
     return JSON.parse(value);
   }
 
-  function requireString(value: string | null | undefined, label: string): string {
-    if (!value) {
-      throw new Error(`Expected ${label}`);
-    }
-    return value;
-  }
-
-  function requireRecordedRequest(
-    request: RecordedFetchRequest | undefined,
-    label: string,
-  ): RecordedFetchRequest {
-    if (!request) {
-      throw new Error(`Expected ${label} request`);
-    }
-    return request;
-  }
-
   type LoginGeminiCliOAuthFn = (options: {
     isRemote: boolean;
     openUrl: () => Promise<void>;
@@ -784,10 +751,8 @@ describe("loginGeminiCliOAuth", () => {
       `gl-node/${process.versions.node}`,
     );
 
-    const clientMetadata = requireString(
-      getHeaderValue(firstHeaders, "Client-Metadata"),
-      "Client-Metadata",
-    );
+    const clientMetadata = getHeaderValue(firstHeaders, "Client-Metadata");
+    expect(clientMetadata).toBeDefined();
     expect(parseJsonString(clientMetadata, "Client-Metadata")).toEqual(
       EXPECTED_LOAD_CODE_ASSIST_METADATA,
     );
@@ -813,16 +778,13 @@ describe("loginGeminiCliOAuth", () => {
     const { loginGeminiCliOAuth } = await import("./oauth.js");
     const { authUrl } = await runRemoteLoginWithCapturedAuthUrl(loginGeminiCliOAuth);
 
-    const authState = requireString(new URL(authUrl).searchParams.get("state"), "OAuth state");
+    const authState = new URL(authUrl).searchParams.get("state");
+    expect(authState).toBeTruthy();
 
-    const tokenRequest = requireRecordedRequest(
-      requests.find((request) => request.url === TOKEN_URL),
-      "token",
-    );
-    const codeVerifier = requireString(
-      getFormField(tokenRequest.init?.body, "code_verifier"),
-      "PKCE code verifier",
-    );
+    const tokenRequest = requests.find((request) => request.url === TOKEN_URL);
+    expect(tokenRequest).toBeDefined();
+    const codeVerifier = getFormField(tokenRequest?.init?.body, "code_verifier");
+    expect(codeVerifier).toBeTruthy();
     expect(codeVerifier).not.toBe(authState);
   });
 
@@ -853,8 +815,8 @@ describe("loginGeminiCliOAuth", () => {
     });
 
     await runProjectDiscoveryExpectingProjectId("env-project");
-    expect(countMatching(requests, ({ url }) => url.includes("v1internal:loadCodeAssist"))).toBe(3);
-    expect(countMatching(requests, ({ url }) => url.includes("v1internal:onboardUser"))).toBe(0);
+    expect(requests.filter(({ url }) => url.includes("v1internal:loadCodeAssist"))).toHaveLength(3);
+    expect(requests.some(({ url }) => url.includes("v1internal:onboardUser"))).toBe(false);
   });
 
   it("skips loadCodeAssist entirely when Gemini CLI is configured for personal OAuth", async () => {

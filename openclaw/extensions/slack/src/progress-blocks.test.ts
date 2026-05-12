@@ -72,7 +72,11 @@ describe("buildSlackProgressDraftBlocks", () => {
     expect(blocksWithLabel).toHaveLength(50);
     expect(blocksWithLabel?.[0]).toMatchObject({
       type: "section",
-      fields: [{ text: "🛠️ *Exec 10*" }, { text: "run 10" }],
+      text: { text: "*Shelling...*" },
+    });
+    expect(blocksWithLabel?.[1]).toMatchObject({
+      type: "section",
+      fields: [{ text: "🛠️ *Exec 11*" }, { text: "run 11" }],
     });
     expect(blocksWithLabel?.at(-1)).toMatchObject({
       type: "section",

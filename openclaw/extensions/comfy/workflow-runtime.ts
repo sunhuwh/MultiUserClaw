@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import { canResolveEnvSecretRefInReadOnlyPath } from "openclaw/plugin-sdk/extension-shared";
-import { extensionForMime } from "openclaw/plugin-sdk/media-mime";
 import {
   isProviderApiKeyConfigured,
   type AuthProfileStore,
@@ -28,8 +27,8 @@ import {
   isRecord,
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
-import { resolveUserPath } from "openclaw/plugin-sdk/text-utility-runtime";
+  resolveUserPath,
+} from "openclaw/plugin-sdk/text-runtime";
 
 const DEFAULT_COMFY_LOCAL_BASE_URL = "http://127.0.0.1:8188";
 const DEFAULT_COMFY_CLOUD_BASE_URL = "https://cloud.comfy.org";
@@ -305,10 +304,25 @@ async function readJsonResponse<T>(params: {
   }
 }
 
-function resolveFileExtension(params: { fileName?: string; mimeType?: string }): string {
-  const extension = extensionForMime(params.mimeType);
-  if (extension) {
-    return extension.slice(1);
+function inferFileExtension(params: { fileName?: string; mimeType?: string }): string {
+  const normalizedMime = normalizeOptionalLowercaseString(params.mimeType);
+  if (normalizedMime?.includes("jpeg")) {
+    return "jpg";
+  }
+  if (normalizedMime?.includes("png")) {
+    return "png";
+  }
+  if (normalizedMime?.includes("webm")) {
+    return "webm";
+  }
+  if (normalizedMime?.includes("mp4")) {
+    return "mp4";
+  }
+  if (normalizedMime?.includes("mpeg")) {
+    return "mp3";
+  }
+  if (normalizedMime?.includes("wav")) {
+    return "wav";
   }
   const fileName = params.fileName?.trim();
   if (!fileName) {
@@ -342,7 +356,7 @@ async function uploadInputImage(params: {
     "image",
     new Blob([toBlobBytes(params.image.buffer)], { type: params.image.mimeType }),
     normalizeOptionalString(params.image.fileName) ||
-      `input.${resolveFileExtension({ mimeType: params.image.mimeType })}`,
+      `input.${inferFileExtension({ mimeType: params.image.mimeType })}`,
   );
   form.set("type", "input");
   form.set("overwrite", "true");
@@ -809,7 +823,7 @@ export async function runComfyWorkflow(params: {
       mimeType: downloaded.mimeType,
       fileName:
         originalName ||
-        `${params.capability}-${assetIndex}.${resolveFileExtension({ mimeType: downloaded.mimeType })}`,
+        `${params.capability}-${assetIndex}.${inferFileExtension({ mimeType: downloaded.mimeType })}`,
       nodeId: output.nodeId,
     });
   }

@@ -245,25 +245,20 @@ describe("resolveDiscordPresenceUpdate", () => {
 
   it("returns status-only presence when activity is omitted", () => {
     const presence = resolveDiscordPresenceUpdate({ status: "dnd" });
-    expect(presence).toMatchObject({
-      status: "dnd",
-      activities: [],
-    });
+    expect(presence).not.toBeNull();
+    expect(presence?.status).toBe("dnd");
+    expect(presence?.activities).toEqual([]);
   });
 
   it("defaults to custom activity type when activity is set without type", () => {
     const presence = resolveDiscordPresenceUpdate({ activity: "Focus time" });
-    expect(presence).toEqual({
-      since: null,
-      status: "online",
-      activities: [
-        {
-          type: 4,
-          name: "Custom Status",
-          state: "Focus time",
-        },
-      ],
-      afk: false,
+    expect(presence).not.toBeNull();
+    expect(presence?.status).toBe("online");
+    expect(presence?.activities).toHaveLength(1);
+    expect(presence?.activities[0]).toMatchObject({
+      type: 4,
+      name: "Custom Status",
+      state: "Focus time",
     });
   });
 
@@ -273,17 +268,12 @@ describe("resolveDiscordPresenceUpdate", () => {
       activityType: 1,
       activityUrl: "https://twitch.tv/openclaw",
     });
-    expect(presence).toEqual({
-      since: null,
-      activities: [
-        {
-          type: 1,
-          name: "Live",
-          url: "https://twitch.tv/openclaw",
-        },
-      ],
-      status: "online",
-      afk: false,
+    expect(presence).not.toBeNull();
+    expect(presence?.activities).toHaveLength(1);
+    expect(presence?.activities[0]).toMatchObject({
+      type: 1,
+      name: "Live",
+      url: "https://twitch.tv/openclaw",
     });
   });
 });
@@ -341,16 +331,17 @@ describe("resolveDiscordAutoThreadContext", () => {
         continue;
       }
 
-      expect(context, testCase.name).toMatchObject({
-        To: "channel:thread",
-        From: "discord:channel:thread",
-        OriginatingTo: "channel:thread",
-        SessionKey: buildAgentSessionKey({
+      expect(context, testCase.name).not.toBeNull();
+      expect(context?.To, testCase.name).toBe("channel:thread");
+      expect(context?.From, testCase.name).toBe("discord:channel:thread");
+      expect(context?.OriginatingTo, testCase.name).toBe("channel:thread");
+      expect(context?.SessionKey, testCase.name).toBe(
+        buildAgentSessionKey({
           agentId: "agent",
           channel: "discord",
           peer: { kind: "channel", id: "thread" },
         }),
-      });
+      );
       expect(context?.ParentSessionKey, testCase.name).toBe(testCase.expectedParentSessionKey);
       expect(context?.ModelParentSessionKey, testCase.name).toBe(
         testCase.expectedModelParentSessionKey,

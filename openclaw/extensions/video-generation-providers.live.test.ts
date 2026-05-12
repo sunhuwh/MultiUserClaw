@@ -1,8 +1,8 @@
 import {
   resolveApiKeyForProvider,
-  resolveDefaultAgentDir,
+  resolveOpenClawAgentDir,
 } from "openclaw/plugin-sdk/agent-runtime";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import {
   registerProviderPlugin,
   requireRegisteredProvider,
@@ -202,15 +202,13 @@ function maybeLoadShellEnvForVideoProviders(providerIds: string[]): void {
 }
 
 function expectGeneratedVideo(video: GeneratedVideoAsset | undefined): LiveGeneratedVideo {
-  if (!video) {
-    throw new Error("expected generated video asset");
-  }
-  expect(video.mimeType.startsWith("video/")).toBe(true);
+  expect(video).toBeDefined();
+  expect(video?.mimeType.startsWith("video/")).toBe(true);
   if (video?.buffer) {
     expect(video.buffer.byteLength).toBeGreaterThan(1024);
     return video;
   }
-  if (!video.url) {
+  if (!video?.url) {
     throw new Error("expected generated video buffer or url");
   }
   expect(video.url).toMatch(/^https?:\/\//u);
@@ -336,11 +334,11 @@ function expectLiveVideoCasePassed(params: {
 }): void {
   logLiveVideoSummary(params);
   if (params.attempted.length === 0) {
-    expect(params.failures).toStrictEqual([]);
+    expect(params.failures).toEqual([]);
     console.warn("[live:video-generation] no live video attempt completed; skipping assertions");
     return;
   }
-  expect(params.failures).toStrictEqual([]);
+  expect(params.failures).toEqual([]);
 }
 
 function resolveLiveSmokeDurationSeconds(params: {
@@ -363,7 +361,7 @@ function resolveLiveSmokeDurationSeconds(params: {
 async function runLiveVideoProviderCase(testCase: LiveProviderCase): Promise<void> {
   const cfg = withPluginsEnabled(getRuntimeConfig());
   const configuredModels = resolveConfiguredLiveVideoModels(cfg);
-  const agentDir = resolveDefaultAgentDir(cfg as never);
+  const agentDir = resolveOpenClawAgentDir();
   const attempted: string[] = [];
   const skipped: string[] = [];
   const failures: string[] = [];

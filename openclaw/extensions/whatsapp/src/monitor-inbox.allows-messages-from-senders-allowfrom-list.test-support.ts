@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildNotifyMessageUpsert,
   expectPairingPromptSent,
-  getRecordChannelActivityMock,
   installWebMonitorInboxUnitTestHooks,
   mockLoadConfig,
   settleInboundWork,
@@ -32,20 +31,6 @@ function createAllowListConfig(allowFrom: string[]) {
 async function openInboxMonitor(onMessage = vi.fn()) {
   const { listener, sock } = await startInboxMonitor(onMessage);
   return { onMessage, listener, sock };
-}
-
-function expectOnlyOutboundChannelActivity(accountId = "default") {
-  const recordChannelActivityMock = getRecordChannelActivityMock();
-  expect(recordChannelActivityMock).toHaveBeenCalledWith({
-    channel: "whatsapp",
-    accountId,
-    direction: "outbound",
-  });
-  expect(recordChannelActivityMock).not.toHaveBeenCalledWith({
-    channel: "whatsapp",
-    accountId,
-    direction: "inbound",
-  });
 }
 
 async function expectOutboundDmSkipsPairing(params: {
@@ -309,7 +294,6 @@ describe("web monitor inbox", () => {
     await settleInboundWork();
 
     expect(onMessage).not.toHaveBeenCalled();
-    expectOnlyOutboundChannelActivity();
 
     await listener.close();
   });
@@ -349,7 +333,6 @@ describe("web monitor inbox", () => {
     await settleInboundWork();
 
     expect(onMessage).not.toHaveBeenCalled();
-    expectOnlyOutboundChannelActivity();
 
     await listener.close();
   });

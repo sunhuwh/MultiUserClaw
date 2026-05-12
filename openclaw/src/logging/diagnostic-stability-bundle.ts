@@ -3,7 +3,6 @@ import path from "node:path";
 import process from "node:process";
 import { resolveStateDir } from "../config/paths.js";
 import { registerFatalErrorHook } from "../infra/fatal-error-hooks.js";
-import { replaceFileAtomicSync } from "../infra/replace-file.js";
 import {
   getDiagnosticStabilitySnapshot,
   MAX_DIAGNOSTIC_STABILITY_LIMIT,
@@ -641,14 +640,14 @@ export function writeDiagnosticStabilityBundleSync(
     };
 
     const dir = resolveDiagnosticStabilityBundleDir(options);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     const file = buildBundlePath(dir, now, reason);
-    replaceFileAtomicSync({
-      filePath: file,
-      content: `${JSON.stringify(bundle, null, 2)}\n`,
-      dirMode: 0o700,
+    const tmpFile = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpFile, `${JSON.stringify(bundle, null, 2)}\n`, {
+      encoding: "utf8",
       mode: 0o600,
-      tempPrefix: ".openclaw-stability",
     });
+    fs.renameSync(tmpFile, file);
     pruneOldBundles(dir, options.retention ?? DEFAULT_DIAGNOSTIC_STABILITY_BUNDLE_RETENTION);
     return { status: "written", path: file, bundle };
   } catch (error) {

@@ -74,10 +74,14 @@ describe("Discord security audit findings", () => {
       config: discordConfig,
     });
 
-    const unrestrictedFinding = findings.find(
-      (finding) => finding.checkId === "channels.discord.commands.native.unrestricted",
+    expect(findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          checkId: "channels.discord.commands.native.unrestricted",
+          severity: "critical",
+        }),
+      ]),
     );
-    expect(unrestrictedFinding?.severity).toBe("critical");
   });
 
   it.each([
@@ -230,15 +234,13 @@ describe("Discord security audit findings", () => {
     if (testCase.expectNoNameBasedFinding) {
       expect(nameBasedFinding).toBeUndefined();
     } else {
-      if (!nameBasedFinding) {
-        throw new Error(`expected name-based finding for ${testCase.name}`);
-      }
-      expect(nameBasedFinding.severity).toBe(testCase.expectNameBasedSeverity);
+      expect(nameBasedFinding).toBeDefined();
+      expect(nameBasedFinding?.severity).toBe(testCase.expectNameBasedSeverity);
       for (const snippet of testCase.detailIncludes ?? []) {
-        expect(nameBasedFinding.detail).toContain(snippet);
+        expect(nameBasedFinding?.detail).toContain(snippet);
       }
       for (const snippet of testCase.detailExcludes ?? []) {
-        expect(nameBasedFinding.detail).not.toContain(snippet);
+        expect(nameBasedFinding?.detail).not.toContain(snippet);
       }
     }
   });

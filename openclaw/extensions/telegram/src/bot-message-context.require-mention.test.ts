@@ -56,9 +56,7 @@ describe("buildTelegramMessageContext requireMention precedence", () => {
       }),
     });
 
-    if (!ctx) {
-      throw new Error("expected Telegram context when topic disables requireMention");
-    }
+    expect(ctx).not.toBeNull();
   });
 
   it("lets explicit topic requireMention=false override mention activation", async () => {
@@ -74,9 +72,7 @@ describe("buildTelegramMessageContext requireMention precedence", () => {
       }),
     });
 
-    if (!ctx?.ctxPayload) {
-      throw new Error("expected Telegram context payload when topic disables requireMention");
-    }
+    expect(ctx).not.toBeNull();
     expect(resolveGroupActivation).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: -1001234567890,
@@ -111,8 +107,6 @@ describe("buildTelegramMessageContext requireMention precedence", () => {
       }),
     });
 
-    if (!ctx) {
-      throw new Error("expected Telegram context when topic config keeps agent");
-    }
+    expect(ctx).not.toBeNull();
   });
 });

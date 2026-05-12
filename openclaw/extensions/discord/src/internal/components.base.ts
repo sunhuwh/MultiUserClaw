@@ -50,7 +50,7 @@ export abstract class BaseComponent {
 }
 
 export abstract class BaseMessageInteractiveComponent extends BaseComponent {
-  override readonly isV2 = false;
+  readonly isV2 = false;
   defer: boolean | ConditionalComponentOption = false;
   ephemeral: boolean | ConditionalComponentOption = false;
   abstract customId: string;

@@ -2,9 +2,8 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
+import { getLatestSubagentRunByChildSessionKey } from "../agents/subagent-registry.js";
 import { resolveStateDir } from "../config/paths.js";
-import { readLocalFileSafely } from "../infra/fs-safe.js";
-import { tryReadJson, writeJson } from "../infra/json-files.js";
 import { safeFileURLToPath } from "../infra/local-file-access.js";
 import {
   getImageMetadata,
@@ -18,11 +17,10 @@ import { MEDIA_MAX_BYTES, saveMediaBuffer, saveMediaSource } from "../media/stor
 import { resolveUserPath } from "../utils.js";
 import type { AuthRateLimiter } from "./auth-rate-limit.js";
 import type { ResolvedGatewayAuth } from "./auth.js";
-import { sendJson, sendMethodNotAllowed, sendMissingScopeForbidden } from "./http-common.js";
+import { sendJson, sendMethodNotAllowed } from "./http-common.js";
 import {
   authorizeGatewayHttpRequestOrReply,
   resolveOpenAiCompatibleHttpOperatorScopes,
-  resolveOpenAiCompatibleHttpSenderIsOwner,
 } from "./http-utils.js";
 import { authorizeOperatorScopesForMethod } from "./method-scopes.js";
 import { loadSessionEntry, readSessionMessagesAsync } from "./session-utils.js";
@@ -277,6 +275,31 @@ function buildOutgoingVariantUrl(sessionKey: string, attachmentId: string, varia
   return `${OUTGOING_IMAGE_ROUTE_PREFIX}/${encodeURIComponent(sessionKey)}/${attachmentId}/${variant}`;
 }
 
+function resolveRequesterSessionKey(req: IncomingMessage) {
+  const raw = req.headers["x-openclaw-requester-session-key"];
+  if (Array.isArray(raw)) {
+    return raw[0]?.trim() || null;
+  }
+  return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : null;
+}
+
+async function requesterOwnsManagedImageSession(params: {
+  requesterSessionKey: string;
+  targetSessionKey: string;
+}) {
+  if (params.requesterSessionKey === params.targetSessionKey) {
+    return true;
+  }
+  const subagentRun = getLatestSubagentRunByChildSessionKey(params.targetSessionKey);
+  if (!subagentRun) {
+    return false;
+  }
+  return (
+    subagentRun.requesterSessionKey === params.requesterSessionKey ||
+    subagentRun.controllerSessionKey === params.requesterSessionKey
+  );
+}
+
 function deriveAltText(source: string, index: number) {
   const fallback = `Generated image ${index + 1}`;
   try {
@@ -343,7 +366,7 @@ function parseImageDataUrl(
 }
 
 async function getVariantStats(filePath: string) {
-  const { buffer: metadataBuffer, stat } = await readLocalFileSafely({ filePath });
+  const [stats, metadataBuffer] = await Promise.all([fs.stat(filePath), fs.readFile(filePath)]);
   const metadata = (await getImageMetadata(metadataBuffer).catch(() => null)) ?? {
     width: null,
     height: null,
@@ -351,13 +374,14 @@ async function getVariantStats(filePath: string) {
   return {
     width: metadata.width ?? null,
     height: metadata.height ?? null,
-    sizeBytes: Number.isFinite(stat.size) ? stat.size : null,
+    sizeBytes: Number.isFinite(stats.size) ? stats.size : null,
   };
 }
 
 async function writeManagedImageRecord(record: ManagedImageRecord, stateDir = resolveStateDir()) {
   const recordPath = resolveOutgoingRecordPath(record.attachmentId, stateDir);
-  await writeJson(recordPath, record, { trailingNewline: true });
+  await fs.mkdir(path.dirname(recordPath), { recursive: true });
+  await fs.writeFile(recordPath, JSON.stringify(record, null, 2), "utf-8");
 }
 
 async function deleteManagedImageRecordArtifacts(
@@ -454,8 +478,10 @@ export async function cleanupManagedOutgoingImageRecords(params?: {
       continue;
     }
     const recordPath = path.join(recordsDir, name);
-    const record = await tryReadJson<ManagedImageRecord>(recordPath);
-    if (!record) {
+    let record: ManagedImageRecord;
+    try {
+      record = JSON.parse(await fs.readFile(recordPath, "utf-8")) as ManagedImageRecord;
+    } catch {
       try {
         await fs.rm(recordPath, { force: true });
       } catch {
@@ -840,7 +866,7 @@ export async function createManagedOutgoingImageBlocks(params: {
       let originalBuffer =
         parsedDataUrl.kind === "image-data-url"
           ? parsedDataUrl.buffer
-          : (await readLocalFileSafely({ filePath: savedOriginal.path })).buffer;
+          : await fs.readFile(savedOriginal.path);
       validateManagedImageBuffer(originalBuffer, alt, limits);
 
       let originalStats = await getVariantStats(savedOriginal.path);
@@ -984,10 +1010,19 @@ export async function handleManagedOutgoingImageHttpRequest(
     return true;
   }
 
+  const privilegedAccess =
+    requestAuth.trustDeclaredOperatorScopes || requestAuth.authMethod === "device-token";
+
   const requestedScopes = resolveOpenAiCompatibleHttpOperatorScopes(req, requestAuth);
   const scopeAuth = authorizeOperatorScopesForMethod("chat.history", requestedScopes);
   if (!scopeAuth.allowed) {
-    sendMissingScopeForbidden(res, scopeAuth.missingScope);
+    sendJson(res, 403, {
+      ok: false,
+      error: {
+        type: "forbidden",
+        message: `missing scope: ${scopeAuth.missingScope}`,
+      },
+    });
     return true;
   }
 
@@ -1012,17 +1047,32 @@ export async function handleManagedOutgoingImageHttpRequest(
     sendStatus(res, 404, "not found");
     return true;
   }
-  // Requester-session headers are client-declared, so media bytes require
-  // authenticated owner/admin context rather than trusting a URL-scoped header.
-  if (!resolveOpenAiCompatibleHttpSenderIsOwner(req, requestAuth)) {
-    sendJson(res, 403, {
-      ok: false,
-      error: {
-        type: "forbidden",
-        message: "owner access required",
-      },
+  if (!privilegedAccess) {
+    const requesterSessionKey = resolveRequesterSessionKey(req);
+    if (!requesterSessionKey) {
+      sendJson(res, 403, {
+        ok: false,
+        error: {
+          type: "forbidden",
+          message: "requester session ownership required",
+        },
+      });
+      return true;
+    }
+    const ownsSession = await requesterOwnsManagedImageSession({
+      requesterSessionKey,
+      targetSessionKey: record.sessionKey,
     });
-    return true;
+    if (!ownsSession) {
+      sendJson(res, 403, {
+        ok: false,
+        error: {
+          type: "forbidden",
+          message: "requester session does not own attachment session",
+        },
+      });
+      return true;
+    }
   }
   if (!(await recordMatchesTranscriptMessage(record))) {
     sendStatus(res, 404, "not found");
@@ -1031,7 +1081,7 @@ export async function handleManagedOutgoingImageHttpRequest(
 
   let body: Buffer;
   try {
-    body = (await readLocalFileSafely({ filePath: record.original.path })).buffer;
+    body = await fs.readFile(record.original.path);
   } catch {
     sendStatus(res, 404, "not found");
     return true;

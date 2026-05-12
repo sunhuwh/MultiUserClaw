@@ -14,16 +14,6 @@ import {
   repairBrokenSessionTranscriptFile,
 } from "./doctor-session-transcripts.js";
 
-function countNonEmptyLines(value: string): number {
-  let count = 0;
-  for (const line of value.split(/\r?\n/)) {
-    if (line) {
-      count += 1;
-    }
-  }
-  return count;
-}
-
 describe("doctor session transcript repair", () => {
   let root: string;
 
@@ -90,14 +80,14 @@ describe("doctor session transcript repair", () => {
 
     const result = await repairBrokenSessionTranscriptFile({ filePath, shouldRepair: true });
 
-    expect(result.broken).toBe(true);
-    expect(result.repaired).toBe(true);
-    expect(result.originalEntries).toBe(6);
-    expect(result.activeEntries).toBe(3);
-    if (result.backupPath === undefined) {
-      throw new Error("expected transcript backup path");
-    }
-    await expect(fs.access(result.backupPath)).resolves.toBeUndefined();
+    expect(result).toMatchObject({
+      broken: true,
+      repaired: true,
+      originalEntries: 6,
+      activeEntries: 3,
+    });
+    expect(result.backupPath).toBeTruthy();
+    await expect(fs.access(result.backupPath!)).resolves.toBeUndefined();
     const lines = (await fs.readFile(filePath, "utf-8")).trim().split(/\r?\n/);
     expect(lines).toHaveLength(4);
     expect(
@@ -137,7 +127,7 @@ describe("doctor session transcript repair", () => {
     expect(title).toBe("Session transcripts");
     expect(message).toContain("duplicated prompt-rewrite branches");
     expect(message).toContain('Run "openclaw doctor --fix"');
-    expect(countNonEmptyLines(await fs.readFile(filePath, "utf-8"))).toBe(3);
+    expect((await fs.readFile(filePath, "utf-8")).split(/\r?\n/).filter(Boolean)).toHaveLength(3);
   });
 
   it("ignores ordinary branch history without internal runtime context", async () => {
@@ -160,6 +150,6 @@ describe("doctor session transcript repair", () => {
     const result = await repairBrokenSessionTranscriptFile({ filePath, shouldRepair: true });
 
     expect(result.broken).toBe(false);
-    expect(countNonEmptyLines(await fs.readFile(filePath, "utf-8"))).toBe(3);
+    expect((await fs.readFile(filePath, "utf-8")).split(/\r?\n/).filter(Boolean)).toHaveLength(3);
   });
 });

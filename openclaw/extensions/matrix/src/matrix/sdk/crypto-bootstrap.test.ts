@@ -3,36 +3,6 @@ import { MatrixCryptoBootstrapper, type MatrixCryptoBootstrapperDeps } from "./c
 import type { MatrixCryptoBootstrapApi, MatrixRawEvent } from "./types.js";
 
 type BootstrapCrossSigningMock = Mock<MatrixCryptoBootstrapApi["bootstrapCrossSigning"]>;
-type MockCallSource = { mock: { calls: Array<Array<unknown>> } };
-
-function mockObjectArg(
-  source: MockCallSource,
-  label: string,
-  callIndex = 0,
-  argIndex = 0,
-): Record<string, unknown> {
-  const call = source.mock.calls[callIndex];
-  if (!call) {
-    throw new Error(`Expected ${label} call ${callIndex} to exist`);
-  }
-  const value = call[argIndex];
-  if (!value || typeof value !== "object") {
-    throw new Error(`Expected ${label} call ${callIndex} argument ${argIndex} to be an object`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function expectBootstrapCrossSigningCall(
-  source: MockCallSource,
-  callNumber: number,
-  expected?: { setupNewCrossSigning?: boolean },
-) {
-  const options = mockObjectArg(source, "bootstrapCrossSigning", callNumber - 1);
-  expect(options.authUploadDeviceSigningKeys).toBeTypeOf("function");
-  if (expected && "setupNewCrossSigning" in expected) {
-    expect(options.setupNewCrossSigning).toBe(expected.setupNewCrossSigning);
-  }
-}
 
 function createBootstrapperDeps() {
   return {
@@ -136,10 +106,19 @@ function expectForcedResetCrossSigningCalls(
   params: { setupNewCall: number; totalCalls: number },
 ) {
   expect(bootstrapCrossSigning).toHaveBeenCalledTimes(params.totalCalls);
-  expectBootstrapCrossSigningCall(bootstrapCrossSigning, params.setupNewCall, {
-    setupNewCrossSigning: true,
-  });
-  expectBootstrapCrossSigningCall(bootstrapCrossSigning, params.totalCalls);
+  expect(bootstrapCrossSigning).toHaveBeenNthCalledWith(
+    params.setupNewCall,
+    expect.objectContaining({
+      setupNewCrossSigning: true,
+      authUploadDeviceSigningKeys: expect.any(Function),
+    }),
+  );
+  expect(bootstrapCrossSigning).toHaveBeenNthCalledWith(
+    params.totalCalls,
+    expect.objectContaining({
+      authUploadDeviceSigningKeys: expect.any(Function),
+    }),
+  );
 }
 
 async function bootstrapWithVerificationRequestListener(overrides?: {
@@ -190,8 +169,11 @@ describe("MatrixCryptoBootstrapper", () => {
 
     await bootstrapper.bootstrap(crypto);
 
-    expect(crypto.bootstrapCrossSigning).toHaveBeenCalledOnce();
-    expectBootstrapCrossSigningCall(crypto.bootstrapCrossSigning as unknown as MockCallSource, 1);
+    expect(crypto.bootstrapCrossSigning).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authUploadDeviceSigningKeys: expect.any(Function),
+      }),
+    );
     expect(deps.recoveryKeyStore.bootstrapSecretStorageWithRecoveryKey).toHaveBeenCalledWith(
       crypto,
       {
@@ -227,8 +209,19 @@ describe("MatrixCryptoBootstrapper", () => {
     await bootstrapper.bootstrap(crypto);
 
     expect(bootstrapCrossSigning).toHaveBeenCalledTimes(2);
-    expectBootstrapCrossSigningCall(bootstrapCrossSigning, 1);
-    expectBootstrapCrossSigningCall(bootstrapCrossSigning, 2, { setupNewCrossSigning: true });
+    expect(bootstrapCrossSigning).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        authUploadDeviceSigningKeys: expect.any(Function),
+      }),
+    );
+    expect(bootstrapCrossSigning).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        setupNewCrossSigning: true,
+        authUploadDeviceSigningKeys: expect.any(Function),
+      }),
+    );
   });
 
   it("does not auto-reset cross-signing when automatic reset is disabled", async () => {
@@ -254,7 +247,11 @@ describe("MatrixCryptoBootstrapper", () => {
     });
 
     expect(bootstrapCrossSigning).toHaveBeenCalledTimes(1);
-    expectBootstrapCrossSigningCall(bootstrapCrossSigning, 1);
+    expect(bootstrapCrossSigning).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authUploadDeviceSigningKeys: expect.any(Function),
+      }),
+    );
   });
 
   it("does not mark the own Matrix identity verified before cross-signing the current device", async () => {
@@ -352,8 +349,18 @@ describe("MatrixCryptoBootstrapper", () => {
     );
 
     expectSecretStorageRepairRetry(deps, crypto, bootstrapCrossSigning);
-    expectBootstrapCrossSigningCall(bootstrapCrossSigning, 1);
-    expectBootstrapCrossSigningCall(bootstrapCrossSigning, 2);
+    expect(bootstrapCrossSigning).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        authUploadDeviceSigningKeys: expect.any(Function),
+      }),
+    );
+    expect(bootstrapCrossSigning).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        authUploadDeviceSigningKeys: expect.any(Function),
+      }),
+    );
   });
 
   it("recreates secret storage and retries cross-signing when explicit bootstrap hits bad MAC", async () => {
@@ -585,7 +592,13 @@ describe("MatrixCryptoBootstrapper", () => {
     await bootstrapper.bootstrap(crypto);
 
     expect(bootstrapCrossSigning).toHaveBeenCalledTimes(2);
-    expectBootstrapCrossSigningCall(bootstrapCrossSigning, 2, { setupNewCrossSigning: true });
+    expect(bootstrapCrossSigning).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        setupNewCrossSigning: true,
+        authUploadDeviceSigningKeys: expect.any(Function),
+      }),
+    );
   });
 
   it("marks own device verified and cross-signs it when needed", async () => {

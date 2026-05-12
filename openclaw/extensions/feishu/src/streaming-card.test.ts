@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const fetchWithSsrFGuardMock = vi.hoisted(() => vi.fn());
 
@@ -38,18 +38,9 @@ function setStreamingSessionInternals(
 }
 
 describe("FeishuStreamingSession", () => {
-  afterAll(() => {
-    vi.doUnmock("openclaw/plugin-sdk/ssrf-runtime");
-    vi.resetModules();
-  });
-
   beforeEach(() => {
     vi.useRealTimers();
     fetchWithSsrFGuardMock.mockReset();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
   });
 
   function mockFetches(updateBodies: string[]) {

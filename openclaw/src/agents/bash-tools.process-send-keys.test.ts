@@ -12,12 +12,6 @@ function createWritableStdinStub(): WritableStdin {
   };
 }
 
-function expectTextContent(content: unknown, text: string) {
-  const part = content as { type?: string; text?: string } | undefined;
-  expect(part?.type).toBe("text");
-  expect(part?.text).toContain(text);
-}
-
 test("process send-keys fails loud for unknown cursor mode when arrows depend on it", async () => {
   const result = await handleProcessSendKeys({
     sessionId: "sess-unknown-mode",
@@ -31,8 +25,11 @@ test("process send-keys fails loud for unknown cursor mode when arrows depend on
     keys: ["up"],
   });
 
-  expect((result.details as { status?: string }).status).toBe("failed");
-  expectTextContent(result.content[0], "cursor key mode is not known yet");
+  expect(result.details).toMatchObject({ status: "failed" });
+  expect(result.content[0]).toMatchObject({
+    type: "text",
+    text: expect.stringContaining("cursor key mode is not known yet"),
+  });
 });
 
 test("process send-keys still sends non-cursor keys while mode is unknown", async () => {
@@ -48,5 +45,5 @@ test("process send-keys still sends non-cursor keys while mode is unknown", asyn
     keys: ["Enter"],
   });
 
-  expect((result.details as { status?: string }).status).toBe("running");
+  expect(result.details).toMatchObject({ status: "running" });
 });

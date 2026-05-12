@@ -31,22 +31,6 @@ function createStore(access: string): AuthProfileStore {
   };
 }
 
-function expectOpenAICodexSnapshotCredential(
-  store: AuthProfileStore | undefined,
-  params: { access: string; refresh?: string },
-) {
-  const credential = store?.profiles["openai-codex:default"];
-  expect(credential?.type).toBe("oauth");
-  if (credential?.type !== "oauth") {
-    throw new Error("Expected OpenAI Codex OAuth credential snapshot");
-  }
-  expect(credential.provider).toBe("openai-codex");
-  expect(credential.access).toBe(params.access);
-  if (params.refresh) {
-    expect(credential.refresh).toBe(params.refresh);
-  }
-}
-
 describe("runtime auth profile snapshots", () => {
   it("isolates set/get/replace snapshot mutations without structuredClone", () => {
     const structuredCloneSpy = vi.spyOn(globalThis, "structuredClone");
@@ -58,14 +42,20 @@ describe("runtime auth profile snapshots", () => {
       stored.order!["openai-codex"].push("mutated");
 
       const first = getRuntimeAuthProfileStoreSnapshot(agentDir);
-      expectOpenAICodexSnapshotCredential(first, { access: "access-1" });
+      expect(first?.profiles["openai-codex:default"]).toMatchObject({
+        provider: "openai-codex",
+        access: "access-1",
+      });
       expect(first?.order?.["openai-codex"]).toEqual(["openai-codex:default"]);
 
       first!.profiles["openai-codex:default"].provider = "mutated-again";
       first!.usageStats!["openai-codex:default"].lastUsed = 99;
 
       const second = getRuntimeAuthProfileStoreSnapshot(agentDir);
-      expectOpenAICodexSnapshotCredential(second, { access: "access-1" });
+      expect(second?.profiles["openai-codex:default"]).toMatchObject({
+        provider: "openai-codex",
+        access: "access-1",
+      });
       expect(second?.usageStats?.["openai-codex:default"]?.lastUsed).toBe(1);
 
       const replacement = createStore("access-2");
@@ -77,7 +67,7 @@ describe("runtime auth profile snapshots", () => {
       }
 
       const replaced = getRuntimeAuthProfileStoreSnapshot(agentDir);
-      expectOpenAICodexSnapshotCredential(replaced, {
+      expect(replaced?.profiles["openai-codex:default"]).toMatchObject({
         access: "access-2",
         refresh: "refresh-access-2",
       });

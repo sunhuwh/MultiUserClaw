@@ -152,17 +152,9 @@ function buildSuccessorEntries(params: {
     }
   }
 
-  const entryById = new Map<string, SessionEntry>();
-  const originalIndexById = new Map<string, number>();
-  for (let index = 0; index < allEntries.length; index += 1) {
-    const entry = allEntries[index];
-    entryById.set(entry.id, entry);
-    originalIndexById.set(entry.id, index);
-  }
-  const activeBranchIds = new Set<string>();
-  for (const entry of branch) {
-    activeBranchIds.add(entry.id);
-  }
+  const entryById = new Map(allEntries.map((entry) => [entry.id, entry]));
+  const activeBranchIds = new Set(branch.map((entry) => entry.id));
+  const originalIndexById = new Map(allEntries.map((entry, index) => [entry.id, index]));
   const keptEntries: SessionEntry[] = [];
   for (const entry of allEntries) {
     if (removedIds.has(entry.id)) {
@@ -193,11 +185,7 @@ function collectLatestStateEntryIds(entries: SessionEntry[]): Set<string> {
       latestByType.set(entry.type, entry);
     }
   }
-  const ids = new Set<string>();
-  for (const entry of latestByType.values()) {
-    ids.add(entry.id);
-  }
-  return ids;
+  return new Set(Array.from(latestByType.values(), (entry) => entry.id));
 }
 
 function isDedupedStateEntry(entry: SessionEntry): boolean {
@@ -214,10 +202,7 @@ function orderSuccessorEntries(params: {
   originalIndexById: Map<string, number>;
 }): SessionEntry[] {
   const { entries, activeBranchIds, originalIndexById } = params;
-  const entryIds = new Set<string>();
-  for (const entry of entries) {
-    entryIds.add(entry.id);
-  }
+  const entryIds = new Set(entries.map((entry) => entry.id));
   const childrenByParentId = new Map<string | null, SessionEntry[]>();
 
   for (const entry of entries) {

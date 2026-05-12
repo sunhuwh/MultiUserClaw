@@ -1,40 +1,37 @@
+import fs from "node:fs";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { setBundledPluginsDirOverrideForTest } from "./bundled-dir.js";
+import { describe, expect, it } from "vitest";
 import { loadOpenClawPlugins } from "./loader.js";
 
 describe("source checkout bundled plugin runtime", () => {
-  beforeEach(() => {
-    setBundledPluginsDirOverrideForTest(path.join(process.cwd(), "extensions"));
-  });
-
-  afterEach(() => {
-    setBundledPluginsDirOverrideForTest(undefined);
-  });
-
-  it("loads enabled bundled plugins from source checkout", () => {
+  it("loads enabled bundled plugins from built dist or source checkout", () => {
     const registry = loadOpenClawPlugins({
       cache: false,
-      onlyPluginIds: ["tokenjuice"],
+      onlyPluginIds: ["twitch"],
       config: {
         plugins: {
           entries: {
-            tokenjuice: { enabled: true },
+            twitch: { enabled: true },
           },
         },
       },
     });
 
-    const tokenjuice = registry.plugins.find((plugin) => plugin.id === "tokenjuice");
-    expect(tokenjuice).toMatchObject({
+    const twitch = registry.plugins.find((plugin) => plugin.id === "twitch");
+    expect(twitch).toMatchObject({
       status: "loaded",
       origin: "bundled",
     });
 
-    const expectedRuntime = `${path.sep}extensions${path.sep}tokenjuice${path.sep}index.ts`;
-    const expectedRoot = `${path.sep}extensions${path.sep}tokenjuice`;
+    const builtRuntime = path.join(process.cwd(), "dist", "extensions", "twitch", "index.js");
+    const expectedRuntime = fs.existsSync(builtRuntime)
+      ? `${path.sep}dist${path.sep}extensions${path.sep}twitch${path.sep}index.js`
+      : `${path.sep}extensions${path.sep}twitch${path.sep}index.ts`;
+    const expectedRoot = fs.existsSync(builtRuntime)
+      ? `${path.sep}dist${path.sep}extensions${path.sep}twitch`
+      : `${path.sep}extensions${path.sep}twitch`;
 
-    expect(tokenjuice?.source).toContain(expectedRuntime);
-    expect(tokenjuice?.rootDir).toContain(expectedRoot);
+    expect(twitch?.source).toContain(expectedRuntime);
+    expect(twitch?.rootDir).toContain(expectedRoot);
   });
 });

@@ -286,7 +286,7 @@ export class BaseComponentInteraction extends BaseInteraction {
   async update(payload: MessagePayload): Promise<unknown> {
     return await this.callback(InteractionResponseType.UpdateMessage, serializePayload(payload));
   }
-  override async acknowledge(): Promise<unknown> {
+  async acknowledge(): Promise<unknown> {
     return await this.callback(InteractionResponseType.DeferredMessageUpdate);
   }
   async showModal(modal: Modal): Promise<unknown> {
@@ -323,7 +323,7 @@ export class ModalInteraction extends BaseInteraction {
       client,
     );
   }
-  override async acknowledge(): Promise<unknown> {
+  async acknowledge(): Promise<unknown> {
     return await this.callback(InteractionResponseType.DeferredMessageUpdate);
   }
 }

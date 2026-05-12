@@ -11,19 +11,18 @@ import {
   resolveAgentWorkspaceDir,
   resolveDefaultModelForAgent,
 } from "openclaw/plugin-sdk/agent-runtime";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import {
   resolveLivePluginConfigObject,
   resolvePluginConfigObject,
 } from "openclaw/plugin-sdk/plugin-config-runtime";
 import { definePluginEntry, type OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { parseAgentSessionKey, parseThreadSessionSuffix } from "openclaw/plugin-sdk/routing";
-import { isPathInside, replaceFileAtomic } from "openclaw/plugin-sdk/security-runtime";
 import {
   resolveSessionStoreEntry,
   updateSessionStore,
 } from "openclaw/plugin-sdk/session-store-runtime";
-import { tempWorkspace, resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
+import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_AGENT_ID = "main";
@@ -42,43 +41,7 @@ const DEFAULT_QMD_SEARCH_MODE = "search" as const;
 const DEFAULT_TRANSCRIPT_DIR = "active-memory";
 const DEFAULT_CIRCUIT_BREAKER_MAX_TIMEOUTS = 3;
 const DEFAULT_CIRCUIT_BREAKER_COOLDOWN_MS = 60_000;
-const DEFAULT_ACTIVE_MEMORY_TOOLS_ALLOW = ["memory_search", "memory_get"] as const;
-const LANCEDB_ACTIVE_MEMORY_TOOLS_ALLOW = ["memory_recall"] as const;
-const MAX_ACTIVE_MEMORY_TOOLS_ALLOW = 32;
-const ACTIVE_MEMORY_RESERVED_TOOLS_ALLOW = new Set([
-  "*",
-  "agents_list",
-  "apply_patch",
-  "browser",
-  "canvas",
-  "cron",
-  "edit",
-  "exec",
-  "gateway",
-  "heartbeat_respond",
-  "heartbeat_response",
-  "image",
-  "image_generate",
-  "message",
-  "music_generate",
-  "nodes",
-  "pdf",
-  "process",
-  "read",
-  "session_status",
-  "sessions_history",
-  "sessions_list",
-  "sessions_send",
-  "sessions_spawn",
-  "sessions_yield",
-  "subagents",
-  "tts",
-  "update_plan",
-  "video_generate",
-  "web_fetch",
-  "web_search",
-  "write",
-]);
+const ACTIVE_MEMORY_TOOL_ALLOWLIST = ["memory_recall", "memory_search", "memory_get"] as const;
 const TOGGLE_STATE_FILE = "session-toggles.json";
 const DEFAULT_PARTIAL_TRANSCRIPT_MAX_CHARS = 32_000;
 const DEFAULT_TRANSCRIPT_READ_MAX_LINES = 2_000;
@@ -137,7 +100,6 @@ type ActiveRecallPluginConfig = {
     | "recall-heavy"
     | "precision-heavy"
     | "preference-only";
-  toolsAllow?: string[];
   promptOverride?: string;
   promptAppend?: string;
   timeoutMs?: number;
@@ -178,7 +140,6 @@ type ResolvedActiveRecallPluginConfig = {
     | "recall-heavy"
     | "precision-heavy"
     | "preference-only";
-  toolsAllow: string[];
   promptOverride?: string;
   promptAppend?: string;
   timeoutMs: number;
@@ -224,7 +185,7 @@ type ActiveMemorySearchDebug = {
 
 type ActiveRecallResult =
   | {
-      status: "empty" | "failed" | "no_relevant_memory" | "timeout" | "unavailable";
+      status: "empty" | "timeout" | "unavailable";
       elapsedMs: number;
       summary: string | null;
       searchDebug?: ActiveMemorySearchDebug;
@@ -256,13 +217,12 @@ type TranscriptReadLimits = {
 
 type RecallSubagentResult = {
   rawReply: string;
-  resultStatus?: "failed" | "unavailable";
   transcriptPath?: string;
   searchDebug?: ActiveMemorySearchDebug;
 };
 
 type TerminalMemorySearchResult = {
-  status: "unavailable";
+  status: "empty";
   searchDebug?: ActiveMemorySearchDebug;
 };
 
@@ -288,7 +248,6 @@ const toggleStoreLocks = new Map<string, AsyncLock>();
 let lastActiveRecallCacheSweepAt = 0;
 let minimumTimeoutMs = DEFAULT_MIN_TIMEOUT_MS;
 let setupGraceTimeoutMs = DEFAULT_SETUP_GRACE_TIMEOUT_MS;
-let timeoutPartialDataGraceMs = TIMEOUT_PARTIAL_DATA_GRACE_MS;
 
 function createAsyncLock(): AsyncLock {
   let lock: Promise<void> = Promise.resolve();
@@ -438,46 +397,6 @@ function normalizeChatIdList(value: unknown): string[] {
   return out;
 }
 
-function normalizeConfiguredToolsAllow(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const entry of value) {
-    if (typeof entry !== "string") {
-      continue;
-    }
-    const trimmed = entry.trim();
-    if (!trimmed || isReservedActiveMemoryToolsAllowEntry(trimmed) || seen.has(trimmed)) {
-      continue;
-    }
-    seen.add(trimmed);
-    out.push(trimmed);
-    if (out.length >= MAX_ACTIVE_MEMORY_TOOLS_ALLOW) {
-      break;
-    }
-  }
-  return out.length > 0 ? out : undefined;
-}
-
-function isReservedActiveMemoryToolsAllowEntry(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  return normalized.startsWith("group:") || ACTIVE_MEMORY_RESERVED_TOOLS_ALLOW.has(normalized);
-}
-
-function resolveDefaultToolsAllow(cfg: OpenClawConfig | undefined): string[] {
-  return cfg?.plugins?.slots?.memory === "memory-lancedb"
-    ? [...LANCEDB_ACTIVE_MEMORY_TOOLS_ALLOW]
-    : [...DEFAULT_ACTIVE_MEMORY_TOOLS_ALLOW];
-}
-
-function resolveToolsAllow(params: { pluginToolsAllow: unknown; cfg?: OpenClawConfig }): string[] {
-  return (
-    normalizeConfiguredToolsAllow(params.pluginToolsAllow) ?? resolveDefaultToolsAllow(params.cfg)
-  );
-}
-
 function normalizePromptConfigText(value: unknown): string | undefined {
   const text = typeof value === "string" ? value.trim() : "";
   return text ? text : undefined;
@@ -502,7 +421,7 @@ function resolveSafeTranscriptDir(baseSessionsDir: string, transcriptDir: string
   }
   const resolvedBase = path.resolve(baseSessionsDir);
   const candidate = path.resolve(resolvedBase, normalized);
-  if (!isPathInside(resolvedBase, candidate)) {
+  if (candidate !== resolvedBase && !candidate.startsWith(resolvedBase + path.sep)) {
     return path.resolve(resolvedBase, DEFAULT_TRANSCRIPT_DIR);
   }
   return candidate;
@@ -522,13 +441,6 @@ function resolvePersistentTranscriptBaseDir(api: OpenClawPluginApi, agentId: str
     "agents",
     toSafeTranscriptAgentDirName(agentId),
   );
-}
-
-function requireTransientWorkspaceDir(tempDir: string | undefined): string {
-  if (!tempDir) {
-    throw new Error("Active memory transient workspace was not initialized.");
-  }
-  return tempDir;
 }
 
 function resolveCanonicalSessionKeyFromSessionId(params: {
@@ -583,14 +495,7 @@ function normalizeOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function formatRuntimeToolsAllowSource(toolsAllow: readonly string[]): string {
-  return `runtime toolsAllow: ${toolsAllow.join(", ")}`;
-}
-
-function isMissingRegisteredMemoryToolsError(
-  error: unknown,
-  toolsAllow: readonly string[] = DEFAULT_ACTIVE_MEMORY_TOOLS_ALLOW,
-): boolean {
+function isMissingRegisteredMemoryToolsError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
   }
@@ -602,12 +507,24 @@ function isMissingRegisteredMemoryToolsError(
     return false;
   }
   const sources = message.slice(prefix.length, -suffix.length);
-  const runtimeSource = formatRuntimeToolsAllowSource(toolsAllow);
+  const runtimeSource = `runtime toolsAllow: ${ACTIVE_MEMORY_TOOL_ALLOWLIST.join(", ")}`;
   const sourceParts = sources
     .split(";")
     .map((source) => source.trim())
     .filter(Boolean);
-  return sourceParts.includes(runtimeSource);
+  if (!sourceParts.includes(runtimeSource)) {
+    return false;
+  }
+  return sourceParts.every((source) => {
+    if (source === runtimeSource) {
+      return true;
+    }
+    const entries = source
+      .slice(source.indexOf(":") + 1)
+      .split(",")
+      .map((entry) => entry.trim());
+    return entries.includes("*");
+  });
 }
 
 function resolveRecallRunChannelContext(params: {
@@ -621,16 +538,14 @@ function resolveRecallRunChannelContext(params: {
   messageChannel?: string;
   messageProvider?: string;
 } {
-  const isRunnableChannelName = (channel: string) =>
-    !channel.includes(":") && !channel.includes("/");
   const explicitChannel = normalizeOptionalString(params.channelId);
   const explicitProvider = normalizeOptionalString(params.messageProvider);
   // A channelId that contains ":" is a scoped conversation id (e.g. Telegram
-  // forum-topic "-100123:topic:77") or "/" (e.g. Google Chat "spaces/...") is
-  // not a runnable channel name. Using it as the embedded recall run's channel
-  // causes bundled-plugin dirName validation to throw (#76704, #78918).
+  // forum-topic "-100123:topic:77"), not a runnable channel name. Using it as
+  // the embedded recall run's channel causes bundled-plugin dirName validation
+  // to throw because ":" is not allowed in directory names (#76704).
   const runnableExplicitChannel =
-    explicitChannel && isRunnableChannelName(explicitChannel) ? explicitChannel : undefined;
+    explicitChannel && !explicitChannel.includes(":") ? explicitChannel : undefined;
   const trustedExplicitChannel =
     runnableExplicitChannel && runnableExplicitChannel !== explicitProvider
       ? runnableExplicitChannel
@@ -682,12 +597,12 @@ function resolveRecallRunChannelContext(params: {
     const rawStrongEntryChannel =
       normalizeOptionalString(sessionEntry?.lastChannel) ??
       normalizeOptionalString(sessionEntry?.channel);
-    // Channel IDs containing ":" or "/" are scoped conversation IDs, not
-    // runnable channel names. The same guard that
+    // Channel IDs containing ":" are scoped conversation IDs (e.g. QQ c2c
+    // "c2c:10D4F7C2..."), not runnable channel names. The same guard that
     // applies to explicit channelId (#76704) must also apply to channels
     // read from the session store (#77396).
     const strongEntryChannel =
-      rawStrongEntryChannel && isRunnableChannelName(rawStrongEntryChannel)
+      rawStrongEntryChannel && !rawStrongEntryChannel.includes(":")
         ? rawStrongEntryChannel
         : undefined;
     const weakEntryChannel = normalizeOptionalString(sessionEntry?.origin?.provider);
@@ -748,11 +663,14 @@ async function readToggleStore(statePath: string): Promise<ActiveMemoryToggleSto
 }
 
 async function writeToggleStore(statePath: string, store: ActiveMemoryToggleStore): Promise<void> {
-  await replaceFileAtomic({
-    filePath: statePath,
-    content: `${JSON.stringify(store, null, 2)}\n`,
-    tempPrefix: ".active-memory",
-  });
+  await fs.mkdir(path.dirname(statePath), { recursive: true });
+  const tempPath = `${statePath}.${process.pid}.${Date.now()}.${crypto.randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(tempPath, `${JSON.stringify(store, null, 2)}\n`, "utf8");
+    await fs.rename(tempPath, statePath);
+  } finally {
+    await fs.rm(tempPath, { force: true }).catch(() => undefined);
+  }
 }
 
 async function isSessionActiveMemoryDisabled(params: {
@@ -872,10 +790,7 @@ function requiresAdminToMutateActiveMemoryGlobal(gatewayClientScopes?: readonly 
 const ACTIVE_MEMORY_GLOBAL_MUTATION_ADMIN_REQUIRED_TEXT =
   "⚠️ /active-memory global enable/disable changes require operator.admin for gateway clients.";
 
-function normalizePluginConfig(
-  pluginConfig: unknown,
-  cfg?: OpenClawConfig,
-): ResolvedActiveRecallPluginConfig {
+function normalizePluginConfig(pluginConfig: unknown): ResolvedActiveRecallPluginConfig {
   const raw = (
     pluginConfig && typeof pluginConfig === "object" ? pluginConfig : {}
   ) as ActiveRecallPluginConfig;
@@ -903,7 +818,6 @@ function normalizePluginConfig(
     deniedChatIds: normalizeChatIdList(raw.deniedChatIds),
     thinking: resolveThinkingLevel(raw.thinking),
     promptStyle: resolvePromptStyle(raw.promptStyle, raw.queryMode),
-    toolsAllow: resolveToolsAllow({ pluginToolsAllow: raw.toolsAllow, cfg }),
     promptOverride: normalizePromptConfigText(raw.promptOverride),
     promptAppend: normalizePromptConfigText(raw.promptAppend),
     timeoutMs: clampInt(
@@ -1075,11 +989,11 @@ function buildRecallPrompt(params: {
     "Your job is to search memory and return only the most relevant memory context for that model.",
     "You receive a bounded search query plus conversation context, including the user's latest message.",
     "Use only the available memory tools.",
-    "Use the bounded search query with the configured memory tools.",
-    `Configured memory tools: ${params.config.toolsAllow.join(", ")}.`,
+    "Use the bounded search query as the memory_search or memory_recall query.",
     "Do not use channel metadata, provider metadata, debug output, or the full conversation context as the memory tool query.",
-    "If the available memory tools find nothing useful, reply with NONE.",
-    "When searching for preference or habit recall, use permissive search limits or thresholds before deciding that no useful memory exists.",
+    "Prefer memory_recall when available.",
+    "If memory_recall is unavailable, use memory_search and memory_get.",
+    "When searching for preference or habit recall, use a permissive recall limit or memory_search threshold before deciding that no useful memory exists.",
     "Do not answer the user directly.",
     `Prompt style: ${params.config.promptStyle}.`,
     ...buildPromptStyleLines(params.config.promptStyle),
@@ -1401,11 +1315,7 @@ function toSingleLineLogValue(value: unknown): string {
 }
 
 function shouldCacheResult(result: ActiveRecallResult): boolean {
-  return result.status === "ok" && result.summary.length > 0;
-}
-
-function isUnavailableMemorySearchDebug(debug?: ActiveMemorySearchDebug): boolean {
-  return Boolean(debug?.error);
+  return result.status === "ok" || result.status === "empty";
 }
 
 function resolveStatusUpdateAgentId(ctx: { agentId?: string; sessionKey?: string }): string {
@@ -1746,10 +1656,15 @@ function extractTerminalMemorySearchResultFromSessionRecord(
   }
   const details = asRecord(message.details);
   const debug = extractActiveMemorySearchDebugFromSessionRecord(value);
+  const results = Array.isArray(details?.results) ? details.results : undefined;
   const disabled = details?.disabled === true;
-  const unavailable = disabled || Boolean(debug?.error) || Boolean(details?.error);
-  if (unavailable) {
-    return { status: "unavailable", searchDebug: debug };
+  const unavailable =
+    disabled || Boolean(debug?.warning) || Boolean(debug?.error) || Boolean(details?.error);
+  const debugHits =
+    typeof debug?.hits === "number" && Number.isFinite(debug.hits) ? debug.hits : undefined;
+  const zeroHitSearch = results !== undefined ? results.length === 0 : debugHits === 0;
+  if (unavailable || zeroHitSearch) {
+    return { status: "empty", searchDebug: debug };
   }
   return undefined;
 }
@@ -1998,7 +1913,7 @@ async function waitForSubagentPartialTimeoutData(
   }
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<undefined>((resolve) => {
-    timeoutId = setTimeout(() => resolve(undefined), timeoutPartialDataGraceMs);
+    timeoutId = setTimeout(() => resolve(undefined), TIMEOUT_PARTIAL_DATA_GRACE_MS);
     timeoutId.unref?.();
   });
   try {
@@ -2038,23 +1953,21 @@ async function buildTimeoutRecallResult(params: {
     normalizeActiveSummary(rawReply ?? "") ?? "",
     params.maxSummaryChars,
   );
-  const searchDebug =
-    params.searchDebug ??
-    subagentPartialData.searchDebug ??
-    (params.sessionFile ? await readActiveMemorySearchDebug(params.sessionFile) : undefined);
   if (summary.length === 0) {
     return {
       status: "timeout",
       elapsedMs: params.elapsedMs,
       summary: null,
-      searchDebug,
     };
   }
   return {
     status: "timeout_partial",
     elapsedMs: params.elapsedMs,
     summary,
-    searchDebug,
+    searchDebug:
+      params.searchDebug ??
+      subagentPartialData.searchDebug ??
+      (params.sessionFile ? await readActiveMemorySearchDebug(params.sessionFile) : undefined),
   };
 }
 
@@ -2471,23 +2384,18 @@ async function runRecallSubagent(params: {
   const subagentSessionKey = parentSessionKey
     ? `${parentSessionKey}:${subagentSuffix}`
     : `agent:${params.agentId}:${subagentSuffix}`;
-  const transientWorkspace = params.config.persistTranscripts
+  const tempDir = params.config.persistTranscripts
     ? undefined
-    : await tempWorkspace({
-        rootDir: resolvePreferredOpenClawTmpDir(),
-        prefix: "openclaw-active-memory-",
-      });
-  const tempDir = transientWorkspace?.dir;
+    : await fs.mkdtemp(path.join(resolvePreferredOpenClawTmpDir(), "openclaw-active-memory-"));
   const persistedDir = params.config.persistTranscripts
     ? resolveSafeTranscriptDir(
         resolvePersistentTranscriptBaseDir(params.api, params.agentId),
         params.config.transcriptDir,
       )
     : undefined;
-  const sessionFile =
-    persistedDir !== undefined
-      ? path.join(persistedDir, `${subagentSessionId}.jsonl`)
-      : path.join(requireTransientWorkspaceDir(tempDir), "session.jsonl");
+  const sessionFile = params.config.persistTranscripts
+    ? path.join(persistedDir!, `${subagentSessionId}.jsonl`)
+    : path.join(tempDir!, "session.jsonl");
   params.onSessionFile?.(sessionFile);
   if (persistedDir) {
     await fs.mkdir(persistedDir, { recursive: true, mode: 0o700 });
@@ -2526,7 +2434,7 @@ async function runRecallSubagent(params: {
       timeoutMs: embeddedTimeoutMs,
       runId: subagentSessionId,
       trigger: "manual",
-      toolsAllow: [...params.config.toolsAllow],
+      toolsAllow: [...ACTIVE_MEMORY_TOOL_ALLOWLIST],
       disableMessageTool: true,
       allowGatewaySubagentBinding: true,
       bootstrapContextMode: "lightweight",
@@ -2566,28 +2474,20 @@ async function runRecallSubagent(params: {
   } catch (error) {
     if (params.abortSignal?.aborted) {
       const partialReply = await readPartialAssistantText(sessionFile);
-      const searchDebug = await readActiveMemorySearchDebug(sessionFile);
+      const searchDebug = partialReply ? await readActiveMemorySearchDebug(sessionFile) : undefined;
       attachPartialTimeoutData(error, partialReply, searchDebug);
     }
-    if (
-      !params.abortSignal?.aborted &&
-      isMissingRegisteredMemoryToolsError(error, params.config.toolsAllow)
-    ) {
+    if (!params.abortSignal?.aborted && isMissingRegisteredMemoryToolsError(error)) {
       params.api.logger.debug?.(
-        `active-memory: no configured memory tools available; skipping sub-agent`,
+        `active-memory: no memory tools registered (memory-core or memory-lancedb required); skipping sub-agent`,
       );
-      return { rawReply: "NONE", resultStatus: "unavailable" };
-    }
-    if (!params.abortSignal?.aborted) {
-      const message = toSingleLineLogValue(error instanceof Error ? error.message : String(error));
-      params.api.logger.warn?.(
-        `active-memory: memory sub-agent failed, skipping recall: ${message}`,
-      );
-      return { rawReply: "NONE", resultStatus: "failed" };
+      return { rawReply: "NONE" };
     }
     throw error;
   } finally {
-    await transientWorkspace?.cleanup();
+    if (tempDir) {
+      await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 }
 
@@ -2779,7 +2679,7 @@ async function maybeResolveActiveRecall(params: {
       return result;
     }
 
-    const { rawReply, resultStatus, transcriptPath, searchDebug } = raceResult;
+    const { rawReply, transcriptPath, searchDebug } = raceResult;
     const summary = truncateSummary(
       normalizeActiveSummary(rawReply) ?? "",
       params.config.maxSummaryChars,
@@ -2796,26 +2696,12 @@ async function maybeResolveActiveRecall(params: {
             summary,
             searchDebug,
           }
-        : resultStatus === "failed"
-          ? {
-              status: "failed",
-              elapsedMs: Date.now() - startedAt,
-              summary: null,
-              searchDebug,
-            }
-          : resultStatus === "unavailable" || isUnavailableMemorySearchDebug(searchDebug)
-            ? {
-                status: "unavailable",
-                elapsedMs: Date.now() - startedAt,
-                summary: null,
-                searchDebug,
-              }
-            : {
-                status: "no_relevant_memory",
-                elapsedMs: Date.now() - startedAt,
-                summary: null,
-                searchDebug,
-              };
+        : {
+            status: "empty",
+            elapsedMs: Date.now() - startedAt,
+            summary: null,
+            searchDebug,
+          };
     if (params.config.logging) {
       params.api.logger.info?.(
         `${logPrefix} done status=${result.status} elapsedMs=${String(result.elapsedMs)} summaryChars=${String(result.summary?.length ?? 0)}`,
@@ -2862,10 +2748,10 @@ async function maybeResolveActiveRecall(params: {
     }
     const message = toSingleLineLogValue(error instanceof Error ? error.message : String(error));
     if (params.config.logging) {
-      params.api.logger.warn?.(`${logPrefix} failed error=${message}; skipping recall`);
+      params.api.logger.warn?.(`${logPrefix} failed error=${message}`);
     }
     const result: ActiveRecallResult = {
-      status: "failed",
+      status: "unavailable",
       elapsedMs: Date.now() - startedAt,
       summary: null,
     };
@@ -2888,17 +2774,7 @@ export default definePluginEntry({
   name: "Active Memory",
   description: "Proactively surfaces relevant memory before eligible conversational replies.",
   register(api: OpenClawPluginApi) {
-    const readCurrentConfig = (): OpenClawConfig | undefined => {
-      try {
-        return (
-          (api.runtime.config?.current?.() as OpenClawConfig | undefined) ??
-          (api.config as OpenClawConfig | undefined)
-        );
-      } catch {
-        return api.config as OpenClawConfig | undefined;
-      }
-    };
-    let config = normalizePluginConfig(api.pluginConfig, readCurrentConfig());
+    let config = normalizePluginConfig(api.pluginConfig);
     const warnDeprecatedModelFallbackPolicy = (pluginConfig: unknown) => {
       if (hasDeprecatedModelFallbackPolicy(pluginConfig)) {
         // Wording matters here: the previous text ("set config.modelFallback
@@ -2926,7 +2802,7 @@ export default definePluginEntry({
         "active-memory",
         api.pluginConfig as Record<string, unknown>,
       );
-      config = normalizePluginConfig(livePluginConfig ?? { enabled: false }, readCurrentConfig());
+      config = normalizePluginConfig(livePluginConfig ?? { enabled: false });
       if (livePluginConfig) {
         warnDeprecatedModelFallbackPolicy(livePluginConfig);
       }
@@ -2983,10 +2859,6 @@ export default definePluginEntry({
           return {
             text: "Active Memory: session toggle unavailable because this command has no session context.",
           };
-        }
-        const commandAgentId = resolveStatusUpdateAgentId({ sessionKey });
-        if (!isEnabledForAgent(config, commandAgentId)) {
-          return { text: "Active Memory: off for this session." };
         }
         if (action === "status") {
           const disabled = await isSessionActiveMemoryDisabled({ api, sessionKey });
@@ -3149,16 +3021,12 @@ const testing = {
     lastActiveRecallCacheSweepAt = 0;
     minimumTimeoutMs = DEFAULT_MIN_TIMEOUT_MS;
     setupGraceTimeoutMs = DEFAULT_SETUP_GRACE_TIMEOUT_MS;
-    timeoutPartialDataGraceMs = TIMEOUT_PARTIAL_DATA_GRACE_MS;
   },
   setMinimumTimeoutMsForTests(value: number) {
     minimumTimeoutMs = value;
   },
   setSetupGraceTimeoutMsForTests(value: number) {
     setupGraceTimeoutMs = Math.max(0, Math.floor(value));
-  },
-  setTimeoutPartialDataGraceMsForTests(value: number) {
-    timeoutPartialDataGraceMs = Math.max(0, Math.floor(value));
   },
   setCachedResult,
   getCircuitBreakerEntry(key: string) {

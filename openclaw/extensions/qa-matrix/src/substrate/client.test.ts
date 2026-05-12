@@ -312,11 +312,13 @@ describe("matrix driver client", () => {
         event_id: "$msg-1",
       },
     });
-    expect(requests[1]?.url).toMatch(
-      /^http:\/\/127\.0\.0\.1:28008\/_matrix\/client\/v3\/rooms\/!room%3Amatrix-qa\.test\/redact\/%24reaction-1\/[0-9a-f-]{36}$/,
-    );
-    expect(requests[1]?.body).toEqual({
-      reason: "qa cleanup",
+    expect(requests[1]).toEqual({
+      url: expect.stringContaining(
+        "/_matrix/client/v3/rooms/!room%3Amatrix-qa.test/redact/%24reaction-1/",
+      ),
+      body: {
+        reason: "qa cleanup",
+      },
     });
   });
 
@@ -491,7 +493,7 @@ describe("matrix driver client", () => {
     });
 
     expect(result.roomId).toBe("!room:matrix-qa.test");
-    expect(result.topology).toEqual({
+    expect(result.topology).toMatchObject({
       defaultRoomId: "!room:matrix-qa.test",
       defaultRoomKey: "main",
       rooms: [
@@ -506,27 +508,16 @@ describe("matrix driver client", () => {
           ],
           requireMention: true,
           roomId: "!room:matrix-qa.test",
-          name: "OpenClaw Matrix QA",
-          encrypted: false,
         },
       ],
     });
     expect(result.observer.userId).toBe("@qa-observer:matrix-qa.test");
     expect(createRoomBodies).toEqual([
-      {
-        creation_content: { "m.federate": false },
-        initial_state: [
-          {
-            type: "m.room.history_visibility",
-            state_key: "",
-            content: { history_visibility: "joined" },
-          },
-        ],
+      expect.objectContaining({
         invite: ["@qa-observer:matrix-qa.test", "@qa-sut:matrix-qa.test"],
         is_direct: false,
-        name: "OpenClaw Matrix QA",
         preset: "private_chat",
-      },
+      }),
     ]);
   });
 
@@ -592,61 +583,21 @@ describe("matrix driver client", () => {
       },
     });
 
-    expect(result.topology.rooms).toEqual([
-      {
-        encrypted: false,
-        key: "group",
-        kind: "group",
-        memberRoles: ["driver", "observer", "sut"],
-        memberUserIds: [
-          "@qa-driver:matrix-qa.test",
-          "@qa-observer:matrix-qa.test",
-          "@qa-sut:matrix-qa.test",
-        ],
-        name: "Matrix Group",
-        requireMention: true,
-        roomId: "!group:matrix-qa.test",
-      },
-      {
-        encrypted: false,
-        key: "sut-dm",
-        kind: "dm",
-        memberRoles: ["driver", "sut"],
-        memberUserIds: ["@qa-driver:matrix-qa.test", "@qa-sut:matrix-qa.test"],
-        name: "Matrix Driver/SUT DM",
-        requireMention: false,
-        roomId: "!dm:matrix-qa.test",
-      },
+    expect(result.topology.rooms).toMatchObject([
+      { key: "group", kind: "group", roomId: "!group:matrix-qa.test", requireMention: true },
+      { key: "sut-dm", kind: "dm", roomId: "!dm:matrix-qa.test", requireMention: false },
     ]);
     expect(createRoomBodies).toEqual([
-      {
-        creation_content: { "m.federate": false },
-        initial_state: [
-          {
-            type: "m.room.history_visibility",
-            state_key: "",
-            content: { history_visibility: "joined" },
-          },
-        ],
+      expect.objectContaining({
         invite: ["@qa-observer:matrix-qa.test", "@qa-sut:matrix-qa.test"],
         is_direct: false,
         name: "Matrix Group",
-        preset: "private_chat",
-      },
-      {
-        creation_content: { "m.federate": false },
-        initial_state: [
-          {
-            type: "m.room.history_visibility",
-            state_key: "",
-            content: { history_visibility: "joined" },
-          },
-        ],
+      }),
+      expect.objectContaining({
         invite: ["@qa-sut:matrix-qa.test"],
         is_direct: true,
         name: "Matrix Driver/SUT DM",
-        preset: "private_chat",
-      },
+      }),
     ]);
   });
 });

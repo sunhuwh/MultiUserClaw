@@ -85,13 +85,12 @@ describe("collectChannelLegacyConfigRules", () => {
       },
     ]);
 
-    const config = {
+    const rules = collectChannelLegacyConfigRules({
       channels: {
         slack: {},
         "custom-chat": {},
       },
-    };
-    const rules = collectChannelLegacyConfigRules(config);
+    });
 
     expect(rules).toEqual([
       {
@@ -104,7 +103,6 @@ describe("collectChannelLegacyConfigRules", () => {
       },
     ]);
     expect(listPluginDoctorLegacyConfigRulesMock).toHaveBeenCalledWith({
-      config,
       pluginIds: ["custom-chat"],
     });
   });
@@ -124,7 +122,7 @@ describe("collectChannelLegacyConfigRules", () => {
       },
     });
 
-    expect(rules).toStrictEqual([]);
+    expect(rules).toEqual([]);
     expect(listPluginDoctorLegacyConfigRulesMock).not.toHaveBeenCalled();
   });
 
@@ -153,7 +151,7 @@ describe("collectChannelLegacyConfigRules", () => {
       },
     });
 
-    expect(rules).toStrictEqual([]);
+    expect(rules).toEqual([]);
     expect(getBootstrapChannelPluginMock).not.toHaveBeenCalled();
     expect(listPluginDoctorLegacyConfigRulesMock).not.toHaveBeenCalled();
   });

@@ -6,14 +6,6 @@ import { CHUTES_BASE_URL } from "./models.js";
 
 const CHUTES_OAUTH_MARKER = resolveOAuthApiKeyMarker("chutes");
 
-function restoreEnvVar(name: string, value: string | undefined): void {
-  if (value === undefined) {
-    delete process.env[name];
-  } else {
-    process.env[name] = value;
-  }
-}
-
 async function runChutesCatalog(params: { apiKey?: string; discoveryApiKey?: string }) {
   const provider = await registerSingleProviderPlugin(plugin);
   const result = await provider.catalog?.run({
@@ -52,8 +44,8 @@ async function withRealChutesDiscovery<T>(
   try {
     return await run(fetchMock);
   } finally {
-    restoreEnvVar("VITEST", originalVitest);
-    restoreEnvVar("NODE_ENV", originalNodeEnv);
+    process.env.VITEST = originalVitest;
+    process.env.NODE_ENV = originalNodeEnv;
     globalThis.fetch = originalFetch;
   }
 }

@@ -8,7 +8,7 @@ import {
 
 describe("engine/config/resolve", () => {
   it("returns empty list when no accounts configured", () => {
-    expect(listAccountIds({})).toStrictEqual([]);
+    expect(listAccountIds({})).toEqual([]);
   });
 
   it("returns default when top-level appId is set", () => {

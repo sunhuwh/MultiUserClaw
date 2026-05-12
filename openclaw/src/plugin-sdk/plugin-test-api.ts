@@ -1,14 +1,9 @@
-import {
-  attachPluginApiFacades,
-  type OpenClawPluginApiWithoutFacades,
-} from "../plugins/api-facades.js";
 import type { OpenClawPluginApi } from "./plugin-runtime.js";
 
 export type TestPluginApiInput = Partial<OpenClawPluginApi>;
 
 export function createTestPluginApi(api: TestPluginApiInput = {}): OpenClawPluginApi {
-  const { agent, lifecycle, runContext, session, ...flatApi } = api;
-  const mergedApi = {
+  return {
     id: "test-plugin",
     name: "test-plugin",
     source: "test",
@@ -19,11 +14,9 @@ export function createTestPluginApi(api: TestPluginApiInput = {}): OpenClawPlugi
     registerTool() {},
     registerHook() {},
     registerHttpRoute() {},
-    registerHostedMediaResolver() {},
     registerChannel() {},
     registerGatewayMethod() {},
     registerCli() {},
-    registerNodeCliFeature() {},
     registerCliBackend() {},
     registerTextTransforms() {},
     registerService() {},
@@ -36,7 +29,6 @@ export function createTestPluginApi(api: TestPluginApiInput = {}): OpenClawPlugi
     registerMigrationProvider() {},
     registerAutoEnableProbe() {},
     registerProvider() {},
-    registerModelCatalogProvider() {},
     registerSpeechProvider() {},
     registerRealtimeTranscriptionProvider() {},
     registerRealtimeVoiceProvider() {},
@@ -66,15 +58,10 @@ export function createTestPluginApi(api: TestPluginApiInput = {}): OpenClawPlugi
     registerControlUiDescriptor() {},
     registerRuntimeLifecycle() {},
     registerAgentEventSubscription() {},
-    emitAgentEvent: () => ({ emitted: false as const, reason: "test api" }),
     setRunContext: () => false,
     getRunContext: () => undefined,
     clearRunContext() {},
     registerSessionSchedulerJob: () => undefined,
-    registerSessionAction() {},
-    sendSessionAttachment: async () => ({ ok: false, error: "test plugin api" }),
-    scheduleSessionTurn: async () => undefined,
-    unscheduleSessionTurnsByTag: async () => ({ removed: 0, failed: 0 }),
     registerMemoryCapability() {},
     registerMemoryPromptSection() {},
     registerMemoryPromptSupplement() {},
@@ -86,14 +73,6 @@ export function createTestPluginApi(api: TestPluginApiInput = {}): OpenClawPlugi
       return input;
     },
     on() {},
-    ...flatApi,
-  } as OpenClawPluginApiWithoutFacades;
-  const withFacades = attachPluginApiFacades(mergedApi);
-  return {
-    ...withFacades,
-    ...(agent ? { agent } : {}),
-    ...(lifecycle ? { lifecycle } : {}),
-    ...(runContext ? { runContext } : {}),
-    ...(session ? { session } : {}),
+    ...api,
   };
 }

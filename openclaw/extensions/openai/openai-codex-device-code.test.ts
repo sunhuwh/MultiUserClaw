@@ -168,9 +168,7 @@ describe("loginOpenAICodexDeviceCode", () => {
       onVerification: async () => {},
     });
 
-    if (expectedExpiry === undefined) {
-      throw new Error("expected device-code expiry to be calculated");
-    }
+    expect(expectedExpiry).toBeDefined();
     expect(credentials.expires).toBe(expectedExpiry);
   });
 

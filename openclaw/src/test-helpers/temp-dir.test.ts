@@ -34,7 +34,7 @@ describe("withTempDir", () => {
       await fs.writeFile(path.join(dir, "marker.txt"), "ok");
     });
 
-    await expect(fs.readdir(parentDir)).resolves.toStrictEqual([]);
+    await expect(fs.readdir(parentDir)).resolves.toEqual([]);
   });
 
   it("keeps the cached async prefix root while another case is active", async () => {
@@ -54,13 +54,11 @@ describe("withTempDir", () => {
       await expect(fs.readdir(parentDir)).resolves.toHaveLength(1);
     });
 
-    if (releaseFirst === undefined) {
-      throw new Error("expected first temp-dir release callback");
-    }
-    releaseFirst();
+    expect(releaseFirst).toBeDefined();
+    releaseFirst?.();
     await first;
 
-    await expect(fs.readdir(parentDir)).resolves.toStrictEqual([]);
+    await expect(fs.readdir(parentDir)).resolves.toEqual([]);
   });
 
   it("removes the cached sync prefix root when the case finishes", async () => {
@@ -70,6 +68,6 @@ describe("withTempDir", () => {
       fsSync.writeFileSync(path.join(dir, "marker.txt"), "ok");
     });
 
-    await expect(fs.readdir(parentDir)).resolves.toStrictEqual([]);
+    await expect(fs.readdir(parentDir)).resolves.toEqual([]);
   });
 });

@@ -99,7 +99,7 @@ describe("collectPluginToolAllowlistWarnings", () => {
       manifestRegistry,
     });
 
-    expect(warnings).toStrictEqual([]);
+    expect(warnings).toEqual([]);
   });
 
   it("does not warn when plugins.allow is not restrictive", () => {
@@ -110,7 +110,7 @@ describe("collectPluginToolAllowlistWarnings", () => {
       manifestRegistry,
     });
 
-    expect(warnings).toStrictEqual([]);
+    expect(warnings).toEqual([]);
   });
 
   it("warns when restrictive plugins.allow leaves bundled provider discovery in explicit compat mode", () => {
@@ -139,7 +139,7 @@ describe("collectPluginToolAllowlistWarnings", () => {
     ({ plugins }) => {
       const warnings = collectBundledProviderAllowlistPolicyWarnings({ cfg: { plugins } });
 
-      expect(warnings).toStrictEqual([]);
+      expect(warnings).toEqual([]);
     },
   );
 });

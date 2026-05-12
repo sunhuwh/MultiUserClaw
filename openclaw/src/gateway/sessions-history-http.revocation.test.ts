@@ -100,7 +100,7 @@ vi.mock("./session-history-state.js", () => ({
     history: { items: [], nextCursor: null, messages: [] },
   }),
   SessionHistorySseState: {
-    fromRawSnapshot: (_params: unknown) => ({
+    fromRawSnapshot: () => ({
       snapshot: () => ({ items: [], nextCursor: null, messages: [] }),
       appendInlineMessage: ({ message, messageId }: { message: unknown; messageId?: string }) => ({
         message,

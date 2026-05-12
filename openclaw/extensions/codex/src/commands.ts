@@ -7,21 +7,10 @@ import { describeControlFailure } from "./app-server/capabilities.js";
 import { formatCodexDisplayText } from "./command-formatters.js";
 import type { CodexCommandDeps } from "./command-handlers.js";
 
-type CodexCommandOptions = {
+export function createCodexCommand(options: {
   pluginConfig?: unknown;
   deps?: Partial<CodexCommandDeps>;
-};
-
-type CodexSubcommandHandler = (
-  ctx: PluginCommandContext,
-  options: CodexCommandOptions,
-) => Promise<PluginCommandResult>;
-
-type CodexCommandInternalOptions = CodexCommandOptions & {
-  loadSubcommandHandler?: () => Promise<CodexSubcommandHandler>;
-};
-
-export function createCodexCommand(options: CodexCommandOptions): OpenClawPluginCommandDefinition {
+}): OpenClawPluginCommandDefinition {
   return {
     name: "codex",
     description: "Inspect and control the Codex app-server harness",
@@ -38,22 +27,14 @@ export function createCodexCommand(options: CodexCommandOptions): OpenClawPlugin
 
 export async function handleCodexCommand(
   ctx: PluginCommandContext,
-  options: CodexCommandInternalOptions = {},
+  options: { pluginConfig?: unknown; deps?: Partial<CodexCommandDeps> } = {},
 ): Promise<PluginCommandResult> {
-  const { loadSubcommandHandler, ...subcommandOptions } = options;
+  const { handleCodexSubcommand } = await import("./command-handlers.js");
   try {
-    const handleCodexSubcommand = loadSubcommandHandler
-      ? await loadSubcommandHandler()
-      : await loadDefaultCodexSubcommandHandler();
-    return await handleCodexSubcommand(ctx, subcommandOptions);
+    return await handleCodexSubcommand(ctx, options);
   } catch (error) {
     return {
       text: `Codex command failed: ${formatCodexDisplayText(describeControlFailure(error))}`,
     };
   }
-}
-
-async function loadDefaultCodexSubcommandHandler(): Promise<CodexSubcommandHandler> {
-  const { handleCodexSubcommand } = await import("./command-handlers.js");
-  return handleCodexSubcommand;
 }

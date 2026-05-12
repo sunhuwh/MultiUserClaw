@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { assertNoSymlinkParents, pathScope } from "openclaw/plugin-sdk/security-runtime";
 
 export function resolveRepoRelativeOutputDir(repoRoot: string, outputDir?: string) {
   if (!outputDir) {
@@ -9,11 +8,12 @@ export function resolveRepoRelativeOutputDir(repoRoot: string, outputDir?: strin
   if (path.isAbsolute(outputDir)) {
     throw new Error("--output-dir must be a relative path inside the repo root.");
   }
-  const resolved = pathScope(repoRoot, { label: "repo root" }).resolve(outputDir);
-  if (!resolved.ok) {
+  const resolved = path.resolve(repoRoot, outputDir);
+  const relative = path.relative(repoRoot, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
     throw new Error("--output-dir must stay within the repo root.");
   }
-  return resolved.path;
+  return resolved;
 }
 
 async function resolveNearestExistingPath(targetPath: string) {
@@ -44,18 +44,22 @@ function assertRepoRelativePath(repoRoot: string, targetPath: string, label: str
 }
 
 async function assertNoSymlinkSegments(repoRoot: string, targetPath: string, label: string) {
-  assertRepoRelativePath(repoRoot, targetPath, label);
-  try {
-    await assertNoSymlinkParents({
-      rootDir: repoRoot,
-      targetPath,
-      messagePrefix: label,
-    });
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("symlink")) {
-      throw new Error(`${label} must not traverse symlinks.`, { cause: error });
+  const relative = assertRepoRelativePath(repoRoot, targetPath, label);
+  let current = repoRoot;
+  for (const segment of relative.split(path.sep).filter((entry) => entry.length > 0)) {
+    current = path.join(current, segment);
+    let stats: Awaited<ReturnType<typeof fs.lstat>> | null = null;
+    try {
+      stats = await fs.lstat(current);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        break;
+      }
+      throw error;
     }
-    throw error;
+    if (stats.isSymbolicLink()) {
+      throw new Error(`${label} must not traverse symlinks.`);
+    }
   }
 }
 
@@ -77,10 +81,40 @@ export async function ensureRepoBoundDirectory(
   label: string,
   opts?: { mode?: number },
 ) {
-  await assertNoSymlinkSegments(path.resolve(repoRoot), path.resolve(targetDir), label);
-  const result = await pathScope(repoRoot, { label }).ensureDir(targetDir, { mode: opts?.mode });
-  if (!result.ok) {
-    throw new Error(`${label} must stay within the repo root.`);
+  const repoRootResolved = path.resolve(repoRoot);
+  const targetResolved = path.resolve(targetDir);
+  const relative = assertRepoRelativePath(repoRootResolved, targetResolved, label);
+  const repoRootReal = await fs.realpath(repoRootResolved);
+  let current = repoRootResolved;
+  for (const segment of relative.split(path.sep).filter((entry) => entry.length > 0)) {
+    current = path.join(current, segment);
+    while (true) {
+      try {
+        const stats = await fs.lstat(current);
+        if (stats.isSymbolicLink()) {
+          throw new Error(`${label} must not traverse symlinks.`);
+        }
+        if (!stats.isDirectory()) {
+          throw new Error(`${label} must point to a directory.`);
+        }
+        break;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") {
+          throw error;
+        }
+        try {
+          await fs.mkdir(current, { recursive: false, mode: opts?.mode });
+        } catch (mkdirError) {
+          if ((mkdirError as NodeJS.ErrnoException).code === "EEXIST") {
+            continue;
+          }
+          throw mkdirError;
+        }
+      }
+    }
   }
-  return result.path;
+  const targetReal = await fs.realpath(targetResolved);
+  assertRepoRelativePath(repoRootReal, targetReal, label);
+  return targetResolved;
 }

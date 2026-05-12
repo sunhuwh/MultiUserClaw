@@ -1,7 +1,7 @@
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
+} from "openclaw/plugin-sdk/text-runtime";
 import type { Page } from "playwright-core";
 import type { SsrFPolicy } from "../infra/net/ssrf.js";
 import { type AriaSnapshotNode, formatAriaSnapshot, type RawAXNode } from "./cdp.js";
@@ -19,12 +19,10 @@ import {
 } from "./pw-role-snapshot.js";
 import {
   assertPageNavigationCompletedSafely,
-  closeBlockedNavigationTarget,
   ensurePageState,
   forceDisconnectPlaywrightForTarget,
   getPageForTargetId,
   gotoPageWithNavigationGuard,
-  isPolicyDenyNavigationError,
   storeRoleRefsForTarget,
 } from "./pw-session.js";
 import { markBackendDomRefsOnPage, withPageScopedCdpClient } from "./pw-session.page-cdp.js";
@@ -380,25 +378,14 @@ export async function navigateViaPlaywright(opts: {
     ensurePageState(page);
     response = await navigate();
   }
-  try {
-    await assertPageNavigationCompletedSafely({
-      cdpUrl: opts.cdpUrl,
-      page,
-      response,
-      ssrfPolicy: opts.ssrfPolicy,
-      browserProxyMode: opts.browserProxyMode,
-      targetId: opts.targetId,
-    });
-  } catch (err) {
-    if (isPolicyDenyNavigationError(err)) {
-      await closeBlockedNavigationTarget({
-        cdpUrl: opts.cdpUrl,
-        page,
-        targetId: opts.targetId,
-      });
-    }
-    throw err;
-  }
+  await assertPageNavigationCompletedSafely({
+    cdpUrl: opts.cdpUrl,
+    page,
+    response,
+    ssrfPolicy: opts.ssrfPolicy,
+    browserProxyMode: opts.browserProxyMode,
+    targetId: opts.targetId,
+  });
   const finalUrl = page.url();
   return { url: finalUrl };
 }

@@ -32,21 +32,6 @@ function createFakeCodexClient(): CodexAppServerClient {
   } as unknown as CodexAppServerClient;
 }
 
-function expectRecordFields(value: unknown, expected: Record<string, unknown>) {
-  expect(value).toBeDefined();
-  expect(typeof value).toBe("object");
-  expect(value).not.toBeNull();
-  const actual = value as Record<string, unknown>;
-  for (const [key, expectedValue] of Object.entries(expected)) {
-    expect(actual[key]).toEqual(expectedValue);
-  }
-  return actual;
-}
-
-function mockCallArg(mockFn: { mock: { calls: unknown[][] } }, callIndex: number): unknown {
-  return mockFn.mock.calls[callIndex]?.[0];
-}
-
 describe("codex provider", () => {
   it("maps Codex app-server models to a Codex provider catalog", async () => {
     const listModels = vi.fn(async () => ({
@@ -75,22 +60,21 @@ describe("codex provider", () => {
       pluginConfig: { discovery: { timeoutMs: 1234 } },
     });
 
-    expectRecordFields(mockCallArg(listModels, 0), {
-      limit: 100,
-      timeoutMs: 1234,
-      sharedClient: false,
-    });
-    expectRecordFields(result.provider, {
+    expect(listModels).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 100, timeoutMs: 1234, sharedClient: false }),
+    );
+    expect(result.provider).toMatchObject({
       auth: "token",
       api: "openai-codex-responses",
-    });
-    expect(result.provider.models).toHaveLength(1);
-    expectRecordFields(result.provider.models[0], {
-      id: "gpt-5.4",
-      name: "gpt-5.4",
-      reasoning: true,
-      input: ["text", "image"],
-      compat: { supportsReasoningEffort: true, supportsUsageInStreaming: true },
+      models: [
+        {
+          id: "gpt-5.4",
+          name: "gpt-5.4",
+          reasoning: true,
+          input: ["text", "image"],
+          compat: { supportsReasoningEffort: true },
+        },
+      ],
     });
   });
 
@@ -143,13 +127,14 @@ describe("codex provider", () => {
       env: {},
     } as never);
 
-    expectRecordFields(mockCallArg(listModels, 0), {
-      limit: 100,
-      timeoutMs: 4321,
-      sharedClient: false,
+    expect(listModels).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 100, timeoutMs: 4321, sharedClient: false }),
+    );
+    expect(result).toMatchObject({
+      provider: {
+        models: [{ id: "gpt-5.4" }],
+      },
     });
-    const resultProvider = result && "provider" in result ? result.provider : undefined;
-    expect(resultProvider?.models.map((model) => model.id)).toEqual(["gpt-5.4"]);
   });
 
   it("pages through live discovery before building the provider catalog", async () => {
@@ -184,16 +169,14 @@ describe("codex provider", () => {
       listModels,
     });
 
-    expectRecordFields(mockCallArg(listModels, 0), {
-      cursor: undefined,
-      limit: 100,
-      sharedClient: false,
-    });
-    expectRecordFields(mockCallArg(listModels, 1), {
-      cursor: "page-2",
-      limit: 100,
-      sharedClient: false,
-    });
+    expect(listModels).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ cursor: undefined, limit: 100, sharedClient: false }),
+    );
+    expect(listModels).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ cursor: "page-2", limit: 100, sharedClient: false }),
+    );
     expect(result.provider.models.map((model) => model.id)).toEqual(["gpt-5.4", "gpt-5.2"]);
   });
 
@@ -262,7 +245,7 @@ describe("codex provider", () => {
       modelRegistry: { find: () => null },
     } as never);
 
-    expectRecordFields(model, {
+    expect(model).toMatchObject({
       id: "custom-model",
       provider: "codex",
       api: "openai-codex-responses",
@@ -280,7 +263,7 @@ describe("codex provider", () => {
       modelRegistry: { find: () => null },
     } as never);
 
-    expectRecordFields(model, {
+    expect(model).toMatchObject({
       id: "gpt-5.5",
       input: ["text", "image"],
     });
@@ -295,10 +278,10 @@ describe("codex provider", () => {
       modelRegistry: { find: () => null },
     } as never);
 
-    expectRecordFields(model, {
+    expect(model).toMatchObject({
       id: "o4-mini",
       reasoning: true,
-      compat: { supportsReasoningEffort: true, supportsUsageInStreaming: true },
+      compat: { supportsReasoningEffort: true },
     });
     expect(
       provider
@@ -320,18 +303,16 @@ describe("codex provider", () => {
   it("exposes a setup auth choice for installing Codex as an external provider", async () => {
     const provider = buildCodexProvider();
 
-    const authChoice = provider.auth[0];
-    expectRecordFields(authChoice, {
+    expect(provider.auth[0]).toMatchObject({
       id: "app-server",
       kind: "custom",
+      wizard: {
+        choiceId: "codex",
+        choiceLabel: "Codex app-server",
+        onboardingScopes: ["text-inference"],
+      },
     });
-    expectRecordFields(authChoice?.wizard, {
-      choiceId: "codex",
-      choiceLabel: "Codex app-server",
-      onboardingScopes: ["text-inference"],
-    });
-    const authResult = await authChoice?.run({} as never);
-    expectRecordFields(authResult, {
+    await expect(provider.auth[0].run({} as never)).resolves.toMatchObject({
       profiles: [],
       defaultModel: "codex/gpt-5.5",
     });
@@ -359,16 +340,23 @@ describe("codex provider", () => {
   it("adds the GPT-5 prompt overlay to Codex provider runs", () => {
     const provider = buildCodexProvider();
 
-    const contribution = provider.resolveSystemPromptContribution?.({
-      provider: "codex",
-      modelId: "gpt-5.4",
-    } as never);
-    expectRecordFields(contribution, {
+    expect(
+      provider.resolveSystemPromptContribution?.({
+        provider: "codex",
+        modelId: "gpt-5.4",
+      } as never),
+    ).toEqual({
       stablePrefix: CODEX_GPT5_BEHAVIOR_CONTRACT,
+      sectionOverrides: {
+        interaction_style: expect.stringContaining("This is a live chat, not a memo."),
+      },
     });
-    const interactionStyle = contribution?.sectionOverrides?.interaction_style;
-    expect(interactionStyle).toContain("Live chat tone: short, natural, human.");
-    expect(interactionStyle).not.toContain("Use heartbeats to create useful proactive progress");
+    expect(
+      provider.resolveSystemPromptContribution?.({
+        provider: "codex",
+        modelId: "gpt-5.4",
+      } as never)?.sectionOverrides?.interaction_style,
+    ).not.toContain("The purpose of heartbeats is to make you feel magical and proactive.");
   });
 
   it("does not add the GPT-5 prompt overlay to non-GPT-5 Codex provider runs", () => {

@@ -5,10 +5,8 @@ import { createStartAccountContext } from "openclaw/plugin-sdk/channel-test-help
 import type { PluginRuntime } from "openclaw/plugin-sdk/core";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResolvedDiscordAccount } from "./accounts.js";
-import * as directoryLive from "./directory-live.js";
 import type { OpenClawConfig } from "./runtime-api.js";
 import * as sendModule from "./send.js";
-import { createDiscordSendReceipt } from "./send.receipt.js";
 import { EMPTY_DISCORD_TEST_CONFIG } from "./test-support/config.js";
 let discordPlugin: typeof import("./channel.js").discordPlugin;
 let setDiscordRuntime: typeof import("./runtime.js").setDiscordRuntime;
@@ -20,14 +18,6 @@ const collectDiscordAuditChannelIdsMock = vi.hoisted(() =>
   vi.fn(() => ({ channelIds: [], unresolvedChannels: 0 })),
 );
 const sleepWithAbortMock = vi.hoisted(() => vi.fn(async () => undefined));
-
-function discordTestSendResult(messageId: string, channelId = "channel:thread-123") {
-  return {
-    messageId,
-    channelId,
-    receipt: createDiscordSendReceipt({ platformMessageIds: [messageId], channelId, kind: "text" }),
-  };
-}
 
 vi.mock("openclaw/plugin-sdk/runtime-env", async () => {
   const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/runtime-env")>(
@@ -91,33 +81,6 @@ function installDiscordRuntime(discord: Record<string, unknown>) {
       shouldLogVerbose: () => false,
     },
   } as unknown as PluginRuntime);
-}
-
-type MockWithCalls = {
-  mock: { calls: unknown[][] };
-};
-
-function objectArgAt(
-  mock: MockWithCalls,
-  callIndex: number,
-  argIndex: number,
-): Record<string, unknown> {
-  const value = mock.mock.calls[callIndex]?.[argIndex];
-  if (value === undefined || value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`expected call ${callIndex} argument ${argIndex} to be an object`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function argAt(mock: MockWithCalls, callIndex: number, argIndex: number): unknown {
-  return mock.mock.calls[callIndex]?.[argIndex];
-}
-
-function recordField(value: unknown, field: string): Record<string, unknown> {
-  if (value === undefined || value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`expected ${field} to be an object`);
-  }
-  return value as Record<string, unknown>;
 }
 
 afterEach(() => {
@@ -201,10 +164,7 @@ describe("discordPlugin outbound", () => {
     });
   });
 
-  it("resolves Discord usernames through the messaging target resolver", async () => {
-    vi.spyOn(directoryLive, "listDiscordDirectoryPeersLive").mockResolvedValueOnce([
-      { kind: "user", id: "user:999", name: "Jane" } as const,
-    ]);
+  it("resolves bare allowlisted Discord user IDs as message-tool DM targets", async () => {
     const resolveTarget = discordPlugin.messaging?.targetResolver?.resolveTarget;
     if (!resolveTarget) {
       throw new Error(
@@ -214,17 +174,20 @@ describe("discordPlugin outbound", () => {
 
     await expect(
       resolveTarget({
-        cfg: createCfg(),
-        accountId: "default",
-        input: "jane",
-        normalized: "channel:jane",
-        preferredKind: "user",
+        cfg: {
+          channels: {
+            discord: {
+              allowFrom: ["1439091261670948987"],
+            },
+          },
+        } as OpenClawConfig,
+        input: "1439091261670948987",
+        normalized: "channel:1439091261670948987",
+        preferredKind: "channel",
       }),
-    ).resolves.toEqual({
-      to: "user:999",
+    ).resolves.toMatchObject({
+      to: "user:1439091261670948987",
       kind: "user",
-      display: "jane",
-      source: "directory",
     });
   });
 
@@ -270,10 +233,14 @@ describe("discordPlugin outbound", () => {
       },
     } as OpenClawConfig;
 
-    expect(resolveAccount(cfg).config.gatewayReadyTimeoutMs).toBe(90_000);
-    expect(resolveAccount(cfg).config.gatewayRuntimeReadyTimeoutMs).toBe(120_000);
-    expect(resolveAccount(cfg, "work").config.gatewayReadyTimeoutMs).toBe(60_000);
-    expect(resolveAccount(cfg, "work").config.gatewayRuntimeReadyTimeoutMs).toBe(120_000);
+    expect(resolveAccount(cfg).config).toMatchObject({
+      gatewayReadyTimeoutMs: 90_000,
+      gatewayRuntimeReadyTimeoutMs: 120_000,
+    });
+    expect(resolveAccount(cfg, "work").config).toMatchObject({
+      gatewayReadyTimeoutMs: 60_000,
+      gatewayRuntimeReadyTimeoutMs: 120_000,
+    });
   });
 
   it("forwards full media send context to sendMessageDiscord", async () => {
@@ -295,22 +262,24 @@ describe("discordPlugin outbound", () => {
       },
     });
 
-    expect(argAt(sendMessageDiscord, 0, 0)).toBe("channel:thread-123");
-    expect(argAt(sendMessageDiscord, 0, 1)).toBe("hi");
-    const sendOptions = objectArgAt(sendMessageDiscord, 0, 2);
-    expect(sendOptions.mediaUrl).toBe("/tmp/image.png");
-    expect(sendOptions.mediaLocalRoots).toEqual(["/tmp/agent-root"]);
-    expect(sendOptions.mediaReadFile).toBe(mediaReadFile);
-    expect(sendOptions.replyTo).toBe("reply-123");
-    expect(result.channel).toBe("discord");
-    expect(result.messageId).toBe("m1");
+    expect(sendMessageDiscord).toHaveBeenCalledWith(
+      "channel:thread-123",
+      "hi",
+      expect.objectContaining({
+        mediaUrl: "/tmp/image.png",
+        mediaLocalRoots: ["/tmp/agent-root"],
+        mediaReadFile,
+        replyTo: "reply-123",
+      }),
+    );
+    expect(result).toMatchObject({ channel: "discord", messageId: "m1" });
   });
 
   it("splits text and video into separate sends for attached outbound delivery", async () => {
     const sendMessageDiscord = vi
       .fn()
-      .mockResolvedValueOnce(discordTestSendResult("text-1"))
-      .mockResolvedValueOnce(discordTestSendResult("video-1"));
+      .mockResolvedValueOnce({ messageId: "text-1" })
+      .mockResolvedValueOnce({ messageId: "video-1" });
 
     const result = await discordPlugin.outbound!.sendMedia!({
       cfg: EMPTY_DISCORD_TEST_CONFIG,
@@ -326,18 +295,30 @@ describe("discordPlugin outbound", () => {
     });
 
     expect(sendMessageDiscord).toHaveBeenCalledTimes(2);
-    expect(argAt(sendMessageDiscord, 0, 0)).toBe("channel:thread-123");
-    expect(argAt(sendMessageDiscord, 0, 1)).toBe("done - tiny cyber-lobster clip incoming");
-    expect(objectArgAt(sendMessageDiscord, 0, 2).replyTo).toBe("reply-123");
-    expect(argAt(sendMessageDiscord, 1, 0)).toBe("channel:thread-123");
-    expect(argAt(sendMessageDiscord, 1, 1)).toBe("");
-    expect(objectArgAt(sendMessageDiscord, 1, 2).mediaUrl).toBe("/tmp/molty.mp4");
-    expect(result.channel).toBe("discord");
-    expect(result.messageId).toBe("video-1");
+    expect(sendMessageDiscord).toHaveBeenNthCalledWith(
+      1,
+      "channel:thread-123",
+      "done - tiny cyber-lobster clip incoming",
+      expect.objectContaining({
+        replyTo: "reply-123",
+      }),
+    );
+    expect(sendMessageDiscord).toHaveBeenNthCalledWith(
+      2,
+      "channel:thread-123",
+      "",
+      expect.objectContaining({
+        mediaUrl: "/tmp/molty.mp4",
+      }),
+    );
+    expect(result).toMatchObject({ channel: "discord", messageId: "video-1" });
   });
 
   it("threads poll sends through the thread target", async () => {
-    const sendPollDiscord = vi.fn(async () => discordTestSendResult("poll-1"));
+    const sendPollDiscord = vi.fn(async () => ({
+      channelId: "channel:thread-123",
+      messageId: "poll-1",
+    }));
     const sendPollSpy = vi.spyOn(sendModule, "sendPollDiscord").mockImplementation(sendPollDiscord);
     try {
       const result = await discordPlugin.outbound!.sendPoll!({
@@ -351,15 +332,17 @@ describe("discordPlugin outbound", () => {
         threadId: "thread-123",
       });
 
-      expect(argAt(sendPollDiscord, 0, 0)).toBe("channel:thread-123");
-      expect(argAt(sendPollDiscord, 0, 1)).toEqual({
-        question: "Best shell?",
-        options: ["molty", "molter"],
-      });
-      expect(objectArgAt(sendPollDiscord, 0, 2).accountId).toBe("work");
-      const pollResult = result as { channel?: string; messageId?: string };
-      expect(pollResult.channel).toBe("discord");
-      expect(pollResult.messageId).toBe("poll-1");
+      expect(sendPollDiscord).toHaveBeenCalledWith(
+        "channel:thread-123",
+        {
+          question: "Best shell?",
+          options: ["molty", "molter"],
+        },
+        expect.objectContaining({
+          accountId: "work",
+        }),
+      );
+      expect(result).toMatchObject({ channel: "discord", messageId: "poll-1" });
     } finally {
       sendPollSpy.mockRestore();
     }
@@ -444,11 +427,14 @@ describe("discordPlugin outbound", () => {
         target: "channel:222",
       });
 
-      expect(fetchPermissionsSpy.mock.calls[0]?.[0]).toBe("222");
-      expect(objectArgAt(fetchPermissionsSpy, 0, 1).token).toBe("discord-token");
-      const permissions = recordField(diagnostics?.details?.permissions, "permissions");
-      expect(permissions.channelId).toBe("222");
-      expect(permissions.missingRequired).toEqual(["Connect", "Speak", "ReadMessageHistory"]);
+      expect(fetchPermissionsSpy).toHaveBeenCalledWith(
+        "222",
+        expect.objectContaining({ token: "discord-token" }),
+      );
+      expect(diagnostics?.details?.permissions).toMatchObject({
+        channelId: "222",
+        missingRequired: ["Connect", "Speak", "ReadMessageHistory"],
+      });
       expect(diagnostics?.lines?.map((line) => line.text).join("\n")).toContain(
         "Missing required: Connect, Speak, ReadMessageHistory",
       );
@@ -490,23 +476,24 @@ describe("discordPlugin outbound", () => {
         includeApplication: true,
       }),
     );
-    const monitorParams = objectArgAt(monitorDiscordProviderMock, 0, 0);
-    expect(monitorParams.token).toBe("discord-token");
-    expect(monitorParams.accountId).toBe("default");
+    expect(monitorDiscordProviderMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        token: "discord-token",
+        accountId: "default",
+      }),
+    );
     expect(sleepWithAbortMock).not.toHaveBeenCalled();
     expect(runtimeProbeDiscord).not.toHaveBeenCalled();
     expect(runtimeMonitorDiscordProvider).not.toHaveBeenCalled();
   });
 
   it("does not block Discord monitor startup on the startup probe", async () => {
-    let resolveProbe:
-      | ((value: {
-          ok: true;
-          bot: { username: string };
-          application: { intents: { messageContent: "limited" } };
-          elapsedMs: number;
-        }) => void)
-      | undefined;
+    let resolveProbe!: (value: {
+      ok: true;
+      bot: { username: string };
+      application: { intents: { messageContent: "limited" } };
+      elapsedMs: number;
+    }) => void;
     probeDiscordMock.mockReturnValue(
       new Promise((resolve) => {
         resolveProbe = resolve;
@@ -524,9 +511,12 @@ describe("discordPlugin outbound", () => {
 
     await discordPlugin.gateway!.startAccount!(ctx);
 
-    const monitorParams = objectArgAt(monitorDiscordProviderMock, 0, 0);
-    expect(monitorParams.token).toBe("discord-token");
-    expect(monitorParams.accountId).toBe("default");
+    expect(monitorDiscordProviderMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        token: "discord-token",
+        accountId: "default",
+      }),
+    );
     await vi.waitFor(() =>
       expect(probeDiscordMock).toHaveBeenCalledWith("discord-token", 2500, {
         includeApplication: true,
@@ -534,9 +524,6 @@ describe("discordPlugin outbound", () => {
     );
     expect(statusPatches.some((patch) => "bot" in patch || "application" in patch)).toBe(false);
 
-    if (!resolveProbe) {
-      throw new Error("Expected Discord startup probe resolver to be initialized");
-    }
     resolveProbe({
       ok: true,
       bot: { username: "AsyncBob" },
@@ -656,12 +643,8 @@ describe("discordPlugin outbound", () => {
     expect(sleepWithAbortMock).not.toHaveBeenCalled();
 
     // Second account (index 1) — 10s delay
-    const zetaContext = createStartAccountContext({
-      account: resolveAccount(cfg, "zeta"),
-      cfg,
-    });
-    await discordPlugin.gateway!.startAccount!(zetaContext);
-    expect(sleepWithAbortMock).toHaveBeenCalledWith(10_000, zetaContext.abortSignal);
+    await startDiscordAccount(cfg, "zeta");
+    expect(sleepWithAbortMock).toHaveBeenCalledWith(10_000, expect.any(Object));
   });
 });
 

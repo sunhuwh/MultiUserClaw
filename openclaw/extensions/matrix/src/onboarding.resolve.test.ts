@@ -32,31 +32,30 @@ describe("matrix onboarding account-scoped resolution", () => {
       note: vi.fn(async () => {}),
       text: vi.fn(async () => "Alice"),
     } as unknown as WizardPrompter;
-    const cfg = {
-      channels: {
-        matrix: {
-          accounts: {
-            default: {
-              homeserver: "https://matrix.main.example.org",
-              accessToken: "main-token",
-            },
-            ops: {
-              homeserver: "https://matrix.ops.example.org",
-              accessToken: "ops-token",
+    const result = await promptMatrixAllowFrom({
+      cfg: {
+        channels: {
+          matrix: {
+            accounts: {
+              default: {
+                homeserver: "https://matrix.main.example.org",
+                accessToken: "main-token",
+              },
+              ops: {
+                homeserver: "https://matrix.ops.example.org",
+                accessToken: "ops-token",
+              },
             },
           },
         },
-      },
-    } as CoreConfig;
-    const result = await promptMatrixAllowFrom({
-      cfg,
+      } as CoreConfig,
       prompter,
       accountId: "ops",
     });
 
     expect(result.channels?.matrix?.accounts?.ops?.dm?.allowFrom).toEqual(["@alice:example.org"]);
     expect(resolveMatrixTargetsMock).toHaveBeenCalledWith({
-      cfg,
+      cfg: expect.any(Object),
       accountId: "ops",
       inputs: ["Alice"],
       kind: "user",

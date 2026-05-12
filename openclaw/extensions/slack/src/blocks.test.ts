@@ -92,9 +92,9 @@ describe("parseSlackBlocksInput", () => {
 
 describe("parseSlackModalPrivateMetadata", () => {
   it("returns empty object for missing or invalid values", () => {
-    expect(parseSlackModalPrivateMetadata(undefined)).toStrictEqual({});
-    expect(parseSlackModalPrivateMetadata("")).toStrictEqual({});
-    expect(parseSlackModalPrivateMetadata("{bad-json")).toStrictEqual({});
+    expect(parseSlackModalPrivateMetadata(undefined)).toEqual({});
+    expect(parseSlackModalPrivateMetadata("")).toEqual({});
+    expect(parseSlackModalPrivateMetadata("{bad-json")).toEqual({});
   });
 
   it("parses known metadata fields", () => {

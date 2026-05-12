@@ -61,7 +61,7 @@ describe("task boundaries", () => {
         }
       }
     }
-    expect(offenders).toStrictEqual([]);
+    expect(offenders).toEqual([]);
   });
 
   it("keeps direct task-flow-registry imports behind approved task-flow access seams", () => {

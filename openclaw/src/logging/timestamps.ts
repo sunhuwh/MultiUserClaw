@@ -1,15 +1,15 @@
 export function isValidTimeZone(tz: string): boolean {
   try {
-    new Intl.DateTimeFormat("en", { timeZone: tz });
+    new Intl.DateTimeFormat("en", { timeZone: tz }).format();
     return true;
   } catch {
     return false;
   }
 }
 
-export type TimestampStyle = "short" | "medium" | "long";
+type TimestampStyle = "short" | "medium" | "long";
 
-export type FormatTimestampOptions = {
+type FormatTimestampOptions = {
   style?: TimestampStyle;
   timeZone?: string;
 };

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
+import type { WebFetchProviderPlugin } from "../provider-web-fetch-contract.js";
 import {
   pluginRegistrationContractRegistry,
+  resolveBundledExplicitWebFetchProvidersFromPublicArtifacts,
   resolveWebFetchProviderContractEntriesForPluginId,
-} from "../../plugins/contracts/registry.js";
-import { resolveBundledExplicitWebFetchProvidersFromPublicArtifacts } from "../../plugins/web-provider-public-artifacts.explicit.js";
-import type { WebFetchProviderPlugin } from "../provider-web-fetch-contract.js";
+} from "../testing.js";
 import { installWebFetchProviderContractSuite } from "./provider-contract-suites.js";
 
 function resolveWebFetchCredentialValue(provider: WebFetchProviderPlugin): unknown {
@@ -23,30 +23,18 @@ export function describeWebFetchProviderContracts(pluginId: string) {
     pluginRegistrationContractRegistry.find((entry) => entry.pluginId === pluginId)
       ?.webFetchProviderIds ?? [];
 
-  let providerEntries:
-    | Array<{
-        pluginId: string;
-        provider: WebFetchProviderPlugin;
-        credentialValue: unknown;
-      }>
-    | undefined;
   const resolveProviders = () => {
-    if (providerEntries) {
-      return providerEntries;
-    }
     const publicArtifactProviders = resolveBundledExplicitWebFetchProvidersFromPublicArtifacts({
       onlyPluginIds: [pluginId],
     });
     if (publicArtifactProviders) {
-      providerEntries = publicArtifactProviders.map((provider) => ({
+      return publicArtifactProviders.map((provider) => ({
         pluginId: provider.pluginId,
         provider,
         credentialValue: resolveWebFetchCredentialValue(provider),
       }));
-      return providerEntries;
     }
-    providerEntries = resolveWebFetchProviderContractEntriesForPluginId(pluginId);
-    return providerEntries;
+    return resolveWebFetchProviderContractEntriesForPluginId(pluginId);
   };
 
   describe(`${pluginId} web fetch provider contract registry load`, () => {

@@ -2,9 +2,12 @@ import { isProviderApiKeyConfigured } from "openclaw/plugin-sdk/provider-auth";
 import { resolveApiKeyForProvider } from "openclaw/plugin-sdk/provider-auth-runtime";
 import {
   assertOkOrThrowHttpError,
+  createProviderOperationDeadline,
   fetchWithTimeout,
   postJsonRequest,
+  resolveProviderOperationTimeoutMs,
   resolveProviderHttpRequestConfig,
+  waitProviderOperationPollInterval,
 } from "openclaw/plugin-sdk/provider-http";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import type {
@@ -22,6 +25,12 @@ const MINIMAX_MODEL_ALLOWED_DURATIONS: Readonly<Record<string, readonly number[]
   "MiniMax-Hailuo-2.3": [6, 10],
   "MiniMax-Hailuo-02": [6, 10],
 };
+const MINIMAX_MODEL_ALLOWED_RESOLUTIONS: Readonly<Record<string, readonly string[]>> = {
+  "MiniMax-Hailuo-2.3": ["768P", "1080P"],
+  "MiniMax-Hailuo-2.3-Fast": ["768P", "1080P"],
+  "MiniMax-Hailuo-02": ["768P", "1080P"],
+};
+const MINIMAX_RESOLUTION_ORDER = ["480P", "720P", "768P", "1080P"] as const;
 
 type MinimaxBaseResp = {
   status_code?: number;
@@ -51,8 +60,9 @@ type MinimaxFileRetrieveResponse = {
 
 function resolveMinimaxVideoBaseUrl(
   cfg: Parameters<typeof resolveApiKeyForProvider>[0]["cfg"],
+  providerId: string,
 ): string {
-  const direct = normalizeOptionalString(cfg?.models?.providers?.minimax?.baseUrl);
+  const direct = normalizeOptionalString(cfg?.models?.providers?.[providerId]?.baseUrl);
   if (!direct) {
     return DEFAULT_MINIMAX_VIDEO_BASE_URL;
   }
@@ -108,6 +118,43 @@ function resolveDurationSeconds(params: {
   );
 }
 
+function resolveResolution(params: {
+  model: string;
+  resolution: string | undefined;
+}): string | undefined {
+  const requested = normalizeOptionalString(params.resolution)?.toUpperCase();
+  if (!requested) {
+    return undefined;
+  }
+  const allowed = MINIMAX_MODEL_ALLOWED_RESOLUTIONS[params.model];
+  if (!allowed || allowed.length === 0 || allowed.includes(requested)) {
+    return requested;
+  }
+  const requestedIndex = MINIMAX_RESOLUTION_ORDER.indexOf(
+    requested as (typeof MINIMAX_RESOLUTION_ORDER)[number],
+  );
+  if (requestedIndex < 0) {
+    return undefined;
+  }
+  return allowed.reduce((best, current) => {
+    const currentIndex = MINIMAX_RESOLUTION_ORDER.indexOf(
+      current as (typeof MINIMAX_RESOLUTION_ORDER)[number],
+    );
+    const bestIndex = MINIMAX_RESOLUTION_ORDER.indexOf(
+      best as (typeof MINIMAX_RESOLUTION_ORDER)[number],
+    );
+    if (currentIndex < 0) {
+      return best;
+    }
+    if (bestIndex < 0) {
+      return current;
+    }
+    return Math.abs(currentIndex - requestedIndex) < Math.abs(bestIndex - requestedIndex)
+      ? current
+      : best;
+  });
+}
+
 async function pollMinimaxVideo(params: {
   taskId: string;
   headers: Headers;
@@ -115,6 +162,10 @@ async function pollMinimaxVideo(params: {
   baseUrl: string;
   fetchFn: typeof fetch;
 }): Promise<MinimaxQueryResponse> {
+  const deadline = createProviderOperationDeadline({
+    timeoutMs: params.timeoutMs,
+    label: `MiniMax video generation task ${params.taskId}`,
+  });
   for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
     const url = new URL(`${params.baseUrl}/v1/query/video_generation`);
     url.searchParams.set("task_id", params.taskId);
@@ -124,7 +175,7 @@ async function pollMinimaxVideo(params: {
         method: "GET",
         headers: params.headers,
       },
-      params.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      resolveProviderOperationTimeoutMs({ deadline, defaultTimeoutMs: DEFAULT_TIMEOUT_MS }),
       params.fetchFn,
     );
     await assertOkOrThrowHttpError(response, "MiniMax video status request failed");
@@ -141,7 +192,7 @@ async function pollMinimaxVideo(params: {
       case "Preparing":
       case "Processing":
       default:
-        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+        await waitProviderOperationPollInterval({ deadline, pollIntervalMs: POLL_INTERVAL_MS });
         break;
     }
   }
@@ -215,9 +266,9 @@ async function downloadVideoFromFileId(params: {
   };
 }
 
-export function buildMinimaxVideoGenerationProvider(): VideoGenerationProvider {
+function buildMinimaxVideoProvider(providerId: string): VideoGenerationProvider {
   return {
-    id: "minimax",
+    id: providerId,
     label: "MiniMax",
     defaultModel: DEFAULT_MINIMAX_VIDEO_MODEL,
     models: [
@@ -230,7 +281,7 @@ export function buildMinimaxVideoGenerationProvider(): VideoGenerationProvider {
     ],
     isConfigured: ({ agentDir }) =>
       isProviderApiKeyConfigured({
-        provider: "minimax",
+        provider: providerId,
         agentDir,
       }),
     capabilities: {
@@ -238,6 +289,7 @@ export function buildMinimaxVideoGenerationProvider(): VideoGenerationProvider {
         maxVideos: 1,
         maxDurationSeconds: 10,
         supportedDurationSecondsByModel: MINIMAX_MODEL_ALLOWED_DURATIONS,
+        resolutions: ["768P", "1080P"],
         supportsResolution: true,
         supportsWatermark: false,
       },
@@ -247,6 +299,7 @@ export function buildMinimaxVideoGenerationProvider(): VideoGenerationProvider {
         maxInputImages: 1,
         maxDurationSeconds: 10,
         supportedDurationSecondsByModel: MINIMAX_MODEL_ALLOWED_DURATIONS,
+        resolutions: ["768P", "1080P"],
         supportsResolution: true,
         supportsWatermark: false,
       },
@@ -259,7 +312,7 @@ export function buildMinimaxVideoGenerationProvider(): VideoGenerationProvider {
         throw new Error("MiniMax video generation does not support video reference inputs.");
       }
       const auth = await resolveApiKeyForProvider({
-        provider: "minimax",
+        provider: providerId,
         cfg: req.cfg,
         agentDir: req.agentDir,
         store: req.authStore,
@@ -269,16 +322,20 @@ export function buildMinimaxVideoGenerationProvider(): VideoGenerationProvider {
       }
 
       const fetchFn = fetch;
+      const deadline = createProviderOperationDeadline({
+        timeoutMs: req.timeoutMs,
+        label: "MiniMax video generation",
+      });
       const { baseUrl, allowPrivateNetwork, headers, dispatcherPolicy } =
         resolveProviderHttpRequestConfig({
-          baseUrl: resolveMinimaxVideoBaseUrl(req.cfg),
+          baseUrl: resolveMinimaxVideoBaseUrl(req.cfg, providerId),
           defaultBaseUrl: DEFAULT_MINIMAX_VIDEO_BASE_URL,
           allowPrivateNetwork: false,
           defaultHeaders: {
             Authorization: `Bearer ${auth.apiKey}`,
             "Content-Type": "application/json",
           },
-          provider: "minimax",
+          provider: providerId,
           capability: "video",
           transport: "http",
         });
@@ -291,8 +348,12 @@ export function buildMinimaxVideoGenerationProvider(): VideoGenerationProvider {
       if (firstFrameImage) {
         body.first_frame_image = firstFrameImage;
       }
-      if (req.resolution) {
-        body.resolution = req.resolution;
+      const resolution = resolveResolution({
+        model,
+        resolution: req.resolution,
+      });
+      if (resolution) {
+        body.resolution = resolution;
       }
       const durationSeconds = resolveDurationSeconds({
         model,
@@ -305,7 +366,10 @@ export function buildMinimaxVideoGenerationProvider(): VideoGenerationProvider {
         url: `${baseUrl}/v1/video_generation`,
         headers,
         body,
-        timeoutMs: req.timeoutMs,
+        timeoutMs: resolveProviderOperationTimeoutMs({
+          deadline,
+          defaultTimeoutMs: DEFAULT_TIMEOUT_MS,
+        }),
         fetchFn,
         allowPrivateNetwork,
         dispatcherPolicy,
@@ -321,7 +385,10 @@ export function buildMinimaxVideoGenerationProvider(): VideoGenerationProvider {
         const completed = await pollMinimaxVideo({
           taskId,
           headers,
-          timeoutMs: req.timeoutMs,
+          timeoutMs: resolveProviderOperationTimeoutMs({
+            deadline,
+            defaultTimeoutMs: DEFAULT_TIMEOUT_MS,
+          }),
           baseUrl,
           fetchFn,
         });
@@ -330,14 +397,20 @@ export function buildMinimaxVideoGenerationProvider(): VideoGenerationProvider {
         const video = videoUrl
           ? await downloadVideoFromUrl({
               url: videoUrl,
-              timeoutMs: req.timeoutMs,
+              timeoutMs: resolveProviderOperationTimeoutMs({
+                deadline,
+                defaultTimeoutMs: DEFAULT_TIMEOUT_MS,
+              }),
               fetchFn,
             })
           : fileId
             ? await downloadVideoFromFileId({
                 fileId,
                 headers,
-                timeoutMs: req.timeoutMs,
+                timeoutMs: resolveProviderOperationTimeoutMs({
+                  deadline,
+                  defaultTimeoutMs: DEFAULT_TIMEOUT_MS,
+                }),
                 baseUrl,
                 fetchFn,
               })
@@ -361,4 +434,12 @@ export function buildMinimaxVideoGenerationProvider(): VideoGenerationProvider {
       }
     },
   };
+}
+
+export function buildMinimaxVideoGenerationProvider(): VideoGenerationProvider {
+  return buildMinimaxVideoProvider("minimax");
+}
+
+export function buildMinimaxPortalVideoGenerationProvider(): VideoGenerationProvider {
+  return buildMinimaxVideoProvider("minimax-portal");
 }

@@ -237,7 +237,7 @@ describe("slackPlugin.security.collectAuditFindings lazy module forwarding", () 
     const account = slackPlugin.config.resolveAccount(cfg, "default");
     const result = await collectAuditFindings({ cfg, account } as never);
 
-    expect(result).toStrictEqual([]);
+    expect(result).toEqual([]);
   });
 });
 
@@ -268,27 +268,8 @@ describe("slackPlugin.resolver.resolveTargets lazy SDK forwarding", () => {
       inputs: ["U123"],
       missingTokenNote: "missing Slack token",
     });
-    if (typeof params.resolveWithToken !== "function") {
-      throw new Error("expected Slack target resolver callback");
-    }
-    if (typeof params.mapResolved !== "function") {
-      throw new Error("expected Slack target mapper callback");
-    }
-    expect(
-      params.mapResolved({
-        input: "U123",
-        resolved: true,
-        id: "U123",
-        name: "Ada",
-        note: "workspace match",
-      }),
-    ).toEqual({
-      input: "U123",
-      resolved: true,
-      id: "U123",
-      name: "Ada",
-      note: "workspace match",
-    });
+    expect(typeof params.resolveWithToken).toBe("function");
+    expect(typeof params.mapResolved).toBe("function");
     expect(result).toBe(sentinelOutput);
   });
 

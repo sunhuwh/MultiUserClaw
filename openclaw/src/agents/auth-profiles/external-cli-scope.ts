@@ -58,15 +58,6 @@ function addExternalCliRuntimeScope(out: Set<string>, value: string | undefined)
   }
 }
 
-function addExternalCliRuntimeScopeFromModelMap(
-  out: Set<string>,
-  models: Record<string, { agentRuntime?: { id?: string } }> | undefined,
-): void {
-  for (const entry of Object.values(models ?? {})) {
-    addExternalCliRuntimeScope(out, entry?.agentRuntime?.id);
-  }
-}
-
 export function resolveExternalCliAuthScopeFromConfig(
   cfg: OpenClawConfig,
 ): ExternalCliAuthScope | undefined {
@@ -100,18 +91,14 @@ export function resolveExternalCliAuthScopeFromConfig(
   addProviderScopeFromModelConfig(providerIds, defaults?.videoGenerationModel);
   addProviderScopeFromModelConfig(providerIds, defaults?.musicGenerationModel);
   addProviderScopeFromModelConfig(providerIds, defaults?.pdfModel);
-  addExternalCliRuntimeScopeFromModelMap(providerIds, defaults?.models);
-  for (const provider of Object.values(cfg.models?.providers ?? {})) {
-    addExternalCliRuntimeScope(providerIds, provider?.agentRuntime?.id);
-    for (const model of provider?.models ?? []) {
-      addExternalCliRuntimeScope(providerIds, model?.agentRuntime?.id);
-    }
-  }
+  addExternalCliRuntimeScope(providerIds, defaults?.agentRuntime?.id);
+  addExternalCliRuntimeScope(providerIds, defaults?.embeddedHarness?.runtime);
 
   for (const agent of cfg.agents?.list ?? []) {
     addProviderScopeFromModelConfig(providerIds, agent.model);
     addProviderScopeFromModelConfig(providerIds, agent.subagents?.model);
-    addExternalCliRuntimeScopeFromModelMap(providerIds, agent.models);
+    addExternalCliRuntimeScope(providerIds, agent.agentRuntime?.id);
+    addExternalCliRuntimeScope(providerIds, agent.embeddedHarness?.runtime);
   }
 
   if (providerIds.size === 0 && profileIds.size === 0) {

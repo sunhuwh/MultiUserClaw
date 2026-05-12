@@ -1,7 +1,7 @@
 import { ChannelType } from "discord-api-types/v10";
 import type { NativeCommandSpec } from "openclaw/plugin-sdk/command-auth";
 import { resolveDirectStatusReplyForSession } from "openclaw/plugin-sdk/command-status-runtime";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import {
   clearPluginCommands,
   executePluginCommand,
@@ -192,67 +192,6 @@ function createUnboundRouteState(params: {
   >;
 }
 
-type MockCalls = {
-  mock: { calls: unknown[][] };
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  expect(isRecord(value), `${label} should be an object`).toBe(true);
-  if (!isRecord(value)) {
-    throw new Error(`${label} should be an object`);
-  }
-  return value;
-}
-
-function expectFields(record: Record<string, unknown>, expected: Record<string, unknown>) {
-  for (const [key, value] of Object.entries(expected)) {
-    expect(record[key], key).toEqual(value);
-  }
-}
-
-function expectSingleCallFirstArg(
-  mock: MockCalls,
-  expected: Record<string, unknown>,
-  label = "mock first argument",
-): Record<string, unknown> {
-  expect(mock.mock.calls).toHaveLength(1);
-  const [firstArg] = mock.mock.calls[0] ?? [];
-  const record = requireRecord(firstArg, label);
-  expectFields(record, expected);
-  return record;
-}
-
-function expectPluginCommandExecution(params: {
-  mock: MockCalls;
-  commandName: string;
-  expected: Record<string, unknown>;
-}) {
-  const payload = expectSingleCallFirstArg(params.mock, params.expected, "plugin command payload");
-  expect(requireRecord(payload.command, "plugin command").name).toBe(params.commandName);
-  return payload;
-}
-
-function expectFollowUpFields(
-  interaction: MockCommandInteraction,
-  expected: Record<string, unknown>,
-) {
-  return expectSingleCallFirstArg(
-    interaction.followUp as unknown as MockCalls,
-    expected,
-    "followUp",
-  );
-}
-
-function expectNoFollowUpContent(interaction: MockCommandInteraction, content: string) {
-  const calls = (interaction.followUp as unknown as MockCalls).mock.calls;
-  const matched = calls.some(([payload]) => isRecord(payload) && payload.content === content);
-  expect(matched).toBe(false);
-}
-
 async function createPluginCommand(params: { cfg: OpenClawConfig; name: string }) {
   return createDiscordNativeCommand({
     command: {
@@ -330,12 +269,15 @@ async function expectPairCommandReply(params: {
   );
 
   expect(dispatchSpy).not.toHaveBeenCalled();
-  expectPluginCommandExecution({
-    mock: executeSpy,
-    commandName: params.expectedRegisteredName ?? "pair",
-    expected: { args: "now" },
-  });
-  expectFollowUpFields(params.interaction, { content: "paired:now" });
+  expect(executeSpy).toHaveBeenCalledWith(
+    expect.objectContaining({
+      command: expect.objectContaining({ name: params.expectedRegisteredName ?? "pair" }),
+      args: "now",
+    }),
+  );
+  expect(params.interaction.followUp).toHaveBeenCalledWith(
+    expect.objectContaining({ content: "paired:now" }),
+  );
   expect(params.interaction.reply).not.toHaveBeenCalled();
 }
 
@@ -479,9 +421,11 @@ describe("Discord native plugin command dispatch", () => {
     await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
 
     expect(handler).not.toHaveBeenCalled();
-    expectFollowUpFields(interaction, {
-      content: "⚠️ This command requires gateway scope: operator.pairing.",
-    });
+    expect(interaction.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "⚠️ This command requires gateway scope: operator.pairing.",
+      }),
+    );
     expect(interaction.reply).not.toHaveBeenCalled();
   });
 
@@ -504,7 +448,9 @@ describe("Discord native plugin command dispatch", () => {
     await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
 
     expect(handler).toHaveBeenCalledTimes(1);
-    expectFollowUpFields(interaction, { content: "paired:now" });
+    expect(interaction.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "paired:now" }),
+    );
     expect(interaction.reply).not.toHaveBeenCalled();
   });
 
@@ -518,9 +464,11 @@ describe("Discord native plugin command dispatch", () => {
     await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
 
     expect(handler).not.toHaveBeenCalled();
-    expectFollowUpFields(interaction, {
-      content: "⚠️ This command requires gateway scope: operator.pairing.",
-    });
+    expect(interaction.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "⚠️ This command requires gateway scope: operator.pairing.",
+      }),
+    );
     expect(interaction.reply).not.toHaveBeenCalled();
   });
 
@@ -581,10 +529,12 @@ describe("Discord native plugin command dispatch", () => {
 
     expect(executeSpy).not.toHaveBeenCalled();
     expect(dispatchSpy).not.toHaveBeenCalled();
-    expectFollowUpFields(interaction, {
-      content: "You are not authorized to use this command.",
-      ephemeral: true,
-    });
+    expect(interaction.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "You are not authorized to use this command.",
+        ephemeral: true,
+      }),
+    );
     expect(interaction.reply).not.toHaveBeenCalled();
   });
 
@@ -639,12 +589,15 @@ describe("Discord native plugin command dispatch", () => {
 
     await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
 
-    expectPluginCommandExecution({
-      mock: executeSpy,
-      commandName: "pair",
-      expected: { args: "now" },
-    });
-    expectFollowUpFields(interaction, { content: "open:now" });
+    expect(executeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: expect.objectContaining({ name: "pair" }),
+        args: "now",
+      }),
+    );
+    expect(interaction.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "open:now" }),
+    );
     expect(interaction.reply).not.toHaveBeenCalled();
   });
 
@@ -699,12 +652,15 @@ describe("Discord native plugin command dispatch", () => {
 
     await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
 
-    expectPluginCommandExecution({
-      mock: executeSpy,
-      commandName: "pair",
-      expected: { args: "now" },
-    });
-    expectFollowUpFields(interaction, { content: "open:now" });
+    expect(executeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: expect.objectContaining({ name: "pair" }),
+        args: "now",
+      }),
+    );
+    expect(interaction.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "open:now" }),
+    );
     expect(interaction.reply).not.toHaveBeenCalled();
   });
 
@@ -736,9 +692,11 @@ describe("Discord native plugin command dispatch", () => {
     await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
 
     expect(dispatchSpy).not.toHaveBeenCalled();
-    expectFollowUpFields(interaction, {
-      content: "This group DM is not allowed.",
-    });
+    expect(interaction.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "This group DM is not allowed.",
+      }),
+    );
     expect(interaction.reply).not.toHaveBeenCalled();
   });
 
@@ -774,7 +732,9 @@ describe("Discord native plugin command dispatch", () => {
 
     expect(executeSpy).toHaveBeenCalledTimes(1);
     expect(dispatchSpy).not.toHaveBeenCalled();
-    expectFollowUpFields(interaction, { content: "direct plugin output" });
+    expect(interaction.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "direct plugin output" }),
+    );
     expect(interaction.reply).not.toHaveBeenCalled();
   });
 
@@ -794,10 +754,12 @@ describe("Discord native plugin command dispatch", () => {
 
     await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
 
-    expectFollowUpFields(interaction, {
-      content: "⚠️ Command produced no visible reply.",
-      ephemeral: true,
-    });
+    expect(interaction.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "⚠️ Command produced no visible reply.",
+        ephemeral: true,
+      }),
+    );
     expect(interaction.reply).not.toHaveBeenCalled();
   });
 
@@ -817,7 +779,9 @@ describe("Discord native plugin command dispatch", () => {
 
     await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
 
-    expectNoFollowUpContent(interaction, "⚠️ Command produced no visible reply.");
+    expect(interaction.followUp).not.toHaveBeenCalledWith(
+      expect.objectContaining({ content: "⚠️ Command produced no visible reply." }),
+    );
     expect(interaction.reply).not.toHaveBeenCalled();
   });
 
@@ -850,7 +814,9 @@ describe("Discord native plugin command dispatch", () => {
     await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
 
     expect(dispatchSpy).not.toHaveBeenCalled();
-    expectFollowUpFields(interaction, { content: "⚠️ Command produced no visible reply." });
+    expect(interaction.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "⚠️ Command produced no visible reply." }),
+    );
     expect(interaction.reply).not.toHaveBeenCalled();
   });
 
@@ -912,14 +878,16 @@ describe("Discord native plugin command dispatch", () => {
 
     await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
 
-    expectSingleCallFirstArg(executeSpy, {
-      channel: "discord",
-      from: "discord:channel:thread-123",
-      to: "slash:owner",
-      sessionKey: "agent:main:discord:channel:thread-123",
-      messageThreadId: "thread-123",
-      threadParentId: "parent-456",
-    });
+    expect(executeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "discord",
+        from: "discord:channel:thread-123",
+        to: "slash:owner",
+        sessionKey: "agent:main:discord:channel:thread-123",
+        messageThreadId: "thread-123",
+        threadParentId: "parent-456",
+      }),
+    );
   });
 
   it("preserves fetched thread parent metadata when interaction parentId getter throws", async () => {
@@ -995,12 +963,14 @@ describe("Discord native plugin command dispatch", () => {
 
     await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
 
-    expectSingleCallFirstArg(executeSpy, {
-      channel: "discord",
-      from: "discord:channel:partial-thread-123",
-      messageThreadId: "partial-thread-123",
-      threadParentId: "partial-parent-456",
-    });
+    expect(executeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "discord",
+        from: "discord:channel:partial-thread-123",
+        messageThreadId: "partial-thread-123",
+        threadParentId: "partial-parent-456",
+      }),
+    );
   });
 
   it("routes native slash commands through configured ACP Discord channel bindings", async () => {
@@ -1150,9 +1120,11 @@ describe("Discord native plugin command dispatch", () => {
 
     await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
 
-    expectSingleCallFirstArg(resolveRouteState, {
-      enforceConfiguredBindingReadiness: true,
-    });
+    expect(resolveRouteState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        enforceConfiguredBindingReadiness: true,
+      }),
+    );
     expect(dispatchSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -1189,12 +1161,10 @@ describe("Discord native plugin command dispatch", () => {
     expect(dispatchCall.ctx?.CommandTargetSessionKey).toMatch(
       /^agent:codex:acp:binding:discord:default:/,
     );
-    const replyCalls = (interaction.reply as unknown as MockCalls).mock.calls;
-    const blockedReply = replyCalls.some(
-      ([payload]) =>
-        isRecord(payload) &&
-        payload.content === "Configured ACP binding is unavailable right now. Please try again.",
+    expect(interaction.reply).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "Configured ACP binding is unavailable right now. Please try again.",
+      }),
     );
-    expect(blockedReply).toBe(false);
   });
 });

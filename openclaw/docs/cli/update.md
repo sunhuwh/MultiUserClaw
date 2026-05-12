@@ -52,10 +52,6 @@ console verbosity and file log level are separate: Gateway `--verbose` affects
 terminal/WebSocket output, while file logs require `logging.level: "debug"` or
 `"trace"` in config. See [Gateway logging](/gateway/logging).
 
-<Note>
-In Nix mode (`OPENCLAW_NIX_MODE=1`), mutating `openclaw update` runs are disabled. Update the Nix source or flake input for this install instead; for nix-openclaw, use the agent-first [Quick Start](https://github.com/openclaw/nix-openclaw#quick-start). `openclaw update status` and `openclaw update --dry-run` remain read-only.
-</Note>
-
 <Warning>
 Downgrades require confirmation because older versions can break configuration.
 </Warning>
@@ -158,7 +154,7 @@ manually.
     Rebases onto the selected commit (dev only).
   </Step>
   <Step title="Install dependencies">
-    Uses the repo package manager. For pnpm checkouts, the updater bootstraps `pnpm` on demand (via `corepack` first, then a temporary `npm install pnpm@11` fallback) instead of running `npm run build` inside a pnpm workspace.
+    Uses the repo package manager. For pnpm checkouts, the updater bootstraps `pnpm` on demand (via `corepack` first, then a temporary `npm install pnpm@10` fallback) instead of running `npm run build` inside a pnpm workspace.
   </Step>
   <Step title="Build Control UI">
     Builds the gateway and the Control UI.

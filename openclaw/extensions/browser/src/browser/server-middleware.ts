@@ -27,15 +27,8 @@ export function installBrowserCommonMiddleware(app: Express) {
         abort();
       }
     });
-    // Make the signal available to browser route handlers on Node versions
-    // whose IncomingMessage does not already expose a native read-only signal.
-    const requestWithSignal = req as Request & { signal?: AbortSignal };
-    if (!(requestWithSignal.signal instanceof AbortSignal)) {
-      Object.defineProperty(req, "signal", {
-        value: ctrl.signal,
-        configurable: true,
-      });
-    }
+    // Make the signal available to browser route handlers (best-effort).
+    (req as unknown as { signal?: AbortSignal }).signal = ctrl.signal;
     next();
   });
   app.use(express.json({ limit: "1mb" }));

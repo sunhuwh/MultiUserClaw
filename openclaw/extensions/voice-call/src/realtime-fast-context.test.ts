@@ -1,13 +1,13 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VoiceCallRealtimeFastContextConfig } from "./config.js";
 
 const mocks = vi.hoisted(() => ({
-  resolveRealtimeVoiceFastContextConsult: vi.fn(),
+  getActiveMemorySearchManager: vi.fn(),
 }));
 
-vi.mock("openclaw/plugin-sdk/realtime-voice", () => ({
-  resolveRealtimeVoiceFastContextConsult: mocks.resolveRealtimeVoiceFastContextConsult,
+vi.mock("openclaw/plugin-sdk/memory-host-search", () => ({
+  getActiveMemorySearchManager: mocks.getActiveMemorySearchManager,
 }));
 
 import { resolveRealtimeFastContextConsult } from "./realtime-fast-context.js";
@@ -36,16 +36,16 @@ function createLogger() {
 
 describe("resolveRealtimeFastContextConsult", () => {
   beforeEach(() => {
-    mocks.resolveRealtimeVoiceFastContextConsult.mockReset();
+    mocks.getActiveMemorySearchManager.mockReset();
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it("passes voice-call labels into the SDK fast context resolver", async () => {
+  it("falls back to the full consult when memory manager setup fails", async () => {
     const logger = createLogger();
-    mocks.resolveRealtimeVoiceFastContextConsult.mockResolvedValue({ handled: false });
+    mocks.getActiveMemorySearchManager.mockRejectedValue(new Error("memory misconfigured"));
 
     await expect(
       resolveRealtimeFastContextConsult({
@@ -58,17 +58,31 @@ describe("resolveRealtimeFastContextConsult", () => {
       }),
     ).resolves.toEqual({ handled: false });
 
-    expect(mocks.resolveRealtimeVoiceFastContextConsult).toHaveBeenCalledWith({
+    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining("memory misconfigured"));
+  });
+
+  it("returns a bounded miss when memory manager setup exceeds the fast context timeout", async () => {
+    vi.useFakeTimers();
+    const logger = createLogger();
+    mocks.getActiveMemorySearchManager.mockReturnValue(new Promise(() => {}));
+
+    const resultPromise = resolveRealtimeFastContextConsult({
       cfg,
       agentId: "main",
       sessionKey: "voice:15550001234",
-      config: createFastContextConfig({ fallbackToConsult: true }),
+      config: createFastContextConfig({ fallbackToConsult: false, timeoutMs: 25 }),
       args: { question: "What do you remember?" },
       logger,
-      labels: {
-        audienceLabel: "caller",
-        contextName: "OpenClaw memory or session context",
+    });
+
+    await vi.advanceTimersByTimeAsync(25);
+
+    await expect(resultPromise).resolves.toEqual({
+      handled: true,
+      result: {
+        text: expect.stringContaining("No relevant OpenClaw memory or session context"),
       },
     });
+    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining("timed out after 25ms"));
   });
 });

@@ -1,13 +1,13 @@
 import { resolveAgentAvatar } from "openclaw/plugin-sdk/agent-runtime";
-import { sendDurableMessageBatch } from "openclaw/plugin-sdk/channel-message";
 import type {
   MarkdownTableMode,
   OpenClawConfig,
   ReplyToMode,
-} from "openclaw/plugin-sdk/config-contracts";
+} from "openclaw/plugin-sdk/config-types";
 import type { OutboundMediaAccess } from "openclaw/plugin-sdk/media-runtime";
 import {
   buildOutboundSessionContext,
+  deliverOutboundPayloads,
   type OutboundDeliveryFormattingOptions,
   type OutboundIdentity,
   type OutboundSendDeps,
@@ -15,7 +15,7 @@ import {
 import type { ChunkMode } from "openclaw/plugin-sdk/reply-chunking";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-dispatch-runtime";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import type { RequestClient } from "../internal/discord.js";
 import { sendMessageDiscord, sendVoiceMessageDiscord } from "../send.js";
 import { sanitizeDiscordFrontChannelReplyPayloads } from "./reply-safety.js";
@@ -181,7 +181,7 @@ export async function deliverDiscordReply(params: {
     return;
   }
 
-  const send = await sendDurableMessageBatch({
+  const results = await deliverOutboundPayloads({
     cfg: params.cfg,
     channel: "discord",
     to: delivery.to,
@@ -205,10 +205,6 @@ export async function deliverDiscordReply(params: {
       requesterAccountId: params.accountId,
     }),
   });
-  if (send.status === "failed" || send.status === "partial_failed") {
-    throw send.error;
-  }
-  const results = send.status === "sent" ? send.results : [];
   if (results.length === 0) {
     throw new Error(`discord final reply produced no delivered message for ${delivery.to}`);
   }

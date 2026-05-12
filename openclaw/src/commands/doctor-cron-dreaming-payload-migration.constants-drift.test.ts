@@ -29,9 +29,7 @@ describe("dreaming payload-migration constants drift", () => {
 
     for (const name of NAMES) {
       const sourceValue = extractStringConst(source, name);
-      if (sourceValue === undefined) {
-        throw new Error(`missing source const ${name}`);
-      }
+      expect(sourceValue).toBeTruthy();
       expect(mirror).toContain(name);
       expect(mirror).not.toMatch(new RegExp(`\\bconst ${name}\\b`));
     }

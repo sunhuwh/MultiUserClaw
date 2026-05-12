@@ -68,10 +68,6 @@ function computeSessionDeliveryBackoffMs(retryCount: number): number {
   return BACKOFF_MS[Math.min(retryCount - 1, BACKOFF_MS.length - 1)] ?? BACKOFF_MS.at(-1) ?? 0;
 }
 
-function resolveSessionDeliveryMaxRetries(entry: QueuedSessionDelivery): number {
-  return entry.maxRetries ?? MAX_SESSION_DELIVERY_RETRIES;
-}
-
 export function isSessionDeliveryEligibleForRetry(
   entry: QueuedSessionDelivery,
   now: number,
@@ -157,7 +153,7 @@ export async function drainPendingSessionDeliveries(opts: {
         if (!currentDecision.match) {
           continue;
         }
-        if (currentEntry.retryCount >= resolveSessionDeliveryMaxRetries(currentEntry)) {
+        if (currentEntry.retryCount >= MAX_SESSION_DELIVERY_RETRIES) {
           try {
             await moveSessionDeliveryToFailed(currentEntry.id, opts.stateDir);
           } catch (err) {
@@ -233,7 +229,7 @@ export async function recoverPendingSessionDeliveries(opts: {
       if (opts.maxEnqueuedAt != null && currentEntry.enqueuedAt > opts.maxEnqueuedAt) {
         continue;
       }
-      if (currentEntry.retryCount >= resolveSessionDeliveryMaxRetries(currentEntry)) {
+      if (currentEntry.retryCount >= MAX_SESSION_DELIVERY_RETRIES) {
         summary.skippedMaxRetries += 1;
         try {
           await moveSessionDeliveryToFailed(currentEntry.id, opts.stateDir);

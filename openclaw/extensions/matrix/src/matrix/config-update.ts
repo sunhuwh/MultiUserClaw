@@ -4,15 +4,16 @@ import { normalizeSecretInputString } from "openclaw/plugin-sdk/setup";
 import type { CoreConfig, MatrixConfig } from "../types.js";
 import { findMatrixAccountConfig } from "./account-config.js";
 import {
-  resolveMatrixConfigPath as resolveMatrixConfigPathBase,
+  resolveMatrixConfigFieldPath,
+  resolveMatrixConfigPath,
   shouldStoreMatrixAccountAtTopLevel,
 } from "./config-paths.js";
 
 export {
   resolveMatrixConfigFieldPath,
+  resolveMatrixConfigPath,
   shouldStoreMatrixAccountAtTopLevel,
 } from "./config-paths.js";
-export const resolveMatrixConfigPath = resolveMatrixConfigPathBase;
 
 export type MatrixAccountPatch = {
   name?: string | null;

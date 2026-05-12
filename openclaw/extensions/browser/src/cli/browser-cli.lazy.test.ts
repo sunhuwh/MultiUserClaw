@@ -72,10 +72,8 @@ describe("registerBrowserCli lazy browser subcommands", () => {
     expect(browser?.commands.map((command) => command.name())).toContain("status");
     expect(browser?.commands.map((command) => command.name())).toContain("snapshot");
     const doctor = browser?.commands.find((command) => command.name() === "doctor");
-    if (!doctor) {
-      throw new Error("expected browser doctor command placeholder");
-    }
-    expect(doctor.options.map((option) => option.long)).toContain("--deep");
+    expect(doctor).toBeDefined();
+    expect(doctor?.options.map((option) => option.long)).toContain("--deep");
     expect(manageMocks.registerBrowserManageCommands).not.toHaveBeenCalled();
     expect(inspectMocks.registerBrowserInspectCommands).not.toHaveBeenCalled();
     expect(actionInputMocks.registerBrowserActionInputCommands).not.toHaveBeenCalled();

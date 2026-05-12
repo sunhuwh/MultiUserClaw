@@ -19,7 +19,6 @@ const hoisted = await vi.hoisted(async () => {
     ),
     mkdirMock: vi.fn(async (_filePath: string, _options?: { recursive?: boolean }) => undefined),
     accessMock: vi.fn(async (_filePath: string) => undefined),
-    pathExistsMock: vi.fn(async (_filePath: string) => true),
     exportHtmlTemplateContents: new Map<string, string>(),
   };
 });
@@ -36,10 +35,6 @@ vi.mock("../../config/sessions/store.js", () => ({
 
 vi.mock("./commands-system-prompt.js", () => ({
   resolveCommandsSystemPromptBundle: hoisted.resolveCommandsSystemPromptBundleMock,
-}));
-
-vi.mock("../../infra/fs-safe.js", () => ({
-  pathExists: hoisted.pathExistsMock,
 }));
 
 vi.mock("node:fs", async () => {
@@ -88,8 +83,6 @@ vi.mock("node:fs/promises", async () => {
     default: mockedFsPromises,
   };
 });
-
-import { buildExportSessionReply } from "./commands-export-session.js";
 
 function makeParams(): HandleCommandsParams {
   return {
@@ -153,11 +146,12 @@ describe("buildExportSessionReply", () => {
       sandboxRuntime: { sandboxed: false, mode: "off" },
     });
     hoisted.accessMock.mockResolvedValue(undefined);
-    hoisted.pathExistsMock.mockResolvedValue(true);
     hoisted.exportHtmlTemplateContents.clear();
   });
 
   it("resolves store and transcript paths from the target session agent", async () => {
+    const { buildExportSessionReply } = await import("./commands-export-session.js");
+
     await buildExportSessionReply(makeParams());
 
     expect(hoisted.resolveDefaultSessionStorePathMock).toHaveBeenCalledWith("target");
@@ -168,6 +162,7 @@ describe("buildExportSessionReply", () => {
   });
 
   it("prefers the active command storePath over the default target-agent store", async () => {
+    const { buildExportSessionReply } = await import("./commands-export-session.js");
     hoisted.loadSessionStoreMock.mockReturnValue({
       "agent:target:session": {
         sessionId: "session-1",
@@ -191,6 +186,7 @@ describe("buildExportSessionReply", () => {
   });
 
   it("uses the target store entry even when the wrapper sessionEntry is missing", async () => {
+    const { buildExportSessionReply } = await import("./commands-export-session.js");
     hoisted.loadSessionStoreMock.mockReturnValue({
       "agent:target:session": {
         sessionId: "session-from-store",
@@ -214,6 +210,8 @@ describe("buildExportSessionReply", () => {
   });
 
   it("injects scripts and session data through the real export template", async () => {
+    const { buildExportSessionReply } = await import("./commands-export-session.js");
+
     await buildExportSessionReply(makeParams());
 
     const html = hoisted.writeFileMock.mock.calls[0]?.[1];
@@ -239,6 +237,7 @@ describe("buildExportSessionReply", () => {
   });
 
   it("suffixes colliding default export filenames instead of overwriting", async () => {
+    const { buildExportSessionReply } = await import("./commands-export-session.js");
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-05T10:11:12.345Z"));
     const collision = Object.assign(new Error("exists"), { code: "EEXIST" });
@@ -264,6 +263,7 @@ describe("buildExportSessionReply", () => {
   });
 
   it("preserves replacement text with dollar sequences", async () => {
+    const { buildExportSessionReply } = await import("./commands-export-session.js");
     hoisted.exportHtmlTemplateContents.set(
       "template.html",
       [

@@ -10,15 +10,6 @@ import {
   type DiagnosticStabilitySnapshot,
 } from "./diagnostic-stability.js";
 
-function expectFields(value: unknown, expected: Record<string, unknown>): void {
-  expect(value).toBeTypeOf("object");
-  expect(value).not.toBeNull();
-  const record = value as Record<string, unknown>;
-  for (const [key, expectedValue] of Object.entries(expected)) {
-    expect(record[key], key).toEqual(expectedValue);
-  }
-}
-
 describe("diagnostic stability recorder", () => {
   beforeEach(() => {
     resetDiagnosticStabilityRecorderForTest();
@@ -31,7 +22,7 @@ describe("diagnostic stability recorder", () => {
     resetDiagnosticEventsForTest();
   });
 
-  it("records a bounded payload-free projection of diagnostic events", async () => {
+  it("records a bounded payload-free projection of diagnostic events", () => {
     startDiagnosticStabilityRecorder();
 
     emitDiagnosticEvent({
@@ -50,37 +41,21 @@ describe("diagnostic stability recorder", () => {
       count: 3,
       message: "message that should not be stored",
     });
-    emitDiagnosticEvent({
-      type: "talk.event",
-      sessionId: "talk-session-secret",
-      turnId: "talk-turn-secret",
-      captureId: "talk-capture-secret",
-      talkEventType: "latency.metrics",
-      mode: "realtime",
-      transport: "gateway-relay",
-      brain: "agent-consult",
-      provider: "openai",
-      final: true,
-      durationMs: 12,
-      byteLength: 345,
-    });
-    await new Promise<void>((resolve) => setImmediate(resolve));
 
     const snapshot = getDiagnosticStabilitySnapshot({ limit: 10 });
 
-    expect(snapshot.count).toBe(3);
-    expectFields(snapshot.summary.byType, {
+    expect(snapshot.count).toBe(2);
+    expect(snapshot.summary.byType).toMatchObject({
       "webhook.error": 1,
       "tool.loop": 1,
-      "talk.event": 1,
     });
-    expectFields(snapshot.events[0], {
+    expect(snapshot.events[0]).toMatchObject({
       type: "webhook.error",
       channel: "telegram",
     });
     expect(snapshot.events[0]).not.toHaveProperty("error");
     expect(snapshot.events[0]).not.toHaveProperty("chatId");
-    expectFields(snapshot.events[1], {
+    expect(snapshot.events[1]).toMatchObject({
       type: "tool.loop",
       toolName: "poll",
       level: "warning",
@@ -91,20 +66,6 @@ describe("diagnostic stability recorder", () => {
     expect(snapshot.events[1]).not.toHaveProperty("message");
     expect(snapshot.events[1]).not.toHaveProperty("sessionId");
     expect(snapshot.events[1]).not.toHaveProperty("sessionKey");
-    expectFields(snapshot.events[2], {
-      type: "talk.event",
-      talkEventType: "latency.metrics",
-      mode: "realtime",
-      transport: "gateway-relay",
-      brain: "agent-consult",
-      provider: "openai",
-      final: true,
-      durationMs: 12,
-      bytes: 345,
-    });
-    expect(snapshot.events[2]).not.toHaveProperty("sessionId");
-    expect(snapshot.events[2]).not.toHaveProperty("turnId");
-    expect(snapshot.events[2]).not.toHaveProperty("captureId");
   });
 
   it("keeps stable reason codes but drops free-form reason text", () => {
@@ -125,11 +86,11 @@ describe("diagnostic stability recorder", () => {
 
     const snapshot = getDiagnosticStabilitySnapshot({ limit: 10 });
 
-    expectFields(snapshot.events[0], {
+    expect(snapshot.events[0]).toMatchObject({
       type: "payload.large",
       reason: "json_body_limit",
     });
-    expectFields(snapshot.events[1], {
+    expect(snapshot.events[1]).toMatchObject({
       type: "message.processed",
       outcome: "error",
     });
@@ -161,7 +122,7 @@ describe("diagnostic stability recorder", () => {
 
     const snapshot = getDiagnosticStabilitySnapshot({ limit: 10 });
 
-    expectFields(snapshot.events[0], {
+    expect(snapshot.events[0]).toMatchObject({
       type: "context.assembled",
       provider: "openai",
       model: "gpt-5.4",
@@ -208,12 +169,12 @@ describe("diagnostic stability recorder", () => {
 
     const snapshot = getDiagnosticStabilitySnapshot({ limit: 10 });
 
-    expectFields(snapshot.events[0], {
+    expect(snapshot.events[0]).toMatchObject({
       type: "tool.execution.error",
       toolName: "read",
     });
     expect(snapshot.events[0]).not.toHaveProperty("reason");
-    expectFields(snapshot.events[1], {
+    expect(snapshot.events[1]).toMatchObject({
       type: "model.call.error",
       provider: "openai",
       model: "gpt-5.4",
@@ -271,14 +232,14 @@ describe("diagnostic stability recorder", () => {
 
     const snapshot = getDiagnosticStabilitySnapshot();
 
-    expectFields(snapshot.summary.memory, {
+    expect(snapshot.summary.memory).toMatchObject({
+      latest: {
+        rssBytes: 120,
+        heapUsedBytes: 50,
+      },
       maxRssBytes: 120,
       maxHeapUsedBytes: 50,
       pressureCount: 1,
-    });
-    expectFields(snapshot.summary.memory?.latest, {
-      rssBytes: 120,
-      heapUsedBytes: 50,
     });
     expect(snapshot.summary.payloadLarge).toEqual({
       count: 1,
@@ -309,7 +270,7 @@ describe("diagnostic stability recorder", () => {
     expect(snapshot.dropped).toBe(5);
     expect(snapshot.firstSeq).toBe(6);
     expect(snapshot.lastSeq).toBe(1005);
-    expectFields(snapshot.events[0], { seq: 6, queueDepth: 5 });
+    expect(snapshot.events[0]).toMatchObject({ seq: 6, queueDepth: 5 });
   });
 
   it("filters snapshots by type, sequence, and limit", () => {
@@ -326,12 +287,13 @@ describe("diagnostic stability recorder", () => {
     });
 
     expect(snapshot.count).toBe(1);
-    expect(snapshot.events).toHaveLength(1);
-    expectFields(snapshot.events[0], {
-      seq: 3,
-      type: "payload.large",
-      action: "chunked",
-    });
+    expect(snapshot.events).toMatchObject([
+      {
+        seq: 3,
+        type: "payload.large",
+        action: "chunked",
+      },
+    ]);
   });
 
   it("applies query filters to persisted snapshots without mutating the source", () => {
@@ -360,24 +322,21 @@ describe("diagnostic stability recorder", () => {
       limit: 1,
     });
 
-    expectFields(selected, {
+    expect(selected).toMatchObject({
       count: 2,
       firstSeq: 2,
       lastSeq: 3,
-    });
-    expect(selected.events).toHaveLength(1);
-    expectFields(selected.events[0], {
-      seq: 3,
-      type: "payload.large",
-      action: "chunked",
-    });
-    expectFields(selected.summary.byType, {
-      "payload.large": 2,
-    });
-    expectFields(selected.summary.payloadLarge, {
-      count: 2,
-      rejected: 1,
-      chunked: 1,
+      events: [{ seq: 3, type: "payload.large", action: "chunked" }],
+      summary: {
+        byType: {
+          "payload.large": 2,
+        },
+        payloadLarge: {
+          count: 2,
+          rejected: 1,
+          chunked: 1,
+        },
+      },
     });
     expect(snapshot.events).toHaveLength(3);
   });

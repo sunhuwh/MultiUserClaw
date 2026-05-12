@@ -1,5 +1,3 @@
-import { isLoopbackHost } from "openclaw/plugin-sdk/gateway-runtime";
-
 export const QA_CREDENTIALS_DEFAULT_ENDPOINT_PREFIX = "/qa-credentials/v1";
 const QA_CREDENTIALS_ALLOW_INSECURE_HTTP_ENV_KEY = "OPENCLAW_QA_ALLOW_INSECURE_HTTP";
 
@@ -31,6 +29,10 @@ export function isQaCredentialTruthyOptIn(value: string | undefined) {
   return normalized === "1" || normalized === "true" || normalized === "yes";
 }
 
+function isQaCredentialLoopbackHostname(hostname: string) {
+  return hostname === "localhost" || hostname === "::1" || hostname.startsWith("127.");
+}
+
 export function normalizeQaCredentialConvexSiteUrl(params: {
   env: NodeJS.ProcessEnv;
   raw: string;
@@ -55,7 +57,7 @@ export function normalizeQaCredentialConvexSiteUrl(params: {
   const allowInsecureHttp = isQaCredentialTruthyOptIn(
     params.env[QA_CREDENTIALS_ALLOW_INSECURE_HTTP_ENV_KEY],
   );
-  if (!allowInsecureHttp || !isLoopbackHost(url.hostname)) {
+  if (!allowInsecureHttp || !isQaCredentialLoopbackHostname(url.hostname)) {
     throw toError(
       `OPENCLAW_QA_CONVEX_SITE_URL must use https://. http:// is only allowed for loopback hosts when ${QA_CREDENTIALS_ALLOW_INSECURE_HTTP_ENV_KEY}=1.`,
     );

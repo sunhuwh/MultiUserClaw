@@ -37,7 +37,6 @@ export async function applyOrStoreProposal(params: {
   store: SkillWorkshopStore;
   config: SkillWorkshopConfig;
   workspaceDir: string;
-  skipAutoApply?: boolean;
 }): Promise<{
   status: "pending" | "applied" | "quarantined";
   skillPath?: string;
@@ -61,7 +60,7 @@ export async function applyOrStoreProposal(params: {
     );
     return { status: "quarantined", proposal: stored };
   }
-  if (params.config.approvalPolicy === "auto" && !params.skipAutoApply) {
+  if (params.config.approvalPolicy === "auto") {
     const applied = await applyProposalToWorkspace({
       proposal: params.proposal,
       maxSkillBytes: params.config.maxSkillBytes,

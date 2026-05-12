@@ -26,11 +26,11 @@ function createModalFieldComponent(
   if (field.type === "text") {
     class DynamicTextInput extends TextInput {
       customId = field.id;
-      override style = mapTextInputStyle(field.style);
-      override placeholder = field.placeholder;
-      override required = field.required;
-      override minLength = field.minLength;
-      override maxLength = field.maxLength;
+      style = mapTextInputStyle(field.style);
+      placeholder = field.placeholder;
+      required = field.required;
+      minLength = field.minLength;
+      maxLength = field.maxLength;
     }
     return new DynamicTextInput();
   }
@@ -38,31 +38,31 @@ function createModalFieldComponent(
     const options = field.options ?? [];
     class DynamicModalSelect extends StringSelectMenu {
       customId = field.id;
-      override options = options;
-      override required = field.required;
-      override minValues = field.minValues;
-      override maxValues = field.maxValues;
-      override placeholder = field.placeholder;
+      options = options;
+      required = field.required;
+      minValues = field.minValues;
+      maxValues = field.maxValues;
+      placeholder = field.placeholder;
     }
     return new DynamicModalSelect();
   }
   if (field.type === "role-select") {
     class DynamicModalRoleSelect extends RoleSelectMenu {
       customId = field.id;
-      override required = field.required;
-      override minValues = field.minValues;
-      override maxValues = field.maxValues;
-      override placeholder = field.placeholder;
+      required = field.required;
+      minValues = field.minValues;
+      maxValues = field.maxValues;
+      placeholder = field.placeholder;
     }
     return new DynamicModalRoleSelect();
   }
   if (field.type === "user-select") {
     class DynamicModalUserSelect extends UserSelectMenu {
       customId = field.id;
-      override required = field.required;
-      override minValues = field.minValues;
-      override maxValues = field.maxValues;
-      override placeholder = field.placeholder;
+      required = field.required;
+      minValues = field.minValues;
+      maxValues = field.maxValues;
+      placeholder = field.placeholder;
     }
     return new DynamicModalUserSelect();
   }
@@ -70,29 +70,29 @@ function createModalFieldComponent(
     const options = field.options ?? [];
     class DynamicCheckboxGroup extends CheckboxGroup {
       customId = field.id;
-      override options = options;
-      override required = field.required;
-      override minValues = field.minValues;
-      override maxValues = field.maxValues;
+      options = options;
+      required = field.required;
+      minValues = field.minValues;
+      maxValues = field.maxValues;
     }
     return new DynamicCheckboxGroup();
   }
   const options = field.options ?? [];
   class DynamicRadioGroup extends RadioGroup {
     customId = field.id;
-    override options = options;
-    override required = field.required;
-    override minValues = field.minValues;
-    override maxValues = field.maxValues;
+    options = options;
+    required = field.required;
+    minValues = field.minValues;
+    maxValues = field.maxValues;
   }
   return new DynamicRadioGroup();
 }
 
 export class DiscordFormModal extends ModalBase {
-  override title: string;
-  override customId: string;
-  override components: Array<Label | TextDisplay>;
-  override customIdParser = parseDiscordModalCustomIdForInteractionImpl;
+  title: string;
+  customId: string;
+  components: Array<Label | TextDisplay>;
+  customIdParser = parseDiscordModalCustomIdForInteractionImpl;
 
   constructor(params: { modalId: string; title: string; fields: DiscordModalFieldDefinition[] }) {
     super();
@@ -101,10 +101,10 @@ export class DiscordFormModal extends ModalBase {
     this.components = params.fields.map((field) => {
       const component = createModalFieldComponent(field);
       class DynamicLabel extends Label {
-        override label = field.label;
-        override description = field.description;
-        override component = component;
-        override customId = field.id;
+        label = field.label;
+        description = field.description;
+        component = component;
+        customId = field.id;
       }
       return new DynamicLabel(component);
     });

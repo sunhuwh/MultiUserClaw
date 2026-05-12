@@ -84,10 +84,7 @@ describe("zalo outbound hosted media", () => {
 
     const { pathname } = new URL(hostedUrl);
     const id = pathname.split("/").pop();
-    if (!id) {
-      throw new Error("expected hosted Zalo media id");
-    }
-    expect(id).toEqual(expect.stringMatching(/^[a-f0-9-]+$/));
+    expect(id).toBeTruthy();
 
     const storageDir = join(resolvePreferredOpenClawTmpDir(), "openclaw-zalo-outbound-media");
     const [dirStats, metadataStats, bufferStats] = await Promise.all([

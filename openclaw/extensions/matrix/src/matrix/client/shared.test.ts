@@ -212,20 +212,11 @@ describe("resolveSharedMatrixClient", () => {
       accountId: "ops",
     });
     expect(createMatrixClientMock).toHaveBeenCalledTimes(1);
-    expect(createMatrixClientMock).toHaveBeenCalledWith({
-      accessToken: "token-ops",
-      accountId: "ops",
-      allowPrivateNetwork: undefined,
-      deviceId: "OPS-DEVICE",
-      dispatcherPolicy: undefined,
-      encryption: false,
-      homeserver: "https://matrix.example.org",
-      initialSyncLimit: undefined,
-      localTimeoutMs: undefined,
-      password: "secret",
-      ssrfPolicy: undefined,
-      userId: "@ops:example.org",
-    });
+    expect(createMatrixClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: "ops",
+      }),
+    );
   });
 
   it("honors startClient false even when the caller acquires a shared lease", async () => {

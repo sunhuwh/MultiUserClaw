@@ -1,13 +1,7 @@
 import {
-  type JsonSchemaObject,
-  validateJsonSchemaValue,
-} from "openclaw/plugin-sdk/json-schema-runtime";
-import {
   type ImagesDescriptionRequest,
   type ImagesDescriptionResult,
   type MediaUnderstandingProvider,
-  type StructuredExtractionRequest,
-  type StructuredExtractionResult,
 } from "openclaw/plugin-sdk/media-understanding";
 import { CODEX_PROVIDER_ID, FALLBACK_CODEX_MODELS } from "./provider-catalog.js";
 import { type CodexAppServerClientFactory } from "./src/app-server/client-factory.js";
@@ -27,7 +21,6 @@ import {
   type CodexThreadStartParams,
   type CodexTurn,
   type CodexTurnStartParams,
-  type CodexUserInput,
   type JsonObject,
   type JsonValue,
 } from "./src/app-server/protocol.js";
@@ -73,7 +66,6 @@ export function buildCodexMediaUnderstandingProvider(
         options,
       ),
     describeImages: async (req) => describeCodexImages(req, options),
-    extractStructured: async (req) => extractCodexStructured(req, options),
   };
 }
 
@@ -86,53 +78,17 @@ async function describeCodexImages(
     throw new Error("Codex image understanding requires model id.");
   }
 
-  const text = await runBoundedCodexVisionTurn({
-    model,
-    profile: req.profile,
-    timeoutMs: req.timeoutMs,
-    agentDir: req.agentDir,
-    options,
-    taskLabel: "image understanding",
-    developerInstructions:
-      "You are OpenClaw's bounded image-understanding worker. Describe only the provided image content. Do not call tools, edit files, or ask follow-up questions.",
-    input: [
-      { type: "text", text: buildCodexImagePrompt(req), text_elements: [] },
-      ...req.images.map((image) => ({
-        type: "image" as const,
-        url: `data:${image.mime ?? "image/png"};base64,${image.buffer.toString("base64")}`,
-      })),
-    ],
-    requiredModalities: ["text", "image"],
-  });
-  return { text, model };
-}
-
-type BoundedCodexVisionTurnParams = {
-  model: string;
-  profile?: string;
-  timeoutMs: number;
-  agentDir?: string;
-  options: CodexMediaUnderstandingProviderOptions;
-  taskLabel: string;
-  developerInstructions: string;
-  input: CodexUserInput[];
-  requiredModalities: string[];
-};
-
-async function runBoundedCodexVisionTurn(params: BoundedCodexVisionTurnParams): Promise<string> {
-  const appServer = resolveCodexAppServerRuntimeOptions({
-    pluginConfig: params.options.pluginConfig,
-  });
-  const timeoutMs = Math.max(100, params.timeoutMs);
-  const ownsClient = !params.options.clientFactory;
-  const client = params.options.clientFactory
-    ? await params.options.clientFactory(appServer.start, params.profile)
+  const appServer = resolveCodexAppServerRuntimeOptions({ pluginConfig: options.pluginConfig });
+  const timeoutMs = Math.max(100, req.timeoutMs);
+  const ownsClient = !options.clientFactory;
+  const client = options.clientFactory
+    ? await options.clientFactory(appServer.start, req.profile)
     : await import("./src/app-server/shared-client.js").then(
         ({ createIsolatedCodexAppServerClient }) =>
           createIsolatedCodexAppServerClient({
             startOptions: appServer.start,
             timeoutMs,
-            authProfileId: params.profile,
+            authProfileId: req.profile,
           }),
       );
   const abortController = new AbortController();
@@ -140,10 +96,9 @@ async function runBoundedCodexVisionTurn(params: BoundedCodexVisionTurnParams): 
   timeout.unref?.();
 
   try {
-    await assertCodexModelSupportsInput({
+    await assertCodexModelSupportsImage({
       client,
-      model: params.model,
-      requiredModalities: params.requiredModalities,
+      model,
       timeoutMs,
       signal: abortController.signal,
     });
@@ -151,13 +106,14 @@ async function runBoundedCodexVisionTurn(params: BoundedCodexVisionTurnParams): 
       await client.request<unknown>(
         "thread/start",
         {
-          model: params.model,
+          model,
           modelProvider: "openai",
-          cwd: params.agentDir || process.cwd(),
+          cwd: req.agentDir || process.cwd(),
           approvalPolicy: "on-request",
           sandbox: "read-only",
           serviceName: "OpenClaw",
-          developerInstructions: params.developerInstructions,
+          developerInstructions:
+            "You are OpenClaw's bounded image-understanding worker. Describe only the provided image content. Do not call tools, edit files, or ask follow-up questions.",
           dynamicTools: [],
           experimentalRawEvents: true,
           persistExtendedHistory: false,
@@ -166,7 +122,7 @@ async function runBoundedCodexVisionTurn(params: BoundedCodexVisionTurnParams): 
         { timeoutMs, signal: abortController.signal },
       ),
     );
-    const collector = createCodexTurnCollector(thread.thread.id, params.taskLabel);
+    const collector = createCodexImageTurnCollector(thread.thread.id);
     const cleanup = client.addNotificationHandler(collector.handleNotification);
     const requestCleanup = client.addRequestHandler(denyCodexImageApprovalRequest);
     try {
@@ -175,10 +131,16 @@ async function runBoundedCodexVisionTurn(params: BoundedCodexVisionTurnParams): 
           "turn/start",
           {
             threadId: thread.thread.id,
-            input: params.input,
-            cwd: params.agentDir || process.cwd(),
+            input: [
+              { type: "text", text: buildCodexImagePrompt(req), text_elements: [] },
+              ...req.images.map((image) => ({
+                type: "image" as const,
+                url: `data:${image.mime ?? "image/png"};base64,${image.buffer.toString("base64")}`,
+              })),
+            ],
+            cwd: req.agentDir || process.cwd(),
             approvalPolicy: "on-request",
-            model: params.model,
+            model,
             effort: "low",
           } satisfies CodexTurnStartParams,
           { timeoutMs, signal: abortController.signal },
@@ -188,7 +150,7 @@ async function runBoundedCodexVisionTurn(params: BoundedCodexVisionTurnParams): 
         timeoutMs,
         signal: abortController.signal,
       });
-      return text;
+      return { text, model };
     } finally {
       requestCleanup();
       cleanup();
@@ -199,40 +161,6 @@ async function runBoundedCodexVisionTurn(params: BoundedCodexVisionTurnParams): 
       client.close();
     }
   }
-}
-
-async function extractCodexStructured(
-  req: StructuredExtractionRequest,
-  options: CodexMediaUnderstandingProviderOptions,
-): Promise<StructuredExtractionResult> {
-  const model = req.model.trim();
-  if (!model) {
-    throw new Error("Codex structured extraction requires model id.");
-  }
-  const instructions = req.instructions.trim();
-  if (!instructions) {
-    throw new Error("Codex structured extraction requires instructions.");
-  }
-  if (req.input.length === 0) {
-    throw new Error("Codex structured extraction requires at least one input.");
-  }
-  if (!req.input.some((entry) => entry.type === "image")) {
-    throw new Error("Codex structured extraction requires at least one image input.");
-  }
-
-  const text = await runBoundedCodexVisionTurn({
-    model,
-    profile: req.profile,
-    timeoutMs: req.timeoutMs,
-    agentDir: req.agentDir,
-    options,
-    taskLabel: "structured extraction",
-    developerInstructions:
-      "You are OpenClaw's bounded structured-extraction worker. Return only the requested extraction. Do not call tools, edit files, ask follow-up questions, or include secrets.",
-    input: buildCodexStructuredInput(req),
-    requiredModalities: requiredStructuredModalities(),
-  });
-  return normalizeStructuredExtractionResult({ text, model, provider: req.provider, req });
 }
 
 function denyCodexImageApprovalRequest(request: { method: string }): JsonValue | undefined {
@@ -260,10 +188,9 @@ function denyCodexImageApprovalRequest(request: { method: string }): JsonValue |
   return undefined;
 }
 
-async function assertCodexModelSupportsInput(params: {
+async function assertCodexModelSupportsImage(params: {
   client: CodexAppServerClient;
   model: string;
-  requiredModalities: string[];
   timeoutMs: number;
   signal: AbortSignal;
 }): Promise<void> {
@@ -277,11 +204,8 @@ async function assertCodexModelSupportsInput(params: {
   if (!match) {
     throw new Error(`Codex app-server model not found: ${params.model}`);
   }
-  if (params.requiredModalities.includes("image") && !match.inputModalities.includes("image")) {
+  if (!match.inputModalities.includes("image")) {
     throw new Error(`Codex app-server model does not support images: ${params.model}`);
-  }
-  if (params.requiredModalities.includes("text") && !match.inputModalities.includes("text")) {
-    throw new Error(`Codex app-server model does not support text: ${params.model}`);
   }
 }
 
@@ -293,78 +217,7 @@ function buildCodexImagePrompt(req: ImagesDescriptionRequest): string {
   return `${prompt}\n\nAnalyze all ${req.images.length} images together.`;
 }
 
-function requiredStructuredModalities(): string[] {
-  return ["text", "image"];
-}
-
-function buildCodexStructuredInput(req: StructuredExtractionRequest): CodexUserInput[] {
-  return [
-    { type: "text", text: buildStructuredExtractionPrompt(req), text_elements: [] },
-    ...req.input.map((entry) => {
-      if (entry.type === "text") {
-        return { type: "text" as const, text: entry.text, text_elements: [] };
-      }
-      return {
-        type: "image" as const,
-        url: `data:${entry.mime ?? "image/png"};base64,${entry.buffer.toString("base64")}`,
-      };
-    }),
-  ];
-}
-
-function buildStructuredExtractionPrompt(req: StructuredExtractionRequest): string {
-  return [
-    req.instructions.trim(),
-    req.schemaName ? `Schema name: ${req.schemaName}` : undefined,
-    req.jsonSchema ? `JSON schema:\n${JSON.stringify(req.jsonSchema)}` : undefined,
-    req.jsonMode === false
-      ? "Return the extraction as concise text."
-      : "Return valid JSON only. Do not wrap the JSON in Markdown fences.",
-  ]
-    .filter((part): part is string => Boolean(part))
-    .join("\n\n");
-}
-
-function isJsonSchemaObject(value: unknown): value is JsonSchemaObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function normalizeStructuredExtractionResult(params: {
-  text: string;
-  model: string;
-  provider: string;
-  req: StructuredExtractionRequest;
-}): StructuredExtractionResult {
-  const result: StructuredExtractionResult = {
-    text: params.text,
-    model: params.model,
-    provider: params.provider,
-    contentType: params.req.jsonMode === false ? "text" : "json",
-  };
-  if (params.req.jsonMode !== false) {
-    try {
-      result.parsed = JSON.parse(params.text);
-    } catch {
-      throw new Error("Codex structured extraction returned invalid JSON.");
-    }
-    if (isJsonSchemaObject(params.req.jsonSchema)) {
-      const validation = validateJsonSchemaValue({
-        schema: params.req.jsonSchema,
-        cacheKey: "codex.media-understanding.extractStructured",
-        value: result.parsed,
-        cache: false,
-      });
-      if (!validation.ok) {
-        const message = validation.errors.map((error) => error.text).join("; ") || "invalid";
-        throw new Error(`Codex structured extraction JSON did not match schema: ${message}`);
-      }
-      result.parsed = validation.value;
-    }
-  }
-  return result;
-}
-
-function createCodexTurnCollector(threadId: string, taskLabel: string) {
+function createCodexImageTurnCollector(threadId: string) {
   let turnId: string | undefined;
   let completedTurn: CodexTurn | undefined;
   let promptError: string | undefined;
@@ -414,7 +267,7 @@ function createCodexTurnCollector(threadId: string, taskLabel: string) {
     if (notification.method === "error") {
       promptError =
         readCodexErrorNotification(notification.params)?.error.message ??
-        `codex app-server ${taskLabel} turn failed`;
+        "codex app-server image turn failed";
       resolveCompletion?.();
     }
   };
@@ -437,16 +290,13 @@ function createCodexTurnCollector(threadId: string, taskLabel: string) {
           completion,
           timeoutMs: options.timeoutMs,
           signal: options.signal,
-          taskLabel,
         });
       }
       if (promptError) {
         throw new Error(promptError);
       }
       if (completedTurn?.status === "failed") {
-        throw new Error(
-          completedTurn.error?.message ?? `codex app-server ${taskLabel} turn failed`,
-        );
+        throw new Error(completedTurn.error?.message ?? "codex app-server image turn failed");
       }
       const itemText = collectAssistantTextFromItems(completedTurn?.items);
       const deltaText = assistantItemOrder
@@ -456,7 +306,7 @@ function createCodexTurnCollector(threadId: string, taskLabel: string) {
         .trim();
       const text = (itemText || deltaText).trim();
       if (!text) {
-        throw new Error(`Codex app-server ${taskLabel} turn returned no text.`);
+        throw new Error("Codex app-server image turn returned no text.");
       }
       return text;
     },
@@ -467,7 +317,6 @@ async function waitForTurnCompletion(params: {
   completion: Promise<void>;
   timeoutMs: number;
   signal: AbortSignal;
-  taskLabel: string;
 }): Promise<void> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let cleanupAbort: (() => void) | undefined;
@@ -476,12 +325,11 @@ async function waitForTurnCompletion(params: {
       params.completion,
       new Promise<never>((_, reject) => {
         timeout = setTimeout(
-          () => reject(new Error(`codex app-server ${params.taskLabel} turn timed out`)),
+          () => reject(new Error("codex app-server image turn timed out")),
           params.timeoutMs,
         );
         timeout.unref?.();
-        const abortListener = () =>
-          reject(new Error(`codex app-server ${params.taskLabel} turn aborted`));
+        const abortListener = () => reject(new Error("codex app-server image turn aborted"));
         params.signal.addEventListener("abort", abortListener, { once: true });
         cleanupAbort = () => params.signal.removeEventListener("abort", abortListener);
       }),

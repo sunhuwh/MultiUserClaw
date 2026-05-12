@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { canvasSizes, getDocumentMock, pdfDocument } = vi.hoisted(() => ({
   canvasSizes: [] as Array<{ width: number; height: number }>,
@@ -37,12 +37,6 @@ import { createPdfDocumentExtractor } from "./document-extractor.js";
 const require = createRequire(import.meta.url);
 
 describe("PDF document extractor", () => {
-  afterAll(() => {
-    vi.doUnmock("pdfjs-dist/legacy/build/pdf.mjs");
-    vi.doUnmock("@napi-rs/canvas");
-    vi.resetModules();
-  });
-
   beforeEach(() => {
     canvasSizes.length = 0;
     getDocumentMock.mockReset();
@@ -70,10 +64,7 @@ describe("PDF document extractor", () => {
       minTextChars: 10,
     });
 
-    if (!result) {
-      throw new Error("Expected PDF extraction result");
-    }
-    expect(result.images).toHaveLength(1);
+    expect(result?.images).toHaveLength(1);
     expect(canvasSizes).toEqual([{ width: 10, height: 10 }]);
   });
 

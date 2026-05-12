@@ -5,11 +5,10 @@ import {
   patchAllowlistUsersInConfigEntries,
   summarizeMapping,
 } from "openclaw/plugin-sdk/allow-from";
-import type { DiscordAccountConfig, DiscordGuildEntry } from "openclaw/plugin-sdk/config-contracts";
-import { isDangerousNameMatchingEnabled } from "openclaw/plugin-sdk/dangerous-name-runtime";
+import type { DiscordGuildEntry } from "openclaw/plugin-sdk/config-types";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
 import { formatErrorMessage } from "openclaw/plugin-sdk/ssrf-runtime";
-import { normalizeStringEntries } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeStringEntries } from "openclaw/plugin-sdk/text-runtime";
 import { resolveDiscordChannelAllowlist } from "../resolve-channels.js";
 import { resolveDiscordUserAllowlist } from "../resolve-users.js";
 
@@ -357,7 +356,6 @@ export async function resolveDiscordAllowlistConfig(params: {
   token: string;
   guildEntries: unknown;
   allowFrom: unknown;
-  discordConfig: DiscordAccountConfig;
   fetcher: typeof fetch;
   runtime: RuntimeEnv;
 }): Promise<{ guildEntries: GuildEntries | undefined; allowFrom: string[] | undefined }> {
@@ -373,22 +371,20 @@ export async function resolveDiscordAllowlistConfig(params: {
     });
   }
 
-  if (isDangerousNameMatchingEnabled(params.discordConfig)) {
-    allowFrom = await resolveAllowFromByUserAllowlist({
+  allowFrom = await resolveAllowFromByUserAllowlist({
+    token: params.token,
+    allowFrom,
+    fetcher: params.fetcher,
+    runtime: params.runtime,
+  });
+
+  if (hasGuildEntries(guildEntries)) {
+    guildEntries = await resolveGuildEntriesByUserAllowlist({
       token: params.token,
-      allowFrom,
+      guildEntries,
       fetcher: params.fetcher,
       runtime: params.runtime,
     });
-
-    if (hasGuildEntries(guildEntries)) {
-      guildEntries = await resolveGuildEntriesByUserAllowlist({
-        token: params.token,
-        guildEntries,
-        fetcher: params.fetcher,
-        runtime: params.runtime,
-      });
-    }
   }
 
   return {

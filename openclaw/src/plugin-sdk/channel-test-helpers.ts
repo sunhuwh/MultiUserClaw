@@ -12,14 +12,13 @@ export {
   createEmptyPluginRegistry,
   createOutboundTestPlugin,
   createTestRegistry,
+  deliverOutboundPayloads,
   initializeGlobalHookRunner,
   releasePinnedPluginChannelRegistry,
   resetGlobalHookRunner,
   setActivePluginRegistry,
   type PluginHookRegistration,
 } from "./test-helpers/outbound-delivery.js";
-/** @deprecated Direct outbound delivery is runtime substrate; use channel message runtime helpers. */
-export { deliverOutboundPayloads } from "./test-helpers/outbound-delivery.js";
 export { createPluginRuntimeMock } from "./test-helpers/plugin-runtime-mock.js";
 export {
   createSendCfgThreadingRuntime,

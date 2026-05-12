@@ -2,7 +2,6 @@ import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { collectConfiguredAgentHarnessRuntimes } from "../../../agents/harness-runtimes.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 
 export type CodexNativeAssetHit = {
@@ -114,7 +113,16 @@ async function discoverPluginHits(root: string): Promise<CodexNativeAssetHit[]> 
 }
 
 function isCodexRuntimeConfigured(cfg: OpenClawConfig, env: NodeJS.ProcessEnv): boolean {
-  return collectConfiguredAgentHarnessRuntimes(cfg, env).includes("codex");
+  if (normalizeString(env.OPENCLAW_AGENT_RUNTIME) === "codex") {
+    return true;
+  }
+  const defaults = cfg.agents?.defaults;
+  if (normalizeString(defaults?.agentRuntime?.id) === "codex") {
+    return true;
+  }
+  return (cfg.agents?.list ?? []).some(
+    (agent) => normalizeString(agent.agentRuntime?.id) === "codex",
+  );
 }
 
 function isCodexPluginConfigured(cfg: OpenClawConfig): boolean {

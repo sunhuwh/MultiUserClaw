@@ -56,11 +56,12 @@ describe("nextcloud talk room info", () => {
     });
 
     expect(kind).toBe("direct");
-    const fetchParams = fetchWithSsrFGuard.mock.calls[0]?.[0];
-    expect(fetchParams?.url).toBe(
-      "https://nc.example.com/ocs/v2.php/apps/spreed/api/v4/room/room-direct",
+    expect(fetchWithSsrFGuard).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://nc.example.com/ocs/v2.php/apps/spreed/api/v4/room/room-direct",
+        auditContext: "nextcloud-talk.room-info",
+      }),
     );
-    expect(fetchParams?.auditContext).toBe("nextcloud-talk.room-info");
     expect(release).toHaveBeenCalledTimes(1);
   });
 

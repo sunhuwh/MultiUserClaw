@@ -1,5 +1,5 @@
+import fsp from "node:fs/promises";
 import path from "node:path";
-import { formatCliCommand } from "../cli/command-format.js";
 import {
   resolveDefaultSessionStorePath,
   resolveSessionFilePath,
@@ -8,7 +8,6 @@ import {
 import { loadSessionStore } from "../config/sessions/store.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import { formatErrorMessage } from "../infra/errors.js";
-import { pathExists } from "../infra/fs-safe.js";
 import { resolveAgentIdFromSessionKey } from "../routing/session-key.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
 import {
@@ -73,6 +72,15 @@ function resolveExportTrajectoryOptions(
   };
 }
 
+async function fileExists(pathName: string): Promise<boolean> {
+  try {
+    await fsp.access(pathName);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function exportTrajectoryCommand(
   opts: ExportTrajectoryCommandOptions,
   runtime: RuntimeEnv,
@@ -87,9 +95,7 @@ export async function exportTrajectoryCommand(
   }
   const sessionKey = resolvedOpts.sessionKey?.trim();
   if (!sessionKey) {
-    runtime.error(
-      `--session-key is required. Run ${formatCliCommand("openclaw sessions")} to choose a session.`,
-    );
+    runtime.error("--session-key is required");
     runtime.exit(1);
     return;
   }
@@ -100,9 +106,7 @@ export async function exportTrajectoryCommand(
   const store = loadSessionStore(storePath, { skipCache: true });
   const entry = store[sessionKey] as SessionEntry | undefined;
   if (!entry?.sessionId) {
-    runtime.error(
-      `Session not found: ${sessionKey}. Run ${formatCliCommand("openclaw sessions")} to see available sessions.`,
-    );
+    runtime.error(`Session not found: ${sessionKey}`);
     runtime.exit(1);
     return;
   }
@@ -119,10 +123,8 @@ export async function exportTrajectoryCommand(
     runtime.exit(1);
     return;
   }
-  if (!(await pathExists(sessionFile))) {
-    runtime.error(
-      `Session file not found for ${sessionKey}. Run ${formatCliCommand("openclaw doctor")} to inspect session storage.`,
-    );
+  if (!(await fileExists(sessionFile))) {
+    runtime.error("Session file not found.");
     runtime.exit(1);
     return;
   }

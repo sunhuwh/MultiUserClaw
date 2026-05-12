@@ -32,7 +32,7 @@ vi.mock("openclaw/plugin-sdk/runtime-env", () => ({
   danger: (value: string) => value,
 }));
 
-vi.mock("openclaw/plugin-sdk/string-coerce-runtime", () => ({
+vi.mock("openclaw/plugin-sdk/text-runtime", () => ({
   normalizeOptionalString: (value: string | null | undefined) => {
     if (typeof value !== "string") {
       return undefined;
@@ -176,9 +176,9 @@ describe("createDiscordMonitorClient", () => {
     });
 
     expect(registerVoiceClientSpy).toHaveBeenCalledTimes(1);
-    expect(
-      result.client.listeners.map((listener) => (listener as { type?: string }).type),
-    ).toContain("voice-listener");
+    expect(result.client.listeners).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: "voice-listener" })]),
+    );
   });
 
   it("waits for gateway registration before creating the supervisor", async () => {
@@ -239,15 +239,17 @@ describe("createDiscordMonitorClient", () => {
       isDisallowedIntentsError: () => false,
     });
 
-    expect(createClient).toHaveBeenCalledTimes(1);
-    const [options, handlers, plugins] = createClient.mock.calls[0] ?? [];
-    expect(options?.requestOptions).toEqual({
-      timeout: DISCORD_REST_TIMEOUT_MS,
-      runtimeProfile: "persistent",
-      maxQueueSize: 1000,
-    });
-    expect(handlers).toBeDefined();
-    expect(Array.isArray(plugins)).toBe(true);
+    expect(createClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestOptions: {
+          timeout: DISCORD_REST_TIMEOUT_MS,
+          runtimeProfile: "persistent",
+          maxQueueSize: 1000,
+        },
+      }),
+      expect.any(Object),
+      expect.any(Array),
+    );
   });
 
   it("passes REST timeout options and fetch to internal Discord REST", async () => {
@@ -272,16 +274,18 @@ describe("createDiscordMonitorClient", () => {
       isDisallowedIntentsError: () => false,
     });
 
-    expect(createClient).toHaveBeenCalledTimes(1);
-    const [options, handlers, plugins] = createClient.mock.calls[0] ?? [];
-    expect(options?.requestOptions).toEqual({
-      timeout: DISCORD_REST_TIMEOUT_MS,
-      runtimeProfile: "persistent",
-      maxQueueSize: 1000,
-      fetch: restFetch,
-    });
-    expect(handlers).toBeDefined();
-    expect(Array.isArray(plugins)).toBe(true);
+    expect(createClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestOptions: {
+          timeout: DISCORD_REST_TIMEOUT_MS,
+          runtimeProfile: "persistent",
+          maxQueueSize: 1000,
+          fetch: restFetch,
+        },
+      }),
+      expect.any(Object),
+      expect.any(Array),
+    );
   });
 
   it("propagates gateway registration failures before supervisor startup", async () => {

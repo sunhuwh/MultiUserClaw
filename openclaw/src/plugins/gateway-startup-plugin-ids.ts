@@ -331,62 +331,6 @@ function canStartConfiguredGenerationProviderPlugin(params: {
   );
 }
 
-function canStartRequiredAgentHarnessPlugin(params: {
-  plugin: InstalledPluginIndexRecord;
-  pluginsConfig: ReturnType<typeof normalizePluginsConfigWithRegistry>;
-  activationSource: {
-    plugins: ReturnType<typeof normalizePluginsConfigWithRegistry>;
-    rootConfig?: OpenClawConfig;
-  };
-  config: OpenClawConfig;
-  requiredAgentHarnessRuntimes: ReadonlySet<string>;
-  platform?: NodeJS.Platform;
-}): boolean {
-  if (
-    !params.plugin.startup.agentHarnesses.some((runtime) =>
-      params.requiredAgentHarnessRuntimes.has(runtime),
-    )
-  ) {
-    return false;
-  }
-  if (!params.pluginsConfig.enabled || !params.activationSource.plugins.enabled) {
-    return false;
-  }
-  if (
-    params.pluginsConfig.deny.includes(params.plugin.pluginId) ||
-    params.activationSource.plugins.deny.includes(params.plugin.pluginId)
-  ) {
-    return false;
-  }
-  if (
-    params.pluginsConfig.entries[params.plugin.pluginId]?.enabled === false ||
-    params.activationSource.plugins.entries[params.plugin.pluginId]?.enabled === false
-  ) {
-    return false;
-  }
-  if (
-    params.pluginsConfig.allow.length > 0 &&
-    !params.pluginsConfig.allow.includes(params.plugin.pluginId)
-  ) {
-    return false;
-  }
-  if (
-    params.activationSource.plugins.allow.length > 0 &&
-    !params.activationSource.plugins.allow.includes(params.plugin.pluginId)
-  ) {
-    return false;
-  }
-  const activationState = resolveEffectivePluginActivationState({
-    id: params.plugin.pluginId,
-    origin: params.plugin.origin,
-    config: params.pluginsConfig,
-    rootConfig: params.config,
-    enabledByDefault: isPluginEnabledByDefaultForPlatform(params.plugin, params.platform),
-    activationSource: params.activationSource,
-  });
-  return activationState.enabled || params.plugin.origin === "bundled";
-}
-
 function canStartConfiguredSpeechProviderPlugin(params: {
   plugin: InstalledPluginIndexRecord;
   manifest: PluginManifestRecord | undefined;
@@ -685,10 +629,7 @@ export function resolveGatewayStartupPluginPlanFromRegistry(params: {
     rootConfig: activationSourceConfig,
   };
   const requiredAgentHarnessRuntimes = new Set(
-    collectConfiguredAgentHarnessRuntimes(activationSourceConfig, params.env, {
-      includeEnvRuntime: false,
-      includeLegacyAgentRuntimes: false,
-    }),
+    collectConfiguredAgentHarnessRuntimes(activationSourceConfig, params.env),
   );
   const startupDreamingPluginIds = resolveGatewayStartupDreamingPluginIds(params.config);
   const manifestLookup = createManifestRegistryLookup(params.manifestRegistry);
@@ -728,16 +669,17 @@ export function resolveGatewayStartupPluginPlanFromRegistry(params: {
         });
       }
       if (
-        canStartRequiredAgentHarnessPlugin({
-          plugin,
-          pluginsConfig,
-          activationSource,
-          config: params.config,
-          requiredAgentHarnessRuntimes,
-          platform: params.platform,
-        })
+        plugin.startup.agentHarnesses.some((runtime) => requiredAgentHarnessRuntimes.has(runtime))
       ) {
-        return true;
+        const activationState = resolveEffectivePluginActivationState({
+          id: plugin.pluginId,
+          origin: plugin.origin,
+          config: pluginsConfig,
+          rootConfig: params.config,
+          enabledByDefault: isPluginEnabledByDefaultForPlatform(plugin, params.platform),
+          activationSource,
+        });
+        return activationState.enabled;
       }
       if (
         canStartConfiguredRootPlugin({

@@ -1,5 +1,5 @@
 import type { BedrockClient } from "@aws-sdk/client-bedrock";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   discoverBedrockModels,
   mergeImplicitBedrockProvider,
@@ -30,23 +30,9 @@ function mockSingleActiveSummary(overrides: Partial<typeof baseActiveAnthropicSu
     .mockResolvedValueOnce({ inferenceProfileSummaries: [] });
 }
 
-function expectModelFields(model: unknown, expected: Record<string, unknown>): void {
-  expect(model).toBeDefined();
-  expect(typeof model).toBe("object");
-  expect(model).not.toBeNull();
-  const actual = model as Record<string, unknown>;
-  for (const [key, value] of Object.entries(expected)) {
-    expect(actual[key]).toEqual(value);
-  }
-}
-
 describe("bedrock discovery", () => {
   beforeEach(() => {
     sendMock.mockClear();
-    resetBedrockDiscoveryCacheForTest();
-  });
-
-  afterEach(() => {
     resetBedrockDiscoveryCacheForTest();
   });
 
@@ -96,7 +82,7 @@ describe("bedrock discovery", () => {
 
     const models = await discoverBedrockModels({ region: "us-east-1", clientFactory });
     expect(models).toHaveLength(1);
-    expectModelFields(models[0], {
+    expect(models[0]).toMatchObject({
       id: "anthropic.claude-3-7-sonnet-20250219-v1:0",
       name: "Claude 3.7 Sonnet",
       reasoning: false,
@@ -129,7 +115,7 @@ describe("bedrock discovery", () => {
       config: { defaultContextWindow: 64000, defaultMaxTokens: 8192 },
       clientFactory,
     });
-    expectModelFields(models[0], { contextWindow: 64000, maxTokens: 8192 });
+    expect(models[0]).toMatchObject({ contextWindow: 64000, maxTokens: 8192 });
   });
 
   it("keeps the conservative fallback for unknown inference profiles", async () => {
@@ -157,7 +143,7 @@ describe("bedrock discovery", () => {
     const models = await discoverBedrockModels({ region: "ap-northeast-1", clientFactory });
 
     expect(models).toHaveLength(1);
-    expectModelFields(models[0], {
+    expect(models[0]).toMatchObject({
       id: "jp.example.unknown-text-v1:0",
       contextWindow: 32000,
       maxTokens: 4096,
@@ -189,7 +175,7 @@ describe("bedrock discovery", () => {
 
     const models = await discoverBedrockModels({ region: "ap-northeast-1", clientFactory });
 
-    expectModelFields(models[0], {
+    expect(models[0]).toMatchObject({
       id: "jp.anthropic.claude-sonnet-4-6-v1:0",
       contextWindow: 1_000_000,
     });
@@ -327,17 +313,17 @@ describe("bedrock discovery", () => {
     const globalProfile = models.find((m) => m.id === "global.anthropic.claude-sonnet-4-6");
 
     // Foundation model has image input.
-    expectModelFields(foundationModel, { input: ["text", "image"] });
+    expect(foundationModel).toMatchObject({ input: ["text", "image"] });
 
     // Inference profiles inherit image input from the foundation model.
-    expectModelFields(usProfile, {
+    expect(usProfile).toMatchObject({
       name: "US Anthropic Claude Sonnet 4.6",
       input: ["text", "image"],
       contextWindow: 1000000,
       maxTokens: 4096,
     });
-    expectModelFields(euProfile, { input: ["text", "image"] });
-    expectModelFields(globalProfile, { input: ["text", "image"] });
+    expect(euProfile).toMatchObject({ input: ["text", "image"] });
+    expect(globalProfile).toMatchObject({ input: ["text", "image"] });
 
     // Inactive profile should not be present.
     expect(models.find((m) => m.id === "ap.anthropic.claude-sonnet-4-6")).toBeUndefined();
@@ -434,7 +420,7 @@ describe("bedrock discovery", () => {
     const models = await discoverBedrockModels({ region: "us-east-1", clientFactory });
     const profile = models.find((model) => model.id === "us.my-prod-profile");
 
-    expectModelFields(profile, {
+    expect(profile).toMatchObject({
       id: "us.my-prod-profile",
       input: ["text", "image"],
       contextWindow: 1000000,
@@ -466,7 +452,7 @@ describe("bedrock discovery", () => {
 
     const models = await discoverBedrockModels({ region: "us-east-1", clientFactory });
 
-    expectModelFields(models[0], {
+    expect(models[0]).toMatchObject({
       id: "us.my-prod-profile",
       contextWindow: 1_000_000,
       maxTokens: 4096,
@@ -592,14 +578,14 @@ describe("bedrock discovery", () => {
     expect(models).toHaveLength(3);
 
     const auProfile = models.find((m) => m.id === "au.anthropic.claude-sonnet-4-6");
-    expectModelFields(auProfile, {
+    expect(auProfile).toMatchObject({
       id: "au.anthropic.claude-sonnet-4-6",
       name: "AU Anthropic Claude Sonnet 4.6",
       input: ["text", "image"],
     });
 
     const apacProfile = models.find((m) => m.id === "apac.anthropic.claude-sonnet-4-6");
-    expectModelFields(apacProfile, {
+    expect(apacProfile).toMatchObject({
       id: "apac.anthropic.claude-sonnet-4-6",
       name: "APAC Anthropic Claude Sonnet 4.6",
       input: ["text", "image"],

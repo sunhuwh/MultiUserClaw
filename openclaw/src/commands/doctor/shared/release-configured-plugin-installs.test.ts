@@ -7,47 +7,6 @@ const mocks = vi.hoisted(() => ({
   resolveProviderInstallCatalogEntries: vi.fn(),
 }));
 
-type AutoEnableDetectionCall = {
-  config: {
-    agents?: {
-      defaults?: {
-        model?: string;
-        agentRuntime?: { id?: string };
-      };
-    };
-  };
-};
-
-type MissingPluginInstallRepairCall = {
-  pluginIds: string[];
-  channelIds?: string[];
-  env?: NodeJS.ProcessEnv;
-};
-
-function readOnlyAutoEnableDetectionCall(): AutoEnableDetectionCall {
-  expect(mocks.detectPluginAutoEnableCandidates).toHaveBeenCalledOnce();
-  const calls = mocks.detectPluginAutoEnableCandidates.mock.calls as unknown as Array<
-    [AutoEnableDetectionCall]
-  >;
-  const call = calls[0]?.[0];
-  if (!call) {
-    throw new Error("Expected auto-enable detection call");
-  }
-  return call;
-}
-
-function readOnlyMissingPluginInstallRepairCall(): MissingPluginInstallRepairCall {
-  expect(mocks.repairMissingPluginInstallsForIds).toHaveBeenCalledOnce();
-  const calls = mocks.repairMissingPluginInstallsForIds.mock.calls as unknown as Array<
-    [MissingPluginInstallRepairCall]
-  >;
-  const call = calls[0]?.[0];
-  if (!call) {
-    throw new Error("Expected missing plugin install repair call");
-  }
-  return call;
-}
-
 vi.mock("../../../config/plugin-auto-enable.js", () => ({
   detectPluginAutoEnableCandidates: mocks.detectPluginAutoEnableCandidates,
 }));
@@ -195,11 +154,20 @@ describe("configured plugin install release step", () => {
       env: {},
     });
 
-    const detectionCall = readOnlyAutoEnableDetectionCall();
-    expect(detectionCall.config.agents?.defaults?.model).toBe("openai/gpt-5.4");
-    expect(detectionCall.config.agents?.defaults?.agentRuntime).toEqual({ id: "codex" });
+    expect(mocks.detectPluginAutoEnableCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          agents: expect.objectContaining({
+            defaults: expect.objectContaining({
+              model: "openai/gpt-5.4",
+              agentRuntime: { id: "codex" },
+            }),
+          }),
+        }),
+      }),
+    );
     expect(result.pluginIds).toEqual(["codex"]);
-    expect(result.channelIds).toStrictEqual([]);
+    expect(result.channelIds).toEqual([]);
   });
 
   it("collects external web search and ACP runtime plugins from config-only usage", async () => {
@@ -223,7 +191,7 @@ describe("configured plugin install release step", () => {
     });
 
     expect(result.pluginIds).toEqual(["acpx", "brave"]);
-    expect(result.channelIds).toStrictEqual([]);
+    expect(result.channelIds).toEqual([]);
   });
 
   it("does not collect channel ids when the matching plugin id is blocked", async () => {
@@ -242,7 +210,7 @@ describe("configured plugin install release step", () => {
         },
         env: {},
       }).channelIds,
-    ).toStrictEqual([]);
+    ).toEqual([]);
 
     expect(
       collectReleaseConfiguredPluginIds({
@@ -258,7 +226,7 @@ describe("configured plugin install release step", () => {
         },
         env: {},
       }).channelIds,
-    ).toStrictEqual([]);
+    ).toEqual([]);
   });
 
   it("marks the release step complete when there is nothing to install", async () => {
@@ -302,10 +270,13 @@ describe("configured plugin install release step", () => {
       env: {},
     });
 
-    const repairCall = readOnlyMissingPluginInstallRepairCall();
-    expect(repairCall.pluginIds).toEqual(["codex"]);
-    expect(repairCall.channelIds).toEqual([]);
-    expect(repairCall.env).toEqual({});
+    expect(mocks.repairMissingPluginInstallsForIds).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pluginIds: ["codex"],
+        channelIds: [],
+        env: {},
+      }),
+    );
     expect(result.touchedConfig).toBe(true);
     expect(result.completed).toBe(true);
   });
@@ -334,9 +305,12 @@ describe("configured plugin install release step", () => {
       env: { OPENCLAW_UPDATE_IN_PROGRESS: "1" },
     });
 
-    const repairCall = readOnlyMissingPluginInstallRepairCall();
-    expect(repairCall.pluginIds).toEqual(["codex"]);
-    expect(repairCall.env).toEqual({ OPENCLAW_UPDATE_IN_PROGRESS: "1" });
+    expect(mocks.repairMissingPluginInstallsForIds).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pluginIds: ["codex"],
+        env: { OPENCLAW_UPDATE_IN_PROGRESS: "1" },
+      }),
+    );
     expect(result).toEqual({
       changes: [
         'Skipped package-manager repair for configured plugin "codex" during package update; rerun "openclaw doctor --fix" after the update completes.',
@@ -368,10 +342,13 @@ describe("configured plugin install release step", () => {
       env: {},
     });
 
-    const repairCall = readOnlyMissingPluginInstallRepairCall();
-    expect(repairCall.pluginIds).toEqual(["discord"]);
-    expect(repairCall.channelIds).toEqual([]);
-    expect(repairCall.env).toEqual({});
+    expect(mocks.repairMissingPluginInstallsForIds).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pluginIds: ["discord"],
+        channelIds: [],
+        env: {},
+      }),
+    );
     expect(result).toEqual({
       changes: ['Installed missing configured plugin "discord".'],
       warnings: [],
@@ -426,7 +403,7 @@ describe("configured plugin install release step", () => {
     });
 
     expect(result.pluginIds).toEqual(["lobster"]);
-    expect(result.channelIds).toStrictEqual([]);
+    expect(result.channelIds).toEqual([]);
   });
 
   it("skips allow-only plugin ids that already have material plugin entries", async () => {

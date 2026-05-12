@@ -105,7 +105,6 @@ export function startMatrixQaOpenClawCli(params: {
   const stderr: Buffer[] = [];
   let closed = false;
   let closeResult: MatrixQaCliRunResult | undefined;
-  let timedOut = false;
   let settleWait:
     | {
         reject: (error: Error) => void;
@@ -139,31 +138,24 @@ export function startMatrixQaOpenClawCli(params: {
   };
 
   const timeout = setTimeout(() => {
-    timedOut = true;
+    const result = buildMatrixQaCliResult({
+      args: params.args,
+      exitCode: 1,
+      output: readOutput(),
+    });
     child.kill("SIGTERM");
-    setTimeout(() => {
-      const result = buildMatrixQaCliResult({
-        args: params.args,
-        exitCode: 1,
-        output: readOutput(),
-      });
-      finish(
-        result,
-        new Error(
-          [
-            `${formatMatrixQaCliCommand(params.args)} timed out after ${params.timeoutMs}ms`,
-            result.stderr.trim()
-              ? `stderr:\n${redactMatrixQaCliOutput(result.stderr.trim())}`
-              : null,
-            result.stdout.trim()
-              ? `stdout:\n${redactMatrixQaCliOutput(result.stdout.trim())}`
-              : null,
-          ]
-            .filter(Boolean)
-            .join("\n"),
-        ),
-      );
-    }, 25);
+    finish(
+      result,
+      new Error(
+        [
+          `${formatMatrixQaCliCommand(params.args)} timed out after ${params.timeoutMs}ms`,
+          result.stderr.trim() ? `stderr:\n${redactMatrixQaCliOutput(result.stderr.trim())}` : null,
+          result.stdout.trim() ? `stdout:\n${redactMatrixQaCliOutput(result.stdout.trim())}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      ),
+    );
   }, params.timeoutMs);
 
   child.stdout.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
@@ -184,9 +176,6 @@ export function startMatrixQaOpenClawCli(params: {
   });
   child.on("close", (exitCode) => {
     clearTimeout(timeout);
-    if (timedOut) {
-      return;
-    }
     const result = buildMatrixQaCliResult({
       args: params.args,
       exitCode: exitCode ?? 1,

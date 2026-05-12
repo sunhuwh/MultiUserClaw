@@ -31,10 +31,8 @@ describe("createHeartbeatTypingCallbacks", () => {
         plugin,
       });
 
-      if (callbacks === undefined) {
-        throw new Error("expected heartbeat typing callbacks for telegram target");
-      }
-      await callbacks.onReplyStart();
+      expect(callbacks).toBeDefined();
+      await callbacks?.onReplyStart();
       expect(sendTyping).toHaveBeenCalledTimes(1);
 
       await vi.advanceTimersByTimeAsync(5_999);

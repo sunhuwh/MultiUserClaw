@@ -142,19 +142,18 @@ describeLive("deepseek plugin live", () => {
     };
     let capturedPayload: Record<string, unknown> | undefined;
     const streamFn = createDeepSeekV4ThinkingWrapper(streamSimple, "high");
-    if (!streamFn) {
-      throw new Error("expected DeepSeek V4 thinking stream wrapper");
-    }
+    expect(streamFn).toBeDefined();
 
-    const stream = streamFn(resolveDeepSeekV4LiveModel(), context, {
+    const stream = streamFn?.(resolveDeepSeekV4LiveModel(), context, {
       apiKey: DEEPSEEK_KEY,
       maxTokens: 64,
       onPayload: (payload) => {
         capturedPayload = payload as Record<string, unknown>;
       },
     });
+    expect(stream).toBeDefined();
 
-    const result = await (await stream).result();
+    const result = await (await stream!).result();
     if (result.stopReason === "error") {
       throw new Error(result.errorMessage || "DeepSeek V4 replay returned error with no message");
     }
@@ -205,19 +204,18 @@ describeLive("deepseek plugin live", () => {
     };
     let capturedPayload: Record<string, unknown> | undefined;
     const streamFn = createDeepSeekV4ThinkingWrapper(streamSimple, "high");
-    if (!streamFn) {
-      throw new Error("expected DeepSeek V4 thinking stream wrapper");
-    }
+    expect(streamFn).toBeDefined();
 
-    const stream = streamFn(resolveDeepSeekV4LiveModel(), context, {
+    const stream = streamFn?.(resolveDeepSeekV4LiveModel(), context, {
       apiKey: DEEPSEEK_KEY,
       maxTokens: 64,
       onPayload: (payload) => {
         capturedPayload = payload as Record<string, unknown>;
       },
     });
+    expect(stream).toBeDefined();
 
-    const result = await (await stream).result();
+    const result = await (await stream!).result();
     if (result.stopReason === "error") {
       throw new Error(
         result.errorMessage || "DeepSeek V4 plain replay returned error with no message",

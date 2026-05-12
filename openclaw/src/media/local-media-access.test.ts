@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveStateDir } from "../config/paths.js";
-import { assertLocalMediaAllowed, LocalMediaAccessError } from "./local-media-access.js";
+import { assertLocalMediaAllowed } from "./local-media-access.js";
 
 describe("assertLocalMediaAllowed", () => {
   it("allows managed inbound media paths before explicit root checks", async () => {
@@ -26,21 +26,9 @@ describe("assertLocalMediaAllowed", () => {
     await fs.writeFile(filePath, Buffer.from("png"));
 
     try {
-      let accessError: unknown;
-      try {
-        await assertLocalMediaAllowed(filePath, []);
-      } catch (error) {
-        accessError = error;
-      }
-      expect(accessError).toBeInstanceOf(LocalMediaAccessError);
-      if (!(accessError instanceof LocalMediaAccessError)) {
-        throw new Error("expected LocalMediaAccessError");
-      }
-      expect(accessError.name).toBe("LocalMediaAccessError");
-      expect(accessError.code).toBe("path-not-allowed");
-      expect(accessError.message).toBe(
-        `Local media path is not under an allowed directory: ${filePath}`,
-      );
+      await expect(assertLocalMediaAllowed(filePath, [])).rejects.toMatchObject({
+        code: "path-not-allowed",
+      });
     } finally {
       await fs.rm(path.dirname(filePath), { recursive: true, force: true });
     }

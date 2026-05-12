@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { resolveStateDir } from "../config/paths.js";
-import { createAsyncLock, tryReadJson, writeJson } from "./json-files.js";
+import { createAsyncLock, readJsonFile, writeJsonAtomic } from "./json-files.js";
 
 // --- Types ---
 
@@ -88,13 +88,13 @@ function isValidKey(key: string): boolean {
 
 async function loadState(baseDir?: string): Promise<WebPushRegistrationState> {
   const filePath = resolveWebPushStatePath(baseDir);
-  const state = await tryReadJson<WebPushRegistrationState>(filePath);
+  const state = await readJsonFile<WebPushRegistrationState>(filePath);
   return state ?? { subscriptionsByEndpointHash: {} };
 }
 
 async function persistState(state: WebPushRegistrationState, baseDir?: string): Promise<void> {
   const filePath = resolveWebPushStatePath(baseDir);
-  await writeJson(filePath, state, { trailingNewline: true });
+  await writeJsonAtomic(filePath, state, { trailingNewline: true });
 }
 
 // --- VAPID keys ---
@@ -116,7 +116,7 @@ export async function resolveVapidKeys(baseDir?: string): Promise<VapidKeyPair> 
   // prevent concurrent bootstraps from writing different keypairs.
   return await withLock(async () => {
     const filePath = resolveVapidKeysPath(baseDir);
-    const existing = await tryReadJson<VapidKeyPair>(filePath);
+    const existing = await readJsonFile<VapidKeyPair>(filePath);
     if (existing?.publicKey && existing?.privateKey) {
       return {
         publicKey: existing.publicKey,
@@ -133,7 +133,7 @@ export async function resolveVapidKeys(baseDir?: string): Promise<VapidKeyPair> 
       privateKey: keys.privateKey,
       subject: resolveVapidSubjectFromEnv(),
     };
-    await writeJson(filePath, pair, { trailingNewline: true });
+    await writeJsonAtomic(filePath, pair, { trailingNewline: true });
     return pair;
   });
 }

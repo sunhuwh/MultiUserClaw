@@ -4,7 +4,7 @@
     "onStartup": false
   },
   "enabledByDefault": true,
-  "providerCatalogEntry": "./provider-discovery.ts",
+  "providerDiscoveryEntry": "./provider-discovery.ts",
   "providers": ["tencent-tokenhub"],
   "modelCatalog": {
     "providers": {

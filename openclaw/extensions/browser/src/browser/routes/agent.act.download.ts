@@ -63,7 +63,6 @@ export function registerBrowserAgentActDownloadRoutes(
           const result = await pw.waitForDownloadViaPlaywright({
             ...requestBase,
             path: downloadPath,
-            rootDir: DEFAULT_DOWNLOAD_DIR,
           });
           res.json({ ok: true, targetId: tab.targetId, download: result });
         },
@@ -114,7 +113,6 @@ export function registerBrowserAgentActDownloadRoutes(
             ...requestBase,
             ref,
             path: downloadPath,
-            rootDir: DEFAULT_DOWNLOAD_DIR,
           });
           res.json({ ok: true, targetId: tab.targetId, download: result });
         },

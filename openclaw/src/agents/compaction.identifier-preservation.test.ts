@@ -7,6 +7,7 @@ vi.mock("@mariozechner/pi-coding-agent", async () => {
   const actual = await vi.importActual<typeof piCodingAgent>("@mariozechner/pi-coding-agent");
   return {
     ...actual,
+    estimateTokens: vi.fn((message: unknown) => Math.ceil(JSON.stringify(message).length / 4)),
     generateSummary: vi.fn(),
   };
 });
@@ -71,6 +72,8 @@ describe("compaction identifier-preservation instructions", () => {
     expect(firstSummaryInstructions()).toContain("UUIDs");
     expect(firstSummaryInstructions()).toContain("IPs");
     expect(firstSummaryInstructions()).toContain("ports");
+    expect(firstSummaryInstructions()).not.toContain("tokens");
+    expect(firstSummaryInstructions()).not.toContain("API keys");
   });
 
   it("keeps identifier-preservation guidance when custom instructions are provided", async () => {
@@ -139,6 +142,8 @@ describe("buildCompactionSummarizationInstructions", () => {
     const result = buildCompactionSummarizationInstructions();
     expect(result).toContain("Preserve all opaque identifiers exactly as written");
     expect(result).not.toContain("Additional focus:");
+    expect(result).not.toContain("tokens");
+    expect(result).not.toContain("API keys");
   });
 
   it("appends custom instructions in a stable format", () => {

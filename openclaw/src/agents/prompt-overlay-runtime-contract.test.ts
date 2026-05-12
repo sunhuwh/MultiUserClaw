@@ -21,10 +21,10 @@ describe("GPT-5 prompt overlay runtime contract", () => {
 
     expect(contribution?.stablePrefix).toContain("<persona_latch>");
     expect(contribution?.sectionOverrides?.interaction_style).toContain(
-      "Live chat tone: short, natural, human.",
+      "This is a live chat, not a memo.",
     );
     expect(contribution?.sectionOverrides?.interaction_style).not.toContain(
-      "Use heartbeats to create useful proactive progress",
+      "The purpose of heartbeats is to make you feel magical and proactive.",
     );
   });
 
@@ -36,7 +36,7 @@ describe("GPT-5 prompt overlay runtime contract", () => {
     });
 
     expect(contribution?.sectionOverrides?.interaction_style).toContain(
-      "Use heartbeats to create useful proactive progress",
+      "The purpose of heartbeats is to make you feel magical and proactive.",
     );
   });
 
@@ -48,7 +48,7 @@ describe("GPT-5 prompt overlay runtime contract", () => {
     });
 
     expect(contribution?.stablePrefix).toContain("<persona_latch>");
-    expect(contribution?.sectionOverrides).toStrictEqual({});
+    expect(contribution?.sectionOverrides).toEqual({});
   });
 
   it("scopes OpenAI plugin personality fallback to OpenAI-family GPT-5 providers", () => {
@@ -64,10 +64,10 @@ describe("GPT-5 prompt overlay runtime contract", () => {
     });
 
     expect(openAiContribution?.stablePrefix).toContain("<persona_latch>");
-    expect(openAiContribution?.sectionOverrides).toStrictEqual({});
+    expect(openAiContribution?.sectionOverrides).toEqual({});
     expect(nonOpenAiContribution?.stablePrefix).toContain("<persona_latch>");
     expect(nonOpenAiContribution?.sectionOverrides?.interaction_style).toContain(
-      "Live chat tone: short, natural, human.",
+      "This is a live chat, not a memo.",
     );
   });
 
@@ -79,7 +79,7 @@ describe("GPT-5 prompt overlay runtime contract", () => {
     });
 
     expect(contribution?.stablePrefix).toContain("<persona_latch>");
-    expect(contribution?.sectionOverrides).toStrictEqual({});
+    expect(contribution?.sectionOverrides).toEqual({});
   });
 
   it("does not apply GPT-5 overlays to non-GPT-5 models", () => {

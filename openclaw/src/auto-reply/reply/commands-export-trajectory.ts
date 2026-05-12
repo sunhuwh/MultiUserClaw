@@ -1,9 +1,9 @@
+import fsp from "node:fs/promises";
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { createExecTool } from "../../agents/bash-tools.js";
 import type { ExecToolDetails } from "../../agents/bash-tools.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import type { ExecApprovalRequest } from "../../infra/exec-approvals.js";
-import { pathExists } from "../../infra/fs-safe.js";
 import {
   exportTrajectoryForCommand,
   formatTrajectoryCommandExportSummary,
@@ -55,6 +55,15 @@ const defaultExportTrajectoryCommandDeps: ExportTrajectoryCommandDeps = {
   resolvePrivateTrajectoryTargets: resolvePrivateTrajectoryTargetsForCommand,
   deliverPrivateTrajectoryReply: deliverPrivateTrajectoryReply,
 };
+
+async function fileExists(pathName: string): Promise<boolean> {
+  try {
+    await fsp.access(pathName);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export async function buildExportTrajectoryCommandReply(
   params: HandleCommandsParams,
@@ -137,7 +146,7 @@ export async function buildExportTrajectoryReply(
   }
   const { entry, sessionFile } = sessionTarget;
 
-  if (!(await pathExists(sessionFile))) {
+  if (!(await fileExists(sessionFile))) {
     return { text: "❌ Session file not found." };
   }
 

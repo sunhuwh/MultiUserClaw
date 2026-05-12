@@ -19,8 +19,7 @@ async function loadOutboundDeliverRuntime(): Promise<OutboundDeliverRuntimeModul
 }
 
 export async function drainPendingDeliveries(opts: DrainPendingDeliveriesOptions): Promise<void> {
-  const deliver =
-    opts.deliver ?? (await loadOutboundDeliverRuntime()).deliverOutboundPayloadsInternal;
+  const deliver = opts.deliver ?? (await loadOutboundDeliverRuntime()).deliverOutboundPayloads;
   await coreDrainPendingDeliveries({
     ...opts,
     deliver,

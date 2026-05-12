@@ -161,7 +161,7 @@ export class MatrixVerificationManager {
   ) {}
 
   private readRequestValue<T>(
-    _request: MatrixVerificationRequestLike,
+    request: MatrixVerificationRequestLike,
     reader: () => T,
     fallback: T,
   ): T {

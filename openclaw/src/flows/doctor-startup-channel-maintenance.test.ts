@@ -13,11 +13,7 @@ describe("doctor startup channel maintenance", () => {
       },
     };
     const calls: unknown[] = [];
-    const runtimeCalls: string[] = [];
-    const runtime = {
-      log: (message: string) => runtimeCalls.push(`log:${message}`),
-      error: (message: string) => runtimeCalls.push(`error:${message}`),
-    };
+    const runtime = { log() {}, error() {} };
 
     await maybeRunDoctorStartupChannelMaintenance({
       cfg,
@@ -30,25 +26,18 @@ describe("doctor startup channel maintenance", () => {
     });
 
     expect(calls).toHaveLength(1);
-    const [call] = calls as Array<{
-      cfg: typeof cfg;
-      env: { OPENCLAW_TEST: string };
-      log: { info: (message: string) => void; warn: (message: string) => void };
-      trigger: string;
-      logPrefix: string;
-    }>;
-    if (!call) {
-      throw new Error("Expected startup maintenance call");
-    }
-    expect(call.cfg).toBe(cfg);
-    expect(call.env).toEqual({ OPENCLAW_TEST: "1" });
-    expect(call.trigger).toBe("doctor-fix");
-    expect(call.logPrefix).toBe("doctor");
-    expect(call.log.info).toBeTypeOf("function");
-    expect(call.log.warn).toBeTypeOf("function");
-    call.log.info("migrated");
-    call.log.warn("needs attention");
-    expect(runtimeCalls).toEqual(["log:migrated", "error:needs attention"]);
+    expect(calls[0]).toEqual(
+      expect.objectContaining({
+        cfg,
+        env: { OPENCLAW_TEST: "1" },
+        trigger: "doctor-fix",
+        logPrefix: "doctor",
+        log: expect.objectContaining({
+          info: expect.any(Function),
+          warn: expect.any(Function),
+        }),
+      }),
+    );
   });
 
   it("skips startup migration outside repair flows", async () => {
@@ -63,6 +52,6 @@ describe("doctor startup channel maintenance", () => {
       shouldRepair: false,
     });
 
-    expect(calls).toStrictEqual([]);
+    expect(calls).toEqual([]);
   });
 });

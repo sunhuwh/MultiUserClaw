@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { inworldTTSMock, listInworldVoicesMock } = vi.hoisted(() => ({
   inworldTTSMock: vi.fn(),
@@ -16,21 +16,18 @@ vi.mock("./tts.js", async (importOriginal) => {
 
 import { buildInworldSpeechProvider } from "./speech-provider.js";
 
-afterAll(() => {
-  vi.doUnmock("./tts.js");
-  vi.resetModules();
-});
-
 describe("buildInworldSpeechProvider", () => {
+  const originalEnv = process.env.INWORLD_API_KEY;
+
   afterEach(() => {
+    process.env.INWORLD_API_KEY = originalEnv;
     inworldTTSMock.mockReset();
     listInworldVoicesMock.mockReset();
-    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
   it("reports configured when INWORLD_API_KEY env var is set", () => {
-    vi.stubEnv("INWORLD_API_KEY", "test-key");
+    process.env.INWORLD_API_KEY = "test-key";
     const provider = buildInworldSpeechProvider();
     expect(
       provider.isConfigured({
@@ -41,7 +38,7 @@ describe("buildInworldSpeechProvider", () => {
   });
 
   it("reports configured when providerConfig apiKey is set", () => {
-    vi.stubEnv("INWORLD_API_KEY", "");
+    delete process.env.INWORLD_API_KEY;
     const provider = buildInworldSpeechProvider();
     expect(
       provider.isConfigured({
@@ -52,7 +49,7 @@ describe("buildInworldSpeechProvider", () => {
   });
 
   it("reports not configured when no key is available", () => {
-    vi.stubEnv("INWORLD_API_KEY", "");
+    delete process.env.INWORLD_API_KEY;
     const provider = buildInworldSpeechProvider();
     expect(
       provider.isConfigured({
@@ -111,18 +108,12 @@ describe("buildInworldSpeechProvider", () => {
       allowSeed: true,
     };
 
-    const parseDirectiveToken = provider.parseDirectiveToken;
-    expect(parseDirectiveToken).toBeTypeOf("function");
-    if (!parseDirectiveToken) {
-      throw new Error("expected Inworld directive parser");
-    }
-
-    expect(parseDirectiveToken({ key: "voice", value: "Ashley", policy })).toEqual({
+    expect(provider.parseDirectiveToken?.({ key: "voice", value: "Ashley", policy })).toEqual({
       handled: true,
       overrides: { voiceId: "Ashley" },
     });
     expect(
-      parseDirectiveToken({
+      provider.parseDirectiveToken?.({
         key: "model",
         value: "inworld-tts-1.5-mini",
         policy,
@@ -131,7 +122,7 @@ describe("buildInworldSpeechProvider", () => {
       handled: true,
       overrides: { modelId: "inworld-tts-1.5-mini" },
     });
-    expect(parseDirectiveToken({ key: "temperature", value: "0.7", policy })).toEqual({
+    expect(provider.parseDirectiveToken?.({ key: "temperature", value: "0.7", policy })).toEqual({
       handled: true,
       overrides: { temperature: 0.7 },
     });

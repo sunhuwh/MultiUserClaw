@@ -31,7 +31,6 @@ export function resolveLiveTransportQaRunOptions(
     fastMode: opts.fastMode,
     allowFailures: opts.allowFailures,
     scenarioIds: opts.scenarioIds,
-    listScenarios: opts.listScenarios,
     sutAccountId: opts.sutAccountId,
     credentialSource: opts.credentialSource?.trim(),
     credentialRole: opts.credentialRole?.trim(),

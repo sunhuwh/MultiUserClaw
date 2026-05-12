@@ -21,6 +21,7 @@ function acceptedSendResult(kind: WhatsAppSendKind, id: string): WhatsAppSendRes
   return {
     kind,
     messageId: id,
+    messageIds: [id],
     keys: [{ id }],
     providerAccepted: true,
   };
@@ -93,9 +94,7 @@ describe("WhatsAppConnectionController", () => {
 
     expect(createListener).not.toHaveBeenCalled();
     expect(sock.end).toHaveBeenCalledOnce();
-    const closeError = sock.end.mock.calls[0]?.[0] as Error | undefined;
-    expect(closeError).toBeInstanceOf(Error);
-    expect(closeError?.message).toBe("OpenClaw WhatsApp socket close");
+    expect(sock.end).toHaveBeenCalledWith(expect.any(Error));
     expect(sock.ws.close).not.toHaveBeenCalled();
     expect(controller.socketRef.current).toBeNull();
     expect(controller.getActiveListener()).toBeNull();

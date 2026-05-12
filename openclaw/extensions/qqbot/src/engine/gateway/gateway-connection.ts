@@ -1,5 +1,11 @@
+/**
+ * GatewayConnection — WebSocket lifecycle, heartbeat, reconnect, and session persistence.
+ *
+ * Encapsulates all connection state as class fields (replaces 11 closure variables).
+ * Event handling and message processing are delegated to injected handlers.
+ */
+
 import WebSocket from "ws";
-import type { EngineAdapters } from "../adapter/index.js";
 import {
   trySlashCommand,
   type SlashCommandHandlerContext,
@@ -22,7 +28,8 @@ import { dispatchEvent } from "./event-dispatcher.js";
 import { createMessageQueue, type QueuedMessage } from "./message-queue.js";
 import { ReconnectState } from "./reconnect.js";
 import type { GatewayAccount, EngineLogger, GatewayPluginRuntime, WSPayload } from "./types.js";
-import { createQQWSClient } from "./ws-client.js";
+
+// ============ Connection context ============
 
 interface GatewayConnectionContext {
   account: GatewayAccount;
@@ -30,15 +37,20 @@ interface GatewayConnectionContext {
   cfg: unknown;
   log?: EngineLogger;
   runtime: GatewayPluginRuntime;
-  adapters: EngineAdapters;
   onReady?: (data: unknown) => void;
+  /** Called when a RESUMED event is received (reconnect success). */
   onResumed?: (data: unknown) => void;
   onError?: (error: Error) => void;
+  /** Process a queued message (inbound pipeline → outbound dispatch). */
   handleMessage: (event: QueuedMessage) => Promise<void>;
+  /** Called when an INTERACTION_CREATE event is received (e.g. approval button clicks). */
   onInteraction?: (event: InteractionEvent) => void;
 }
 
+// ============ GatewayConnection ============
+
 export class GatewayConnection {
+  // ---- Connection state ----
   private isAborted = false;
   private currentWs: WebSocket | null = null;
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
@@ -62,6 +74,7 @@ export class GatewayConnection {
     });
   }
 
+  /** Start the connection loop. Resolves when abortSignal fires. */
   async start(): Promise<void> {
     this.restoreSession();
     this.registerAbortHandler();
@@ -70,6 +83,8 @@ export class GatewayConnection {
       this.ctx.abortSignal.addEventListener("abort", () => resolve());
     });
   }
+
+  // ============ Session persistence ============
 
   private restoreSession(): void {
     const { account, log } = this.ctx;
@@ -96,6 +111,8 @@ export class GatewayConnection {
       appId: account.appId,
     });
   }
+
+  // ============ Abort + cleanup ============
 
   private registerAbortHandler(): void {
     const { account, abortSignal, log: _log } = this.ctx;
@@ -127,6 +144,8 @@ export class GatewayConnection {
     this.currentWs = null;
   }
 
+  // ============ Reconnect ============
+
   private scheduleReconnect(customDelay?: number): void {
     const { account: _account, log } = this.ctx;
     if (this.isAborted || this.reconnect.isExhausted()) {
@@ -145,6 +164,8 @@ export class GatewayConnection {
       }
     }, delay);
   }
+
+  // ============ Connect ============
 
   private async connect(): Promise<void> {
     const { account, log } = this.ctx;
@@ -167,24 +188,19 @@ export class GatewayConnection {
       log?.info(`✅ Access token obtained successfully`);
       const gatewayUrl = await getGatewayUrl(accessToken, account.appId);
       log?.info(`Connecting to ${gatewayUrl}`);
-      const ws = await createQQWSClient({
-        gatewayUrl,
-        userAgent: getPluginUserAgent(),
+
+      const ws = new WebSocket(gatewayUrl, {
+        headers: { "User-Agent": getPluginUserAgent() },
       });
       this.currentWs = ws;
 
+      // ---- Slash command interception ----
       const slashCtx: SlashCommandHandlerContext = {
         account,
         cfg: this.ctx.cfg,
         log,
         getMessagePeerId: (msg) => this.msgQueue.getMessagePeerId(msg),
         getQueueSnapshot: (peerId) => this.msgQueue.getSnapshot(peerId),
-        resolveCommandAuthorized: (params) =>
-          this.ctx.adapters.access.resolveSlashCommandAuthorization({
-            cfg: this.ctx.cfg,
-            accountId: account.accountId,
-            ...params,
-          }),
       };
 
       const trySlashCommandOrEnqueue = async (msg: QueuedMessage): Promise<void> => {

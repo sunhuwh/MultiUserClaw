@@ -1,10 +1,7 @@
 import { ButtonStyle } from "discord-api-types/v10";
 import { resolveApprovalOverGateway } from "openclaw/plugin-sdk/approval-gateway-runtime";
 import type { ExecApprovalDecision } from "openclaw/plugin-sdk/approval-runtime";
-import type {
-  DiscordExecApprovalConfig,
-  OpenClawConfig,
-} from "openclaw/plugin-sdk/config-contracts";
+import type { DiscordExecApprovalConfig, OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import { Button, type ButtonInteraction, type ComponentData } from "../internal/discord.js";
 export { buildExecApprovalCustomId } from "../approval-handler.runtime.js";
 import { getDiscordExecApprovalApprovers } from "../exec-approvals.js";
@@ -68,15 +65,15 @@ function isStructuredApprovalNotFoundError(err: unknown): boolean {
 }
 
 export class ExecApprovalButton extends Button {
-  override label = "execapproval";
+  label = "execapproval";
   customId = "execapproval:seed=1";
-  override style = ButtonStyle.Primary;
+  style = ButtonStyle.Primary;
 
   constructor(private readonly ctx: ExecApprovalButtonContext) {
     super();
   }
 
-  override async run(interaction: ButtonInteraction, data: ComponentData): Promise<void> {
+  async run(interaction: ButtonInteraction, data: ComponentData): Promise<void> {
     const parsed = parseExecApprovalData(data);
     if (!parsed) {
       try {

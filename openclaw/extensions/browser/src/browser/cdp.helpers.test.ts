@@ -233,7 +233,7 @@ describe("CDP reachability policy", () => {
     expect(resolveCdpReachabilityPolicy(profile, browserPolicy)).toEqual({
       allowedHostnames: ["172.29.128.1"],
     });
-    expect(browserPolicy).toStrictEqual({});
+    expect(browserPolicy).toEqual({});
     await expect(
       assertBrowserNavigationAllowed({
         url: "http://172.29.128.1/",

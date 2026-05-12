@@ -5,24 +5,16 @@ import {
   resolveTtsPrefsPath,
   type ResolvedTtsConfig,
 } from "openclaw/plugin-sdk/agent-runtime";
-import type { OpenClawConfig, TtsConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig, TtsConfig } from "openclaw/plugin-sdk/config-types";
 import { parseTtsDirectives } from "openclaw/plugin-sdk/speech";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import { getDiscordRuntime } from "../runtime.js";
 import { sanitizeVoiceReplyTextForSpeech } from "./sanitize.js";
 
 type VoiceReplyAudioResult =
   | {
       status: "ok";
-      mode: "file";
       audioPath: string;
-      speakText: string;
-    }
-  | {
-      status: "ok";
-      mode: "stream";
-      audioStream: ReadableStream<Uint8Array>;
-      release?: () => Promise<void>;
       speakText: string;
     }
   | {
@@ -120,25 +112,7 @@ export async function synthesizeVoiceReplyAudio(params: {
     return { status: "empty" };
   }
 
-  const runtime = getDiscordRuntime();
-  const streamResult = await runtime.tts.textToSpeechStream?.({
-    text: speakText,
-    cfg: ttsCfg,
-    channel: "discord",
-    overrides: directive.overrides,
-    disableFallback: true,
-  });
-  if (streamResult?.success && streamResult.audioStream) {
-    return {
-      status: "ok",
-      mode: "stream",
-      audioStream: streamResult.audioStream,
-      release: streamResult.release,
-      speakText,
-    };
-  }
-
-  const result = await runtime.tts.textToSpeech({
+  const result = await getDiscordRuntime().tts.textToSpeech({
     text: speakText,
     cfg: ttsCfg,
     channel: "discord",
@@ -147,5 +121,5 @@ export async function synthesizeVoiceReplyAudio(params: {
   if (!result.success || !result.audioPath) {
     return { status: "failed", error: result.error ?? "unknown error" };
   }
-  return { status: "ok", mode: "file", audioPath: result.audioPath, speakText };
+  return { status: "ok", audioPath: result.audioPath, speakText };
 }

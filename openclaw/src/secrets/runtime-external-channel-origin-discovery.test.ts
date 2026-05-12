@@ -20,14 +20,6 @@ import { asConfig, setupSecretsRuntimeSnapshotTestHooks } from "./runtime.test-s
 
 const { prepareSecretsRuntimeSnapshot } = setupSecretsRuntimeSnapshotTestHooks();
 
-function requireDiscordConfig(snapshot: Awaited<ReturnType<typeof prepareSecretsRuntimeSnapshot>>) {
-  const config = snapshot.config.channels?.discord;
-  if (!config) {
-    throw new Error("expected Discord runtime config");
-  }
-  return config;
-}
-
 describe("secrets runtime external channel origin discovery", () => {
   it("discovers loadable plugins for channel SecretRefs when plugins.entries is absent", async () => {
     loadPluginMetadataSnapshotMock.mockReturnValue({
@@ -76,10 +68,13 @@ describe("secrets runtime external channel origin discovery", () => {
       includeAuthStoreRefs: false,
     });
 
-    expect(requireDiscordConfig(snapshot).token).toBe("resolved-discord-token");
+    expect(snapshot.config.channels?.discord?.token).toBe("resolved-discord-token");
     expect(loadPluginMetadataSnapshotMock).toHaveBeenCalled();
-    const loadCall = loadChannelSecretContractApiMock.mock.calls[0]?.[0];
-    expect(loadCall?.channelId).toBe("discord");
-    expect(loadCall?.loadablePluginOrigins).toEqual(new Map([["discord", "global"]]));
+    expect(loadChannelSecretContractApiMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: "discord",
+        loadablePluginOrigins: new Map([["discord", "global"]]),
+      }),
+    );
   });
 });

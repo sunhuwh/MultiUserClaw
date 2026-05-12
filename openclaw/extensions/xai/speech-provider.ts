@@ -8,7 +8,7 @@ import {
   type SpeechProviderPlugin,
   type SpeechSynthesisTarget,
 } from "openclaw/plugin-sdk/speech";
-import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import {
   isValidXaiTtsVoice,
   normalizeXaiLanguageCode,
@@ -49,7 +49,7 @@ function normalizeXaiSpeechResponseFormat(value: unknown): XaiSpeechResponseForm
 }
 
 function resolveSpeechResponseFormat(
-  _target: SpeechSynthesisTarget,
+  target: SpeechSynthesisTarget,
   configuredFormat?: XaiSpeechResponseFormat,
 ): XaiSpeechResponseFormat {
   if (configuredFormat) {

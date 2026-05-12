@@ -14,6 +14,7 @@ function acceptedSendResult(kind: "media" | "text", id: string): WhatsAppSendRes
   return {
     kind,
     messageId: id,
+    messageIds: [id],
     keys: [{ id }],
     providerAccepted: true,
   };
@@ -116,10 +117,7 @@ vi.mock("./runtime-api.js", async (importOriginal) => {
   return {
     ...actual,
     buildHistoryContextFromEntries: () => "hi",
-    createChannelMessageReplyPipeline: () => ({
-      onModelSelected: () => {},
-      responsePrefix: undefined,
-    }),
+    createChannelReplyPipeline: () => ({ onModelSelected: () => {}, responsePrefix: undefined }),
     formatInboundEnvelope: () => "hi",
     logVerbose: () => {},
     normalizeE164: (v: string) => v,
@@ -161,7 +159,10 @@ function makePolicy(account: ReturnType<typeof makeAccount>) {
     groupAllowFrom: [],
     isSelfChat: false,
     providerMissingFallbackApplied: false,
+    shouldReadStorePairingApprovals: true,
     isSamePhone: () => false,
+    isDmSenderAllowed: () => false,
+    isGroupSenderAllowed: () => false,
     resolveConversationGroupPolicy: () => "allowlist",
     resolveConversationRequireMention: () => false,
   };

@@ -103,9 +103,12 @@ describe("RequestClient", () => {
     await expect(first).resolves.toEqual({ ok: "first" });
     await expect(stale).rejects.toThrow(/Dropped stale background request/);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const metrics = client.getSchedulerMetrics();
-    expect(metrics.droppedByLane).toEqual({ critical: 0, standard: 0, background: 1 });
-    expect(metrics.queueSize).toBe(0);
+    expect(client.getSchedulerMetrics()).toEqual(
+      expect.objectContaining({
+        droppedByLane: expect.objectContaining({ background: 1 }),
+        queueSize: 0,
+      }),
+    );
   });
 
   it("keeps standard mutations queued until Discord accepts or rejects them", async () => {
@@ -154,9 +157,12 @@ describe("RequestClient", () => {
       { ok: true },
     ]);
     expect(fetchSpy).toHaveBeenCalledTimes(requests.length);
-    const metrics = client.getSchedulerMetrics();
-    expect(metrics.droppedByLane).toEqual({ critical: 0, standard: 0, background: 0 });
-    expect(metrics.queueSize).toBe(0);
+    expect(client.getSchedulerMetrics()).toEqual(
+      expect.objectContaining({
+        droppedByLane: expect.objectContaining({ standard: 0 }),
+        queueSize: 0,
+      }),
+    );
   });
 
   it("drains same-bucket requests when the active request finishes without polling", async () => {
@@ -251,7 +257,7 @@ describe("RequestClient", () => {
     const metrics = client.getSchedulerMetrics();
     expect(metrics.activeBuckets).toBe(0);
     expect(metrics.routeBucketMappings).toBe(0);
-    expect(metrics.buckets).toStrictEqual([]);
+    expect(metrics.buckets).toEqual([]);
   });
 
   it("waits for a learned bucket reset before dispatching the next request", async () => {
@@ -359,7 +365,7 @@ describe("RequestClient", () => {
     await expect(request).resolves.toEqual({ id: "retried" });
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect(client.queueSize).toBe(0);
-    expect(client.getSchedulerMetrics().buckets).toStrictEqual([]);
+    expect(client.getSchedulerMetrics().buckets).toEqual([]);
   });
 
   it("honors maxRateLimitRetries for queued requests", async () => {
@@ -530,12 +536,15 @@ describe("RequestClient", () => {
 
     await expect(client.get("/channels/c1/messages")).rejects.toMatchObject({ status: 403 });
 
-    const metrics = client.getSchedulerMetrics();
-    expect(metrics.invalidRequestCount).toBe(1);
-    expect(metrics.invalidRequestCountByStatus).toEqual({ 403: 1 });
+    expect(client.getSchedulerMetrics()).toEqual(
+      expect.objectContaining({
+        invalidRequestCount: 1,
+        invalidRequestCountByStatus: { 403: 1 },
+      }),
+    );
   });
 
-  it("serializes message multipart uploads with payload_json", () => {
+  it("serializes message multipart uploads with payload_json", async () => {
     const headers = new Headers();
     const body = serializeRequestBody(
       {

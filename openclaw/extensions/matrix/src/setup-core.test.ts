@@ -15,18 +15,8 @@ function applyOpsAccountConfig(cfg: CoreConfig): CoreConfig {
   }) as CoreConfig;
 }
 
-function expectFields(value: unknown, expected: Record<string, unknown>): void {
-  if (value === undefined || value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("expected object with fields");
-  }
-  const record = value as Record<string, unknown>;
-  Object.entries(expected).forEach(([key, expectedValue]) => {
-    expect(record[key]).toEqual(expectedValue);
-  });
-}
-
 function expectPromotedDefaultAccount(next: CoreConfig): void {
-  expectFields(next.channels?.matrix?.accounts?.Default, {
+  expect(next.channels?.matrix?.accounts?.Default).toMatchObject({
     enabled: true,
     deviceName: "Legacy raw key",
     homeserver: "https://matrix.example.org",
@@ -38,7 +28,7 @@ function expectPromotedDefaultAccount(next: CoreConfig): void {
 }
 
 function expectOpsAccount(next: CoreConfig): void {
-  expectFields(next.channels?.matrix?.accounts?.ops, {
+  expect(next.channels?.matrix?.accounts?.ops).toMatchObject({
     name: "Ops",
     enabled: true,
     homeserver: "https://matrix.example.org",
@@ -135,7 +125,7 @@ describe("createMatrixSetupWizardProxy", () => {
     expect(proxy.dmPolicy?.getCurrent(cfg, "ops")).toBe("pairing");
     const next = proxy.dmPolicy?.setPolicy(cfg, "open", "ops") as CoreConfig;
 
-    expectFields(next.channels?.matrix?.accounts?.ops?.dm, {
+    expect(next.channels?.matrix?.accounts?.ops?.dm).toMatchObject({
       policy: "open",
       allowFrom: ["@ops:example.org", "*"],
     });
@@ -170,7 +160,7 @@ describe("createMatrixSetupWizardProxy", () => {
 
     const next = proxy.dmPolicy?.setPolicy(cfg, "allowlist", "ops") as CoreConfig;
 
-    expectFields(next.channels?.matrix?.accounts?.ops?.dm, {
+    expect(next.channels?.matrix?.accounts?.ops?.dm).toMatchObject({
       policy: "allowlist",
       allowFrom: ["@ops:example.org"],
     });
@@ -205,13 +195,13 @@ describe("matrixSetupAdapter", () => {
     expect(next.channels?.matrix?.homeserver).toBeUndefined();
     expect(next.channels?.matrix?.userId).toBeUndefined();
     expect(next.channels?.matrix?.accessToken).toBeUndefined();
-    expectFields(next.channels?.matrix?.accounts?.default, {
+    expect(next.channels?.matrix?.accounts?.default).toMatchObject({
       homeserver: "https://matrix.example.org",
       userId: "@default:example.org",
       accessToken: "default-token",
       deviceName: "Default device",
     });
-    expectFields(next.channels?.matrix?.accounts?.ops, {
+    expect(next.channels?.matrix?.accounts?.ops).toMatchObject({
       name: "Ops",
       enabled: true,
       homeserver: "https://matrix.example.org",
@@ -270,7 +260,7 @@ describe("matrixSetupAdapter", () => {
     const next = applyOpsAccountConfig(cfg);
 
     expectPromotedDefaultAccount(next);
-    expectFields(next.channels?.matrix?.accounts?.support, {
+    expect(next.channels?.matrix?.accounts?.support).toMatchObject({
       homeserver: "https://matrix.example.org",
       accessToken: "support-token",
     });
@@ -306,7 +296,7 @@ describe("matrixSetupAdapter", () => {
       },
     }) as CoreConfig;
 
-    expectFields(next.channels?.matrix?.accounts?.ops, {
+    expect(next.channels?.matrix?.accounts?.ops).toMatchObject({
       name: "Ops",
       enabled: true,
     });
@@ -344,7 +334,7 @@ describe("matrixSetupAdapter", () => {
       },
     }) as CoreConfig;
 
-    expectFields(next.channels?.matrix?.accounts?.ops, {
+    expect(next.channels?.matrix?.accounts?.ops).toMatchObject({
       name: "Ops",
       enabled: true,
       avatarUrl: "mxc://example.org/ops-avatar",
@@ -364,7 +354,7 @@ describe("matrixSetupAdapter", () => {
       },
     }) as CoreConfig;
 
-    expectFields(next.channels?.matrix?.accounts?.ops, {
+    expect(next.channels?.matrix?.accounts?.ops).toMatchObject({
       enabled: true,
       homeserver: "https://matrix.example.org",
       accessToken: "ops-token",
@@ -383,7 +373,7 @@ describe("matrixSetupAdapter", () => {
       },
     }) as CoreConfig;
 
-    expectFields(next.channels?.matrix?.accounts?.ops, {
+    expect(next.channels?.matrix?.accounts?.ops).toMatchObject({
       enabled: true,
       homeserver: "https://matrix.example.org",
       accessToken: "ops-token",
@@ -416,7 +406,7 @@ describe("matrixSetupAdapter", () => {
       },
     }) as CoreConfig;
 
-    expectFields(next.channels?.matrix?.accounts?.ops, {
+    expect(next.channels?.matrix?.accounts?.ops).toMatchObject({
       enabled: true,
       homeserver: "http://matrix.internal:8008",
       accessToken: "ops-token",
@@ -457,7 +447,7 @@ describe("matrixSetupAdapter", () => {
     }) as CoreConfig;
 
     expect(next.channels?.matrix?.blockStreaming).toBe(true);
-    expectFields(next.channels?.matrix?.accounts?.ops, {
+    expect(next.channels?.matrix?.accounts?.ops).toMatchObject({
       name: "Ops",
       enabled: true,
       homeserver: "https://matrix.example.org",

@@ -9,7 +9,7 @@ title: "Docs hubs"
 If you are new to OpenClaw, start with [Getting Started](/start/getting-started).
 </Note>
 
-Use these hubs to discover every page, including deep dives and reference docs that don't appear in the left nav.
+Use these hubs to discover every page, including deep dives and reference docs that don’t appear in the left nav.
 
 ## Start here
 
@@ -73,8 +73,9 @@ Use these hubs to discover every page, including deep dives and reference docs t
 - [Discord](/channels/discord)
 - [Mattermost](/channels/mattermost)
 - [Signal](/channels/signal)
+- [BlueBubbles (iMessage)](/channels/bluebubbles)
 - [QQ Bot](/channels/qqbot)
-- [iMessage](/channels/imessage)
+- [iMessage (legacy)](/channels/imessage)
 - [Location parsing](/channels/location)
 - [WebChat](/web/webchat)
 - [Webhooks](/automation/cron-jobs#webhooks)
@@ -83,7 +84,7 @@ Use these hubs to discover every page, including deep dives and reference docs t
 ## Gateway + operations
 
 - [Gateway runbook](/gateway)
-- [Network model](/network#core-model)
+- [Network model](/gateway/network-model)
 - [Gateway pairing](/gateway/pairing)
 - [Gateway lock](/gateway/gateway-lock)
 - [Background process](/gateway/background-process)
@@ -167,7 +168,7 @@ Use these hubs to discover every page, including deep dives and reference docs t
 - [Plugin manifest](/plugins/manifest)
 - [Agent tools](/plugins/building-plugins#registering-agent-tools)
 - [Plugin bundles](/plugins/bundles)
-- [ClawHub](/clawhub)
+- [Community plugins](/plugins/community)
 - [Capability cookbook](/tools/capability-cookbook)
 - [Voice call plugin](/plugins/voice-call)
 - [Zalo user plugin](/plugins/zalouser)
@@ -175,7 +176,7 @@ Use these hubs to discover every page, including deep dives and reference docs t
 ## Workspace + templates
 
 - [Skills](/tools/skills)
-- [ClawHub](/clawhub)
+- [ClawHub](/tools/clawhub)
 - [Skills config](/tools/skills-config)
 - [Default AGENTS](/reference/AGENTS.default)
 - [Templates: AGENTS](/reference/templates/AGENTS)

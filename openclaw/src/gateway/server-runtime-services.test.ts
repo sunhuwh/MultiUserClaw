@@ -30,7 +30,6 @@ vi.mock("../infra/env.js", () => ({
 
 vi.mock("../infra/outbound/deliver.js", () => ({
   deliverOutboundPayloads: hoisted.deliverOutboundPayloads,
-  deliverOutboundPayloadsInternal: hoisted.deliverOutboundPayloads,
 }));
 
 vi.mock("../infra/outbound/delivery-queue.js", () => ({
@@ -269,9 +268,7 @@ describe("server-runtime-services", () => {
   it("clears delayed maintenance handles when close starts during maintenance startup", async () => {
     vi.useFakeTimers();
     let closing = false;
-    let resolveMaintenance:
-      | ((maintenance: ReturnType<typeof createMaintenanceHandles>) => void)
-      | undefined;
+    let resolveMaintenance!: (maintenance: ReturnType<typeof createMaintenanceHandles>) => void;
     const startMaintenance = vi.fn(
       () =>
         new Promise<ReturnType<typeof createMaintenanceHandles>>((resolve) => {
@@ -297,9 +294,6 @@ describe("server-runtime-services", () => {
     expect(startMaintenance).toHaveBeenCalledTimes(1);
 
     closing = true;
-    if (!resolveMaintenance) {
-      throw new Error("Expected gateway maintenance resolver to be initialized");
-    }
     resolveMaintenance(createMaintenanceHandles());
     await Promise.resolve();
     await Promise.resolve();

@@ -6,5 +6,4 @@ export type OutboundDeliveryFormattingOptions = {
   maxLinesPerMessage?: number;
   tableMode?: MarkdownTableMode;
   chunkMode?: ChunkMode;
-  parseMode?: "HTML";
 };

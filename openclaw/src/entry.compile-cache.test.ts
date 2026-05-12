@@ -155,9 +155,9 @@ describe("entry compile cache", () => {
         env: { NODE_DISABLE_COMPILE_CACHE: "1" },
       },
     );
-    expect(attachChildProcessBridge.mock.calls[0]?.[0]).toBe(child);
-    const bridgeOptions = attachChildProcessBridge.mock.calls[0]?.[1];
-    expect(typeof bridgeOptions?.onSignal).toBe("function");
+    expect(attachChildProcessBridge).toHaveBeenCalledWith(child, {
+      onSignal: expect.any(Function),
+    });
 
     child.emit("exit", 0, null);
 

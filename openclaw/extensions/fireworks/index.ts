@@ -16,7 +16,6 @@ import {
   FIREWORKS_DEFAULT_MODEL_ID,
 } from "./provider-catalog.js";
 import { wrapFireworksProviderStream } from "./stream.js";
-import { resolveFireworksThinkingProfile } from "./thinking-policy.js";
 
 const PROVIDER_ID = "fireworks";
 function resolveFireworksDynamicModel(ctx: ProviderResolveDynamicModelContext) {
@@ -78,7 +77,6 @@ export default defineSingleProviderPluginEntry({
     },
     ...OPENAI_COMPATIBLE_REPLAY_HOOKS,
     wrapStreamFn: wrapFireworksProviderStream,
-    resolveThinkingProfile: ({ modelId }) => resolveFireworksThinkingProfile(modelId),
     resolveDynamicModel: (ctx) => resolveFireworksDynamicModel(ctx),
     isModernModelRef: () => true,
   },

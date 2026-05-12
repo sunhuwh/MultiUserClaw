@@ -6,7 +6,6 @@ export type MigrateCommonOptions = {
   includeSecrets?: boolean;
   overwrite?: boolean;
   skills?: string[];
-  plugins?: string[];
   json?: boolean;
 };
 

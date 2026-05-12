@@ -1,5 +1,5 @@
 import { importFreshModule } from "openclaw/plugin-sdk/test-fixtures";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClawdbotConfig } from "../runtime-api.js";
 
 const createFeishuClientMock = vi.hoisted(() => vi.fn());
@@ -45,11 +45,6 @@ function makeConfiguredCfg(): ClawdbotConfig {
 }
 
 describe("feishu directory (config-backed)", () => {
-  afterAll(() => {
-    vi.doUnmock("./client.js");
-    vi.resetModules();
-  });
-
   beforeEach(() => {
     createFeishuClientMock.mockReset();
   });

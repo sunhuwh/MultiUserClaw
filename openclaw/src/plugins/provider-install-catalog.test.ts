@@ -393,7 +393,7 @@ describe("provider install catalog", () => {
       },
     ]);
 
-    expect(resolveProviderInstallCatalogEntries()).toStrictEqual([]);
+    expect(resolveProviderInstallCatalogEntries()).toEqual([]);
   });
 
   it("skips untrusted workspace package install metadata when the plugin is disabled", () => {
@@ -449,7 +449,7 @@ describe("provider install catalog", () => {
         },
         includeUntrustedWorkspacePlugins: false,
       }),
-    ).toStrictEqual([]);
+    ).toEqual([]);
   });
 
   it("surfaces provider-index install metadata when the provider plugin is not installed", () => {

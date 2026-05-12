@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { writeJsonFileAtomically } from "openclaw/plugin-sdk/json-store";
 import {
   replaceManagedMarkdownBlock,
   withTrailingNewline,
@@ -680,7 +679,8 @@ async function writeImportRunRecord(
   record: ChatGptImportRunRecord,
 ): Promise<void> {
   const recordPath = resolveImportRunPath(vaultRoot, record.runId);
-  await writeJsonFileAtomically(recordPath, record);
+  await fs.mkdir(path.dirname(recordPath), { recursive: true });
+  await fs.writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
 }
 
 async function readImportRunRecord(

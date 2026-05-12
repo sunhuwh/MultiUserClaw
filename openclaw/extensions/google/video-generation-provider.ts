@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { resolveApiKeyForProvider } from "openclaw/plugin-sdk/provider-auth-runtime";
 import {
@@ -6,10 +6,9 @@ import {
   resolveProviderOperationTimeoutMs,
   waitProviderOperationPollInterval,
 } from "openclaw/plugin-sdk/provider-http";
-import { writeExternalFileWithinRoot } from "openclaw/plugin-sdk/security-runtime";
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { resolvePreferredOpenClawTmpDir, withTempWorkspace } from "openclaw/plugin-sdk/temp-path";
+import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import type {
   GeneratedVideoAsset,
   VideoGenerationProvider,
@@ -27,7 +26,7 @@ import { createGoogleGenAI, type GoogleGenAIClient } from "./google-genai-runtim
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 const POLL_INTERVAL_MS = 10_000;
-const MAX_POLL_ATTEMPTS = 120;
+const MAX_POLL_ATTEMPTS = 90;
 const GOOGLE_VIDEO_EMPTY_RESULT_MESSAGE =
   "Google video generation response missing generated videos";
 
@@ -152,29 +151,24 @@ async function downloadGeneratedVideo(params: {
   file: unknown;
   index: number;
 }): Promise<GeneratedVideoAsset> {
-  return await withTempWorkspace(
-    { rootDir: resolvePreferredOpenClawTmpDir(), prefix: "openclaw-google-video-" },
-    async ({ dir: tempDir }) => {
-      const fileName = `video-${params.index + 1}.mp4`;
-      const downloadPath = path.join(tempDir, fileName);
-      await writeExternalFileWithinRoot({
-        rootDir: tempDir,
-        path: fileName,
-        write: async (downloadPath) => {
-          await params.client.files.download({
-            file: params.file as never,
-            downloadPath,
-          });
-        },
-      });
-      const buffer = await readFile(downloadPath);
-      return {
-        buffer,
-        mimeType: "video/mp4",
-        fileName: `video-${params.index + 1}.mp4`,
-      };
-    },
+  const tempDir = await mkdtemp(
+    path.join(resolvePreferredOpenClawTmpDir(), "openclaw-google-video-"),
   );
+  const downloadPath = path.join(tempDir, `video-${params.index + 1}.mp4`);
+  try {
+    await params.client.files.download({
+      file: params.file as never,
+      downloadPath,
+    });
+    const buffer = await readFile(downloadPath);
+    return {
+      buffer,
+      mimeType: "video/mp4",
+      fileName: `video-${params.index + 1}.mp4`,
+    };
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 }
 
 function resolveGoogleGeneratedVideoDownloadUrl(params: {

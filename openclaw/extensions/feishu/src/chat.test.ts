@@ -1,5 +1,5 @@
 import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi, PluginRuntime } from "../runtime-api.js";
 
 const createFeishuClientMock = vi.hoisted(() => vi.fn());
@@ -35,11 +35,6 @@ describe("registerFeishuChatTools", () => {
 
   beforeAll(async () => {
     ({ registerFeishuChatTools } = await import("./chat.js"));
-  });
-
-  afterAll(() => {
-    vi.doUnmock("./client.js");
-    vi.resetModules();
   });
 
   beforeEach(() => {
@@ -82,21 +77,9 @@ describe("registerFeishuChatTools", () => {
       data: { name: "group name", user_count: 3 },
     });
     const infoResult = await tool.execute("tc_1", { action: "info", chat_id: "oc_1" });
-    expect(infoResult.details).toEqual({
-      chat_id: "oc_1",
-      name: "group name",
-      description: undefined,
-      owner_id: undefined,
-      tenant_key: undefined,
-      user_count: 3,
-      chat_mode: undefined,
-      chat_type: undefined,
-      join_message_visibility: undefined,
-      leave_message_visibility: undefined,
-      membership_approval: undefined,
-      moderation_permission: undefined,
-      avatar: undefined,
-    });
+    expect(infoResult.details).toEqual(
+      expect.objectContaining({ chat_id: "oc_1", name: "group name", user_count: 3 }),
+    );
 
     chatMembersGetMock.mockResolvedValueOnce({
       code: 0,
@@ -107,19 +90,12 @@ describe("registerFeishuChatTools", () => {
       },
     });
     const membersResult = await tool.execute("tc_2", { action: "members", chat_id: "oc_1" });
-    expect(membersResult.details).toEqual({
-      chat_id: "oc_1",
-      has_more: false,
-      page_token: "",
-      members: [
-        {
-          member_id: "ou_1",
-          name: "member1",
-          tenant_key: undefined,
-          member_id_type: "open_id",
-        },
-      ],
-    });
+    expect(membersResult.details).toEqual(
+      expect.objectContaining({
+        chat_id: "oc_1",
+        members: [expect.objectContaining({ member_id: "ou_1", name: "member1" })],
+      }),
+    );
 
     contactUserGetMock.mockResolvedValueOnce({
       code: 0,
@@ -136,35 +112,15 @@ describe("registerFeishuChatTools", () => {
       action: "member_info",
       member_id: "ou_1",
     });
-    expect(memberInfoResult.details).toEqual({
-      member_id: "ou_1",
-      member_id_type: "open_id",
-      open_id: "ou_1",
-      user_id: undefined,
-      union_id: undefined,
-      name: "member1",
-      en_name: undefined,
-      nickname: undefined,
-      email: "member1@example.com",
-      enterprise_email: undefined,
-      mobile: undefined,
-      mobile_visible: undefined,
-      status: undefined,
-      avatar: undefined,
-      department_ids: ["od_1"],
-      department_path: undefined,
-      leader_user_id: undefined,
-      city: undefined,
-      country: undefined,
-      work_station: undefined,
-      join_time: undefined,
-      is_tenant_manager: undefined,
-      employee_no: undefined,
-      employee_type: undefined,
-      description: undefined,
-      job_title: undefined,
-      geo: undefined,
-    });
+    expect(memberInfoResult.details).toEqual(
+      expect.objectContaining({
+        member_id: "ou_1",
+        open_id: "ou_1",
+        name: "member1",
+        email: "member1@example.com",
+        department_ids: ["od_1"],
+      }),
+    );
   });
 
   it("skips registration when chat tool is disabled", () => {

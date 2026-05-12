@@ -1,9 +1,9 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import {
   applyResolvedAssignments,
   createResolverContext,
   resolveSecretRefValues,
-} from "openclaw/plugin-sdk/secret-ref-runtime";
+} from "openclaw/plugin-sdk/runtime-secret-resolution";
 import { describe, expect, it } from "vitest";
 import { collectRuntimeConfigAssignments } from "./secret-contract.js";
 
@@ -30,7 +30,7 @@ async function resolveQqbotSecretAssignments(
   );
   applyResolvedAssignments({ assignments: context.assignments, resolved });
 
-  expect(context.warnings).toStrictEqual([]);
+  expect(context.warnings).toEqual([]);
   return resolvedConfig;
 }
 

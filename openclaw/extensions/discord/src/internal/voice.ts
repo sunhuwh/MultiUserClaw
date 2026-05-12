@@ -12,7 +12,7 @@ export class VoicePlugin extends Plugin {
   readonly adapters = new Map<string, DiscordGatewayAdapterLibraryMethods>();
   private gatewayPlugin?: GatewayPlugin;
 
-  override registerClient(client: Client): void {
+  registerClient(client: Client): void {
     this.client = client;
     this.gatewayPlugin = client.getPlugin<GatewayPlugin>("gateway");
     if (!this.gatewayPlugin) {

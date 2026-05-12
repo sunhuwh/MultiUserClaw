@@ -31,8 +31,8 @@ describe("resolveChannelTtsVoiceDelivery", () => {
     setActivePluginRegistry(
       createTestRegistry([
         {
-          pluginId: "imessage",
-          plugin: createChannelPlugin("imessage", {
+          pluginId: "bluebubbles",
+          plugin: createChannelPlugin("bluebubbles", {
             chatTypes: ["direct"],
             tts: {
               voice: {
@@ -85,7 +85,7 @@ describe("resolveChannelTtsVoiceDelivery", () => {
         },
       ]),
     );
-    expect(resolveChannelTtsVoiceDelivery("imessage")).toEqual({
+    expect(resolveChannelTtsVoiceDelivery("bluebubbles")).toEqual({
       synthesisTarget: "audio-file",
       audioFileFormats: ["mp3", "caf", "audio/mpeg", "audio/x-caf"],
     });

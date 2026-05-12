@@ -40,10 +40,8 @@ authoritative pin without explicit user intent or other out-of-band verification
 3. Client sends `pair-request`.
 4. Gateway waits for approval, then sends `pair-ok` and `hello-ok`.
 
-Historically, `hello-ok` returned `serverName`; hosted plugin surfaces are now
-advertised through `pluginSurfaceUrls`. Canvas/A2UI uses
-`pluginSurfaceUrls.canvas`; the deprecated `canvasHostUrl` alias is not part of
-the refactored protocol.
+Historically, `hello-ok` returned `serverName` and could include
+`canvasHostUrl`.
 
 ## Frames
 
@@ -79,7 +77,7 @@ Payload fields (all optional unless noted):
 - Bind the bridge to a tailnet IP: `bridge.bind: "tailnet"` in
   `~/.openclaw/openclaw.json` (historical only; `bridge.*` is no longer valid).
 - Clients connect via MagicDNS name or tailnet IP.
-- Bonjour does **not** cross networks; use manual host/port or wide-area DNS-SD
+- Bonjour does **not** cross networks; use manual host/port or wide-area DNS‑SD
   when needed.
 
 ## Versioning

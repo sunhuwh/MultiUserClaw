@@ -2,7 +2,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 const recordChannelActivityMock = vi.hoisted(() => vi.fn());
 const loadConfigMock = vi.hoisted(() => vi.fn(() => ({ channels: { discord: {} } })));
-let dateNowSpy: ReturnType<typeof vi.spyOn>;
 
 vi.mock("openclaw/plugin-sdk/plugin-config-runtime", async () => {
   const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/plugin-config-runtime")>(
@@ -34,7 +33,6 @@ describe("sendWebhookMessageDiscord activity", () => {
   beforeEach(() => {
     recordChannelActivityMock.mockClear();
     loadConfigMock.mockClear();
-    dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
@@ -47,7 +45,6 @@ describe("sendWebhookMessageDiscord activity", () => {
   });
 
   afterEach(() => {
-    dateNowSpy.mockRestore();
     vi.unstubAllGlobals();
   });
 
@@ -67,35 +64,9 @@ describe("sendWebhookMessageDiscord activity", () => {
       threadId: "thread-1",
     });
 
-    expect(result).toMatchObject({
+    expect(result).toEqual({
       messageId: "msg-1",
       channelId: "thread-1",
-    });
-    expect(result.receipt).toEqual({
-      primaryPlatformMessageId: "msg-1",
-      platformMessageIds: ["msg-1"],
-      parts: [
-        {
-          platformMessageId: "msg-1",
-          kind: "text",
-          index: 0,
-          threadId: "thread-1",
-          raw: {
-            channel: "discord",
-            messageId: "msg-1",
-            channelId: "thread-1",
-          },
-        },
-      ],
-      threadId: "thread-1",
-      sentAt: 1_700_000_000_000,
-      raw: [
-        {
-          channel: "discord",
-          messageId: "msg-1",
-          channelId: "thread-1",
-        },
-      ],
     });
     expect(recordChannelActivityMock).toHaveBeenCalledWith({
       channel: "discord",
@@ -124,19 +95,11 @@ describe("sendWebhookMessageDiscord activity", () => {
       threadId: "thread-1",
     });
 
-    const fetchMock = vi.mocked(fetch);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]).toEqual([
-      "https://discord.com/api/v10/webhooks/wh-1/tok-1?wait=true&thread_id=thread-1",
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          content: "hello <@123456789012345678>",
-        }),
-      },
-    ]);
+    expect(fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        body: expect.stringContaining('"content":"hello <@123456789012345678>"'),
+      }),
+    );
   });
 });

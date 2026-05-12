@@ -2,7 +2,6 @@ import type { Node as TreeSitterNode } from "web-tree-sitter";
 import type { InterpreterInlineEvalHit } from "../command-analysis/inline-eval.js";
 import {
   detectCarriedShellBuiltinArgv,
-  detectCarrierInlineEvalArgv as detectSharedCarrierInlineEvalArgv,
   detectCommandCarrierArgv,
   detectInlineEvalArgv,
   detectShellWrapperThroughCarrierArgv,
@@ -11,7 +10,6 @@ import {
 import { normalizeExecutableToken } from "../exec-wrapper-resolution.js";
 import {
   extractShellWrapperCommand,
-  extractShellWrapperInlineCommand,
   isShellWrapperExecutable,
   POSIX_SHELL_WRAPPERS,
   resolveShellWrapperTransportArgv,
@@ -878,11 +876,14 @@ function shellWrapperPayloadForParsing(
   dynamicArguments: DynamicArgument[],
 ): { command: string; spanBase: SpanBase } | null {
   const shellWrapper = extractShellWrapperCommand(argv);
-  const payload = shellWrapper.command ?? extractShellWrapperInlineCommand(argv);
-  if (!shellWrapper.isWrapper || !payload || isDynamicPayload(payload, dynamicArguments)) {
+  if (
+    !shellWrapper.isWrapper ||
+    !shellWrapper.command ||
+    isDynamicPayload(shellWrapper.command, dynamicArguments)
+  ) {
     return null;
   }
-  const spanBase = payloadBaseFromArguments(payload, argumentsList);
+  const spanBase = payloadBaseFromArguments(shellWrapper.command, argumentsList);
   if (!spanBase) {
     return null;
   }
@@ -891,10 +892,11 @@ function shellWrapperPayloadForParsing(
   if (!canParseShellWrapperPayload(transportArgv, commandFlag?.flag ?? null)) {
     return null;
   }
-  return { command: payload, spanBase };
+  return { command: shellWrapper.command, spanBase };
 }
 
 type InlineEvalHit = InterpreterInlineEvalHit;
+
 function recordInlineEvalRisk(
   inlineEval: InlineEvalHit,
   text: string,
@@ -939,14 +941,13 @@ function recordCommandRisks(
   }
   const normalizedExecutable = normalizeExecutableToken(executable);
   recordDynamicArgumentRisks(normalizedExecutable, dynamicArguments, output);
-  const inlineEval = detectInlineEvalArgv(argv) ?? detectSharedCarrierInlineEvalArgv(argv);
+  const inlineEval = detectInlineEvalArgv(argv);
   if (inlineEval) {
     recordInlineEvalRisk(inlineEval, text, span, output);
   }
 
   const shellWrapper = extractShellWrapperCommand(argv);
-  const shellWrapperPayload = shellWrapper.command ?? extractShellWrapperInlineCommand(argv);
-  if (shellWrapper.isWrapper && shellWrapperPayload) {
+  if (shellWrapper.isWrapper && shellWrapper.command) {
     const transportArgv = resolveShellWrapperTransportArgv(argv) ?? argv;
     const shellExecutable = transportArgv[0] ?? executable;
     const commandFlag = shellCommandFlag(transportArgv, 1) ?? shellCommandFlag(argv, 1);
@@ -955,7 +956,7 @@ function recordCommandRisks(
         kind: "shell-wrapper",
         executable: shellExecutable,
         flag: commandFlag?.flag ?? "-c",
-        payload: shellWrapperPayload,
+        payload: shellWrapper.command,
         text,
         span,
       });
@@ -1078,10 +1079,6 @@ async function walk(
         argv: parsed.argv,
         text: node.text,
         span,
-        executableSpan:
-          nameNode !== null
-            ? spanFromNode(nameNode, state.spanBase)
-            : (parsed.arguments[0]?.span ?? span),
       };
       if (step.executable) {
         output.commands.push(step);

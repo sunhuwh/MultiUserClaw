@@ -236,7 +236,7 @@ export class MessageApi {
   // ---- Internal ----
 
   private async sendAndNotify(
-    _appId: string,
+    appId: string,
     accessToken: string,
     method: string,
     path: string,

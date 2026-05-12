@@ -1,5 +1,5 @@
 import { ChannelType } from "discord-api-types/v10";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockCommandInteraction as createInteraction } from "./native-command.test-helpers.js";
 import { createNoopThreadBindingManager } from "./thread-bindings.js";
@@ -161,11 +161,12 @@ describe("discord native /status", () => {
 
     expect(runtimeModuleMocks.resolveDirectStatusReplyForSession).toHaveBeenCalledTimes(1);
     expect(runtimeModuleMocks.dispatchReplyWithDispatcher).not.toHaveBeenCalled();
-    expect(interaction.followUp).toHaveBeenCalledTimes(1);
-    expect(interaction.followUp.mock.calls[0]?.[0]).toStrictEqual({
-      content: "status reply",
-      ephemeral: true,
-    });
+    expect(interaction.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "status reply",
+        ephemeral: true,
+      }),
+    );
     expect(interaction.reply).not.toHaveBeenCalled();
   });
 
@@ -192,11 +193,12 @@ describe("discord native /status", () => {
 
     expect(runtimeModuleMocks.resolveDirectStatusReplyForSession).toHaveBeenCalledTimes(1);
     expect(executePluginCommand).not.toHaveBeenCalled();
-    expect(interaction.followUp).toHaveBeenCalledTimes(1);
-    expect(interaction.followUp.mock.calls[0]?.[0]).toStrictEqual({
-      content: "status reply",
-      ephemeral: true,
-    });
+    expect(interaction.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "status reply",
+        ephemeral: true,
+      }),
+    );
   });
 
   it("keeps every direct status chunk ephemeral", async () => {
@@ -211,7 +213,11 @@ describe("discord native /status", () => {
 
     expect(interaction.followUp.mock.calls.length).toBeGreaterThan(1);
     for (const [payload] of interaction.followUp.mock.calls) {
-      expect((payload as { ephemeral?: boolean }).ephemeral).toBe(true);
+      expect(payload).toEqual(
+        expect.objectContaining({
+          ephemeral: true,
+        }),
+      );
     }
   });
 
@@ -226,20 +232,22 @@ describe("discord native /status", () => {
 
     await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
 
-    expect(runtimeModuleMocks.loadWebMedia).toHaveBeenCalledTimes(1);
-    const [mediaUrl, mediaOptions] = runtimeModuleMocks.loadWebMedia.mock.calls[0] ?? [];
-    expect(mediaUrl).toBe("https://example.com/status.png");
-    expect(Array.isArray((mediaOptions as { localRoots?: unknown } | undefined)?.localRoots)).toBe(
-      true,
-    );
+    expect(runtimeModuleMocks.loadWebMedia).toHaveBeenCalledWith("https://example.com/status.png", {
+      localRoots: expect.any(Array),
+    });
     expect(interaction.followUp.mock.calls.length).toBeGreaterThan(1);
-    const firstPayload = interaction.followUp.mock.calls[0]?.[0] as
-      | { ephemeral?: boolean; files?: Array<{ name?: string; data?: unknown }> }
-      | undefined;
-    expect(firstPayload?.ephemeral).toBe(true);
-    expect(firstPayload?.files?.map((file) => file.name)).toEqual(["status.png"]);
+    expect(interaction.followUp.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        ephemeral: true,
+        files: expect.arrayContaining([expect.objectContaining({ name: "status.png" })]),
+      }),
+    );
     for (const [payload] of interaction.followUp.mock.calls) {
-      expect((payload as { ephemeral?: boolean }).ephemeral).toBe(true);
+      expect(payload).toEqual(
+        expect.objectContaining({
+          ephemeral: true,
+        }),
+      );
     }
     expect(interaction.reply).not.toHaveBeenCalled();
   });

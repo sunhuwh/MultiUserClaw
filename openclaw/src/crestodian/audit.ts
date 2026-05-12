@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { resolveStateDir } from "../config/paths.js";
-import { appendRegularFile } from "../infra/fs-safe.js";
 
 type CrestodianAuditEntry = {
   timestamp: string;
@@ -30,10 +29,9 @@ export async function appendCrestodianAuditEntry(
     timestamp: new Date().toISOString(),
     ...entry,
   } satisfies CrestodianAuditEntry);
-  await appendRegularFile({
-    filePath: auditPath,
-    content: `${line}\n`,
-    rejectSymlinkParents: true,
+  await fs.appendFile(auditPath, `${line}\n`, { encoding: "utf8", mode: 0o600 });
+  await fs.chmod(auditPath, 0o600).catch(() => {
+    // Best-effort on platforms/filesystems without POSIX modes.
   });
   return auditPath;
 }

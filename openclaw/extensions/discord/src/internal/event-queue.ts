@@ -31,7 +31,6 @@ const DEFAULT_SLOW_LISTENER_THRESHOLD_MS = 30_000;
 export class DiscordEventQueue {
   private readonly options: Required<DiscordEventQueueOptions>;
   private readonly queue: DiscordEventQueueJob[] = [];
-  private queueHead = 0;
   private processing = 0;
   private processedCount = 0;
   private droppedCount = 0;
@@ -53,7 +52,7 @@ export class DiscordEventQueue {
   }
 
   enqueue(params: Omit<DiscordEventQueueJob, "resolve" | "reject">): Promise<void> {
-    if (this.pendingQueueSize >= this.options.maxQueueSize) {
+    if (this.queue.length >= this.options.maxQueueSize) {
       this.droppedCount += 1;
       return Promise.reject(
         new Error(
@@ -69,7 +68,7 @@ export class DiscordEventQueue {
 
   getMetrics(): DiscordEventQueueMetrics {
     return {
-      queueSize: this.pendingQueueSize,
+      queueSize: this.queue.length,
       processing: this.processing,
       processed: this.processedCount,
       dropped: this.droppedCount,
@@ -79,31 +78,9 @@ export class DiscordEventQueue {
     };
   }
 
-  private get pendingQueueSize(): number {
-    return Math.max(0, this.queue.length - this.queueHead);
-  }
-
-  private takeNextJob(): DiscordEventQueueJob | undefined {
-    if (this.queueHead >= this.queue.length) {
-      this.queue.length = 0;
-      this.queueHead = 0;
-      return undefined;
-    }
-    const job = this.queue[this.queueHead];
-    this.queueHead += 1;
-    if (this.queueHead >= this.queue.length) {
-      this.queue.length = 0;
-      this.queueHead = 0;
-    } else if (this.queueHead > 256 && this.queueHead * 2 > this.queue.length) {
-      this.queue.splice(0, this.queueHead);
-      this.queueHead = 0;
-    }
-    return job;
-  }
-
   private processNext(): void {
-    while (this.processing < this.options.maxConcurrency && this.pendingQueueSize > 0) {
-      const job = this.takeNextJob();
+    while (this.processing < this.options.maxConcurrency && this.queue.length > 0) {
+      const job = this.queue.shift();
       if (!job) {
         return;
       }

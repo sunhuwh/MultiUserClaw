@@ -61,12 +61,6 @@ function preparedSnapshot(config: OpenClawConfig): PreparedSecretsRuntimeSnapsho
   };
 }
 
-function callArg<T>(mock: { mock: { calls: unknown[][] } }, index = 0, _type?: (value: T) => T): T {
-  const call = mock.mock.calls[index];
-  expect(call).toBeDefined();
-  return call?.[0] as T;
-}
-
 describe("gateway startup config secret preflight", () => {
   const previousSkipChannels = process.env.OPENCLAW_SKIP_CHANNELS;
   const previousSkipProviders = process.env.OPENCLAW_SKIP_PROVIDERS;
@@ -130,12 +124,10 @@ describe("gateway startup config secret preflight", () => {
       activate: false,
     });
 
-    const preflightInput = callArg<{
-      config?: unknown;
-      loadAuthStore?: unknown;
-    }>(prepareRuntimeSecretsSnapshot);
-    expect(typeof preflightInput.config).toBe("object");
-    expect(preflightInput.loadAuthStore).toBe(loadAuthProfileStoreWithoutExternalProfiles);
+    expect(prepareRuntimeSecretsSnapshot).toHaveBeenCalledWith({
+      config: expect.any(Object),
+      loadAuthStore: loadAuthProfileStoreWithoutExternalProfiles,
+    });
   });
 
   it("does not emit degraded or recovered events for warning-only secret reloads", async () => {
@@ -161,33 +153,37 @@ describe("gateway startup config secret preflight", () => {
       activateRuntimeSecretsSnapshot: vi.fn(),
     });
 
-    const config = {
-      plugins: {
-        entries: {
-          google: {
-            enabled: true,
-            config: {
-              webSearch: {
-                apiKey: { source: "env", provider: "default", id: "MISSING_GEMINI_KEY" },
+    await expect(
+      activateRuntimeSecrets(
+        {
+          plugins: {
+            entries: {
+              google: {
+                enabled: true,
+                config: {
+                  webSearch: {
+                    apiKey: { source: "env", provider: "default", id: "MISSING_GEMINI_KEY" },
+                  },
+                },
               },
             },
           },
         },
-      },
-    };
-    const result = await activateRuntimeSecrets(config, {
-      reason: "reload",
-      activate: true,
+        {
+          reason: "reload",
+          activate: true,
+        },
+      ),
+    ).resolves.toMatchObject({
+      warnings: [warning],
     });
-    expect(result.sourceConfig).toBe(config);
-    expect(result.config).toBe(config);
-    expect(result.warnings).toEqual([warning]);
     expect(logSecrets.warn).toHaveBeenCalledWith(
       "[WEB_SEARCH_KEY_UNRESOLVED_FALLBACK_USED] web search provider fell back to environment credentials",
     );
     expect(emitStateEvent).not.toHaveBeenCalled();
-    const preflightInput = callArg<{ config?: unknown }>(prepareRuntimeSecretsSnapshot);
-    expect(typeof preflightInput.config).toBe("object");
+    expect(prepareRuntimeSecretsSnapshot).toHaveBeenCalledWith({
+      config: expect.any(Object),
+    });
   });
 
   it.each(KNOWN_WEAK_GATEWAY_TOKEN_PLACEHOLDERS)(
@@ -263,17 +259,22 @@ describe("gateway startup config secret preflight", () => {
       }),
     );
 
-    const result = await activateRuntimeSecrets(config, {
-      reason: "startup",
-      activate: false,
+    await expect(
+      activateRuntimeSecrets(config, {
+        reason: "startup",
+        activate: false,
+      }),
+    ).resolves.toMatchObject({
+      config: expect.objectContaining({
+        gateway: expect.any(Object),
+      }),
     });
-    expect(typeof result.config.gateway).toBe("object");
-    const preflightInput = callArg<{
-      config?: OpenClawConfig;
-      loadAuthStore?: unknown;
-    }>(prepareRuntimeSecretsSnapshot);
-    expect(preflightInput.config?.channels).toBeUndefined();
-    expect(preflightInput.loadAuthStore).toBe(loadAuthProfileStoreWithoutExternalProfiles);
+    expect(prepareRuntimeSecretsSnapshot).toHaveBeenCalledWith({
+      config: expect.not.objectContaining({
+        channels: expect.anything(),
+      }),
+      loadAuthStore: loadAuthProfileStoreWithoutExternalProfiles,
+    });
   });
 
   it("honors startup auth overrides before secret preflight gating", async () => {
@@ -309,15 +310,21 @@ describe("gateway startup config secret preflight", () => {
       }),
     });
 
-    expect(result.auth.mode).toBe("password");
-    expect(result.auth.password).toBe("override-password");
-    const preflightInput = callArg<{
-      config?: OpenClawConfig;
-      loadAuthStore?: unknown;
-    }>(prepareRuntimeSecretsSnapshot);
-    expect(preflightInput.config?.gateway?.auth?.mode).toBe("password");
-    expect(preflightInput.config?.gateway?.auth?.password).toBe("override-password");
-    expect(preflightInput.loadAuthStore).toBe(loadAuthProfileStoreWithoutExternalProfiles);
+    expect(result.auth).toMatchObject({
+      mode: "password",
+      password: "override-password",
+    });
+    expect(prepareRuntimeSecretsSnapshot).toHaveBeenNthCalledWith(1, {
+      config: expect.objectContaining({
+        gateway: expect.objectContaining({
+          auth: expect.objectContaining({
+            mode: "password",
+            password: "override-password",
+          }),
+        }),
+      }),
+      loadAuthStore: loadAuthProfileStoreWithoutExternalProfiles,
+    });
     expect(activateRuntimeSecretsSnapshot).toHaveBeenCalledTimes(1);
   });
 
@@ -337,15 +344,21 @@ describe("gateway startup config secret preflight", () => {
       }),
     });
 
-    expect(result.auth.mode).toBe("token");
-    expect(result.auth.token).toBe("startup-test-token");
+    expect(result.auth).toMatchObject({
+      mode: "token",
+      token: "startup-test-token",
+    });
     expect(prepareRuntimeSecretsSnapshot).toHaveBeenCalledTimes(1);
-    const preflightInput = callArg<{
-      config?: OpenClawConfig;
-      loadAuthStore?: unknown;
-    }>(prepareRuntimeSecretsSnapshot);
-    expect(preflightInput.config?.gateway?.auth?.token).toBe("startup-test-token");
-    expect(preflightInput.loadAuthStore).toBe(loadAuthProfileStoreWithoutExternalProfiles);
+    expect(prepareRuntimeSecretsSnapshot).toHaveBeenCalledWith({
+      config: expect.objectContaining({
+        gateway: expect.objectContaining({
+          auth: expect.objectContaining({
+            token: "startup-test-token",
+          }),
+        }),
+      }),
+      loadAuthStore: loadAuthProfileStoreWithoutExternalProfiles,
+    });
   });
 
   it("uses gateway auth strings resolved during startup preflight for bootstrap auth", async () => {
@@ -388,8 +401,10 @@ describe("gateway startup config secret preflight", () => {
       }),
     });
 
-    expect(result.auth.mode).toBe("token");
-    expect(result.auth.token).toBe("resolved-gateway-token");
+    expect(result.auth).toMatchObject({
+      mode: "token",
+      token: "resolved-gateway-token",
+    });
     expect(prepareRuntimeSecretsSnapshot).toHaveBeenCalledTimes(2);
   });
 });

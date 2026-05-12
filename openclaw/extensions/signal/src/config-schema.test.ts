@@ -71,24 +71,6 @@ describe("signal groups schema", () => {
     });
   });
 
-  it("accepts channel apiMode", () => {
-    for (const apiMode of ["auto", "native", "container"]) {
-      expectValidSignalConfig({ apiMode });
-    }
-  });
-
-  it("rejects per-account apiMode", () => {
-    const issues = expectInvalidSignalConfig({
-      accounts: {
-        primary: {
-          apiMode: "container",
-        },
-      },
-    });
-
-    expect(issues.some((issue) => issue.path.join(".") === "accounts.primary")).toBe(true);
-  });
-
   it("accepts top-level group overrides", () => {
     expectValidSignalConfig({
       groups: {
@@ -126,8 +108,6 @@ describe("signal groups schema", () => {
       },
     });
 
-    expect(issues.map((issue) => issue.path.join("."))).toContainEqual(
-      expect.stringMatching(/^groups/),
-    );
+    expect(issues.some((issue) => issue.path.join(".").startsWith("groups"))).toBe(true);
   });
 });

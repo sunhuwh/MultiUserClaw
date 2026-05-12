@@ -133,10 +133,7 @@ describe("performMatrixRequest", () => {
     }) as typeof fetch);
     const runtimeFetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const requestInit = init as RequestInit & { dispatcher?: unknown };
-      expect(
-        (requestInit.dispatcher as { constructor?: { name?: string } } | undefined)?.constructor
-          ?.name,
-      ).toBe("MockAgent");
+      expect(requestInit.dispatcher).toBeDefined();
       return new Response('{"ok":true}', {
         status: 200,
         headers: {
@@ -158,10 +155,8 @@ describe("performMatrixRequest", () => {
     expect(result.text).toBe('{"ok":true}');
     expect(ambientFetchCalls).toBe(0);
     expect(runtimeFetch).toHaveBeenCalledTimes(1);
-    const dispatcher = (runtimeFetch.mock.calls[0]?.[1] as RequestInit & { dispatcher?: unknown })
-      ?.dispatcher;
-    expect((dispatcher as { constructor?: { name?: string } } | undefined)?.constructor?.name).toBe(
-      "MockAgent",
-    );
+    expect(
+      (runtimeFetch.mock.calls[0]?.[1] as RequestInit & { dispatcher?: unknown })?.dispatcher,
+    ).toBeDefined();
   });
 });

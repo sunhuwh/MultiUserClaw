@@ -1,7 +1,5 @@
 import fs from "node:fs";
 import { createRequire } from "node:module";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
 import type { createJiti } from "jiti";
 import { toSafeImportPath } from "../shared/import-specifier.js";
 import { tryNativeRequireJavaScriptModule } from "./native-module-require.js";
@@ -49,6 +47,7 @@ export type PluginModuleLoaderStatsSnapshot = {
 
 const DEFAULT_PLUGIN_MODULE_LOADER_CACHE_ENTRIES = 128;
 const MAX_TRACKED_SOURCE_TRANSFORM_TARGETS = 24;
+const JITI_FACTORY_OVERRIDE_KEY = Symbol.for("openclaw.pluginModuleLoaderJitiFactoryOverride");
 const PLUGIN_SDK_IMPORT_SPECIFIER_PATTERN =
   /(?:\bfrom\s*["']|\bimport\s*\(\s*["']|\brequire\s*\(\s*["'])(?:openclaw|@openclaw)\/plugin-sdk(?:\/[^"']*)?["']/u;
 const requireForJiti = createRequire(import.meta.url);
@@ -105,6 +104,14 @@ export function resetPluginModuleLoaderStatsForTest(): void {
 }
 
 function loadCreateJitiLoaderFactory(): PluginModuleLoaderFactory {
+  const override = (
+    globalThis as typeof globalThis & {
+      [JITI_FACTORY_OVERRIDE_KEY]?: PluginModuleLoaderFactory;
+    }
+  )[JITI_FACTORY_OVERRIDE_KEY];
+  if (override) {
+    return override;
+  }
   if (createJitiLoaderFactory) {
     return createJitiLoaderFactory;
   }
@@ -120,13 +127,6 @@ export function createPluginModuleLoaderCache(
   maxEntries = DEFAULT_PLUGIN_MODULE_LOADER_CACHE_ENTRIES,
 ): PluginModuleLoaderCache {
   return new PluginLruCache<PluginModuleLoader>(maxEntries);
-}
-
-function toSourceTransformImportPath(specifier: string): string {
-  if (process.platform === "win32" && path.isAbsolute(specifier)) {
-    return pathToFileURL(specifier).href;
-  }
-  return toSafeImportPath(specifier);
 }
 
 function resolveDefaultPluginModuleLoaderConfig(
@@ -185,7 +185,7 @@ export function resolvePluginModuleLoaderCacheEntry(
 function createLazySourceTransformLoader(params: {
   loaderFilename: string;
   aliasMap: Record<string, string>;
-  sourceTransformTryNative: boolean;
+  tryNative: boolean;
   createLoader?: PluginModuleLoaderFactory;
 }): () => PluginModuleLoader {
   let loadWithSourceTransform: PluginModuleLoader | undefined;
@@ -197,7 +197,7 @@ function createLazySourceTransformLoader(params: {
       params.loaderFilename,
       {
         ...buildPluginLoaderJitiOptions(params.aliasMap),
-        tryNative: params.sourceTransformTryNative,
+        tryNative: params.tryNative,
       },
     );
     loadWithSourceTransform = new Proxy(jitiLoader, {
@@ -205,7 +205,7 @@ function createLazySourceTransformLoader(params: {
         const [first, ...rest] = argArray as [unknown, ...unknown[]];
         if (typeof first === "string") {
           return Reflect.apply(target, thisArg, [
-            toSourceTransformImportPath(first),
+            toSafeImportPath(first),
             ...rest,
           ] as never) as never;
         }
@@ -245,10 +245,7 @@ function createPluginModuleLoader(params: {
   tryNative: boolean;
   createLoader?: PluginModuleLoaderFactory;
 }): PluginModuleLoader {
-  const getLoadWithSourceTransform = createLazySourceTransformLoader({
-    ...params,
-    sourceTransformTryNative: params.tryNative,
-  });
+  const getLoadWithSourceTransform = createLazySourceTransformLoader(params);
   // When the caller has explicitly opted out of native loading (for example
   // `bundled-capability-runtime` in Vitest+dist mode, which depends on
   // jiti's alias rewriting to surface a narrow SDK slice), route every
@@ -273,7 +270,7 @@ function createPluginModuleLoader(params: {
   // handle.
   const getLoadWithAliasTransform = createLazySourceTransformLoader({
     ...params,
-    sourceTransformTryNative: false,
+    tryNative: false,
   });
   return ((target: string, ...rest: unknown[]) => {
     pluginModuleLoaderStats.calls += 1;
@@ -287,9 +284,6 @@ function createPluginModuleLoader(params: {
     }
     const native = tryNativeRequireJavaScriptModule(target, {
       allowWindows: true,
-      aliasMap: params.aliasMap,
-      fallbackOnMissingDependency: true,
-      fallbackOnNativeError: true,
     });
     if (native.ok) {
       pluginModuleLoaderStats.nativeHits += 1;

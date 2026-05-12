@@ -1,4 +1,3 @@
-import { getCachedLiveCatalogValue } from "openclaw/plugin-sdk/provider-catalog-shared";
 import type { ModelProviderConfig } from "openclaw/plugin-sdk/provider-model-shared";
 import { OLLAMA_DEFAULT_BASE_URL } from "./defaults.js";
 import { readProviderBaseUrl } from "./provider-base-url.js";
@@ -268,19 +267,8 @@ export async function resolveOllamaDiscoveryResult(params: {
   }
 
   const configuredBaseUrl = readProviderBaseUrl(explicit);
-  const quiet = !hasRealOllamaKey && !hasMeaningfulExplicitConfig;
-  const provider = await getCachedLiveCatalogValue({
-    keyParts: [
-      OLLAMA_PROVIDER_ID,
-      "models",
-      configuredBaseUrl ?? OLLAMA_DEFAULT_BASE_URL,
-      ollamaKey,
-      quiet,
-    ],
-    load: async () =>
-      await params.buildProvider(configuredBaseUrl, {
-        quiet,
-      }),
+  const provider = await params.buildProvider(configuredBaseUrl, {
+    quiet: !hasRealOllamaKey && !hasMeaningfulExplicitConfig,
   });
   if (provider.models?.length === 0 && !ollamaKey && !explicit?.apiKey) {
     return null;

@@ -1,7 +1,6 @@
 import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
 import {
   appendCatalogSupplementRows,
-  appendAuthenticatedCatalogRows,
   appendConfiguredProviderRows,
   appendConfiguredRows,
   appendDiscoveredRows,
@@ -89,10 +88,11 @@ export async function appendAllModelRowSources(
       }
       await appendDiscoveredRows({
         rows: params.rows,
-        models: params.registryModels ?? params.modelRegistry.getAll(),
+        models: params.modelRegistry.getAll(),
         modelRegistry: params.modelRegistry,
         context: params.context,
         resolveWithRegistry: false,
+        skipSuppression: true,
       });
     }
     return { requiresRegistryFallback: false };
@@ -174,15 +174,11 @@ export async function appendConfiguredModelRowSources(params: {
   context: RowBuilderContext;
 }): Promise<void> {
   await appendConfiguredRows(params);
-  const seenKeys = new Set(params.rows.map((row) => row.key));
-  await appendConfiguredProviderRows({
-    rows: params.rows,
-    context: params.context,
-    seenKeys,
-  });
-  await appendAuthenticatedCatalogRows({
-    rows: params.rows,
-    context: params.context,
-    seenKeys,
-  });
+  if (params.context.filter.provider) {
+    await appendConfiguredProviderRows({
+      rows: params.rows,
+      context: params.context,
+      seenKeys: new Set(params.rows.map((row) => row.key)),
+    });
+  }
 }

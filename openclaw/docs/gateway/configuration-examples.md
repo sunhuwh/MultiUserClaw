@@ -15,7 +15,7 @@ Examples below are aligned with the current config schema. For the exhaustive re
 
 ```json5
 {
-  agents: { defaults: { workspace: "~/.openclaw/workspace" } },
+  agent: { workspace: "~/.openclaw/workspace" },
   channels: { whatsapp: { allowFrom: ["+15555550123"] } },
 }
 ```
@@ -26,21 +26,14 @@ Save to `~/.openclaw/openclaw.json` and you can DM the bot from that number.
 
 ```json5
 {
-  agents: {
-    defaults: {
-      workspace: "~/.openclaw/workspace",
-      model: { primary: "anthropic/claude-sonnet-4-6" },
-    },
-    list: [
-      {
-        id: "main",
-        identity: {
-          name: "Clawd",
-          theme: "helpful assistant",
-          emoji: "🦞",
-        },
-      },
-    ],
+  identity: {
+    name: "Clawd",
+    theme: "helpful assistant",
+    emoji: "🦞",
+  },
+  agent: {
+    workspace: "~/.openclaw/workspace",
+    model: { primary: "anthropic/claude-sonnet-4-6" },
   },
   channels: {
     whatsapp: {
@@ -90,7 +83,12 @@ Save to `~/.openclaw/openclaw.json` and you can DM the bot from that number.
     },
   },
 
-  // Identity is per agent — set it on agents.list[].identity below.
+  // Identity
+  identity: {
+    name: "Samantha",
+    theme: "helpful sloth",
+    emoji: "🦥",
+  },
 
   // Logging
   logging: {
@@ -309,11 +307,6 @@ Save to `~/.openclaw/openclaw.json` and you can DM the bot from that number.
       {
         id: "main",
         default: true,
-        identity: {
-          name: "Samantha",
-          theme: "helpful sloth",
-          emoji: "🦥",
-        },
         // inherits defaults.skills -> github, weather
         groupChat: {
           mentionPatterns: ["@openclaw", "openclaw"],
@@ -454,12 +447,10 @@ Save to `~/.openclaw/openclaw.json` and you can DM the bot from that number.
     allowBundled: ["gemini", "peekaboo"],
     load: {
       extraDirs: ["~/Projects/agent-scripts/skills"],
-      allowSymlinkTargets: ["~/Projects/agent-scripts/skills"],
     },
     install: {
       preferBrew: true,
       nodeManager: "npm", // npm | pnpm | yarn | bun
-      allowUploadedArchives: false,
     },
     entries: {
       "image-lab": {
@@ -472,26 +463,6 @@ Save to `~/.openclaw/openclaw.json` and you can DM the bot from that number.
   },
 }
 ```
-
-### Symlinked sibling skill repo
-
-Use this when a built-in skill root contains a symlink into a sibling repo, for
-example `~/.agents/skills/manager -> ~/Projects/manager/skills`.
-
-```json5
-{
-  skills: {
-    load: {
-      extraDirs: ["~/Projects/manager/skills"],
-      allowSymlinkTargets: ["~/Projects/manager/skills"],
-    },
-  },
-}
-```
-
-- `extraDirs` scans the sibling repo as an explicit skill root.
-- `allowSymlinkTargets` lets symlinked skill folders resolve into that trusted
-  real target root without allowing arbitrary symlink escapes.
 
 ## Common patterns
 
@@ -520,7 +491,7 @@ example `~/.agents/skills/manager -> ~/Projects/manager/skills`.
 
 ```json5
 {
-  agents: { defaults: { workspace: "~/.openclaw/workspace" } },
+  agent: { workspace: "~/.openclaw/workspace" },
   channels: {
     whatsapp: { allowFrom: ["+15555550123"] },
     telegram: {
@@ -561,7 +532,7 @@ public-key upgrades still require manual approval.
 
 ### Secure DM mode (shared inbox / multi-user DMs)
 
-If more than one person can DM your bot (multiple entries in `allowFrom`, pairing approvals for multiple people, or `dmPolicy: "open"`), enable **secure DM mode** so DMs from different senders don't share one context by default:
+If more than one person can DM your bot (multiple entries in `allowFrom`, pairing approvals for multiple people, or `dmPolicy: "open"`), enable **secure DM mode** so DMs from different senders don’t share one context by default:
 
 ```json5
 {
@@ -612,13 +583,11 @@ Only enable direct mutable name/email/nick matching with each channel's `dangero
       },
     },
   },
-  agents: {
-    defaults: {
-      workspace: "~/.openclaw/workspace",
-      model: {
-        primary: "anthropic/claude-opus-4-6",
-        fallbacks: ["minimax/MiniMax-M2.7"],
-      },
+  agent: {
+    workspace: "~/.openclaw/workspace",
+    model: {
+      primary: "anthropic/claude-opus-4-6",
+      fallbacks: ["minimax/MiniMax-M2.7"],
     },
   },
 }
@@ -628,20 +597,13 @@ Only enable direct mutable name/email/nick matching with each channel's `dangero
 
 ```json5
 {
-  agents: {
-    defaults: {
-      workspace: "~/work-openclaw",
-      elevatedDefault: "off",
-    },
-    list: [
-      {
-        id: "main",
-        identity: {
-          name: "WorkBot",
-          theme: "professional assistant",
-        },
-      },
-    ],
+  identity: {
+    name: "WorkBot",
+    theme: "professional assistant",
+  },
+  agent: {
+    workspace: "~/work-openclaw",
+    elevated: { enabled: false },
   },
   channels: {
     slack: {
@@ -660,11 +622,9 @@ Only enable direct mutable name/email/nick matching with each channel's `dangero
 
 ```json5
 {
-  agents: {
-    defaults: {
-      workspace: "~/.openclaw/workspace",
-      model: { primary: "lmstudio/my-local-model" },
-    },
+  agent: {
+    workspace: "~/.openclaw/workspace",
+    model: { primary: "lmstudio/my-local-model" },
   },
   models: {
     mode: "merge",
@@ -694,7 +654,7 @@ Only enable direct mutable name/email/nick matching with each channel's `dangero
 
 - If you set `dmPolicy: "open"`, the matching `allowFrom` list must include `"*"`.
 - Provider IDs differ (phone numbers, user IDs, channel IDs). Use the provider docs to confirm the format.
-- Optional sections to add later: `web`, `browser`, `ui`, `discovery`, `plugins`, `talk`, `signal`, `imessage`.
+- Optional sections to add later: `web`, `browser`, `ui`, `discovery`, `canvasHost`, `talk`, `signal`, `imessage`.
 - See [Providers](/providers) and [Troubleshooting](/gateway/troubleshooting) for deeper setup notes.
 
 ## Related

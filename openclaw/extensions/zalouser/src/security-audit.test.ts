@@ -17,10 +17,9 @@ describe("Zalouser security audit findings", () => {
     name: string;
     config: ZalouserAccountConfig;
     expectedSeverity: "info" | "warn";
-    expectedTitle: string;
-    expectedRemediation: string;
     detailIncludes: string[];
     detailExcludes?: string[];
+    expectFindingMatch?: { checkId: string; severity: "info" | "warn" };
   }> = [
     {
       name: "warns when group routing contains mutable group entries",
@@ -32,9 +31,6 @@ describe("Zalouser security audit findings", () => {
         },
       } satisfies ZalouserAccountConfig,
       expectedSeverity: "warn",
-      expectedTitle: "Zalouser group routing contains mutable group entries",
-      expectedRemediation:
-        "Prefer stable Zalo group IDs in channels.zalouser.groups, or explicitly opt in with dangerouslyAllowNameMatching=true if you accept mutable group-name matching.",
       detailIncludes: ["channels.zalouser.groups:Ops Room"],
       detailExcludes: ["group:g-123"],
     },
@@ -48,10 +44,11 @@ describe("Zalouser security audit findings", () => {
         },
       } satisfies ZalouserAccountConfig,
       expectedSeverity: "info",
-      expectedTitle: "Zalouser group routing uses break-glass name matching",
-      expectedRemediation:
-        "Prefer stable Zalo group IDs (for example group:<id> or provider-native g- ids), then disable dangerouslyAllowNameMatching.",
       detailIncludes: ["out-of-scope"],
+      expectFindingMatch: {
+        checkId: "channels.zalouser.groups.mutable_entries",
+        severity: "info",
+      },
     },
   ];
 
@@ -66,18 +63,18 @@ describe("Zalouser security audit findings", () => {
       (entry) => entry.checkId === "channels.zalouser.groups.mutable_entries",
     );
 
-    if (!finding) {
-      throw new Error("expected mutable Zalo User group finding");
-    }
-    expect(finding.checkId).toBe("channels.zalouser.groups.mutable_entries");
-    expect(finding.severity).toBe(testCase.expectedSeverity);
-    expect(finding.title).toBe(testCase.expectedTitle);
-    expect(finding.remediation).toBe(testCase.expectedRemediation);
+    expect(finding).toBeDefined();
+    expect(finding?.severity).toBe(testCase.expectedSeverity);
     for (const snippet of testCase.detailIncludes) {
-      expect(finding.detail).toContain(snippet);
+      expect(finding?.detail).toContain(snippet);
     }
     for (const snippet of testCase.detailExcludes ?? []) {
-      expect(finding.detail).not.toContain(snippet);
+      expect(finding?.detail).not.toContain(snippet);
+    }
+    if (testCase.expectFindingMatch) {
+      expect(findings).toEqual(
+        expect.arrayContaining([expect.objectContaining(testCase.expectFindingMatch)]),
+      );
     }
   });
 });

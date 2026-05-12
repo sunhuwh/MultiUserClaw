@@ -1,18 +1,16 @@
 import { ChannelType } from "discord-api-types/v10";
 import { recordChannelActivity } from "openclaw/plugin-sdk/channel-activity-runtime";
-import type { MarkdownTableMode, OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { MarkdownTableMode, OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import { resolveMarkdownTableMode } from "openclaw/plugin-sdk/markdown-table-runtime";
 import type { OutboundMediaAccess, PollInput } from "openclaw/plugin-sdk/media-runtime";
 import { requireRuntimeConfig } from "openclaw/plugin-sdk/plugin-config-runtime";
 import { resolveChunkMode, type ChunkMode } from "openclaw/plugin-sdk/reply-chunking";
 import type { RetryConfig } from "openclaw/plugin-sdk/retry-runtime";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { convertMarkdownTables } from "openclaw/plugin-sdk/text-chunking";
+import { convertMarkdownTables, normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import { resolveDiscordAccount } from "./accounts.js";
 import { createChannelMessage, createThread, type RequestClient } from "./internal/discord.js";
 import { rewriteDiscordKnownMentions } from "./mentions.js";
 import { parseAndResolveRecipient } from "./recipient-resolution.js";
-import { createDiscordSendResult, type DiscordReceiptResultSource } from "./send.receipt.js";
 import {
   buildDiscordMessageRequest,
   buildDiscordSendError,
@@ -57,7 +55,10 @@ type DiscordClientRequest = ReturnType<typeof createDiscordClient>["request"];
 
 const DEFAULT_DISCORD_MEDIA_MAX_MB = 100;
 
-type DiscordChannelMessageResult = DiscordReceiptResultSource;
+type DiscordChannelMessageResult = {
+  id?: string | null;
+  channel_id?: string | null;
+};
 
 async function sendDiscordThreadTextChunks(params: {
   rest: RequestClient;
@@ -104,24 +105,11 @@ function isForumLikeType(channelType?: number): boolean {
 function toDiscordSendResult(
   result: DiscordChannelMessageResult,
   fallbackChannelId: string,
-  params: {
-    kind?: Parameters<typeof createDiscordSendResult>[0]["kind"];
-    threadId?: string | number;
-    replyToId?: string;
-  } = {},
 ): DiscordSendResult {
-  const resultParams: Parameters<typeof createDiscordSendResult>[0] = {
-    result,
-    fallbackChannelId,
-    kind: params.kind ?? "text",
+  return {
+    messageId: result.id || "unknown",
+    channelId: result.channel_id ?? fallbackChannelId,
   };
-  if (params.threadId != null) {
-    resultParams.threadId = params.threadId;
-  }
-  if (params.replyToId) {
-    resultParams.replyToId = params.replyToId;
-  }
-  return createDiscordSendResult(resultParams);
 }
 
 async function resolveDiscordSendTarget(
@@ -290,11 +278,10 @@ export async function sendMessageDiscord(
         channel_id: resultChannelId,
       },
       channelId,
-      { kind: opts.mediaUrl ? "media" : "text", threadId },
     );
   }
 
-  let result: DiscordChannelMessageResult;
+  let result: { id: string; channel_id: string } | { id: string | null; channel_id: string };
   try {
     if (opts.mediaUrl) {
       result = await sendDiscordMedia(
@@ -346,10 +333,7 @@ export async function sendMessageDiscord(
     accountId: accountInfo.accountId,
     direction: "outbound",
   });
-  return toDiscordSendResult(result, channelId, {
-    kind: opts.mediaUrl ? "media" : opts.components || opts.embeds ? "card" : "text",
-    replyToId: opts.replyTo,
-  });
+  return toDiscordSendResult(result, channelId);
 }
 
 export async function sendStickerDiscord(
@@ -372,7 +356,7 @@ export async function sendStickerDiscord(
       }),
     "sticker",
   )) as { id: string; channel_id: string };
-  return toDiscordSendResult(res, channelId, { kind: "card" });
+  return toDiscordSendResult(res, channelId);
 }
 
 export async function sendPollDiscord(
@@ -400,7 +384,7 @@ export async function sendPollDiscord(
       }),
     "poll",
   )) as { id: string; channel_id: string };
-  return toDiscordSendResult(res, channelId, { kind: "card" });
+  return toDiscordSendResult(res, channelId);
 }
 
 async function resolveDiscordStructuredSendContext(

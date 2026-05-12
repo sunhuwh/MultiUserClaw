@@ -68,6 +68,6 @@ describe("engine import boundary", () => {
       }
     }
 
-    expect(offenders).toStrictEqual([]);
+    expect(offenders).toEqual([]);
   });
 });

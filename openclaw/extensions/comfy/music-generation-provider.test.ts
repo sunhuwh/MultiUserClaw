@@ -1,5 +1,5 @@
 import { expectExplicitMusicGenerationCapabilities } from "openclaw/plugin-sdk/provider-test-contracts";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildComfyMusicGenerationProvider } from "./music-generation-provider.js";
 import { _setComfyFetchGuardForTesting } from "./workflow-runtime.js";
 
@@ -8,11 +8,6 @@ const { fetchWithSsrFGuardMock } = vi.hoisted(() => ({
 }));
 
 describe("comfy music-generation provider", () => {
-  afterEach(() => {
-    _setComfyFetchGuardForTesting(null);
-    vi.clearAllMocks();
-  });
-
   it("registers the workflow model", () => {
     const provider = buildComfyMusicGenerationProvider();
 

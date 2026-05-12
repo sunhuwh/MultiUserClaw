@@ -44,8 +44,11 @@ describe("createOpenClawCodingTools cron scope", () => {
     });
 
     expect(tools.map((tool) => tool.name)).toContain("cron");
-    const [options] = mocks.createOpenClawToolsOptions.mock.calls[0] ?? [];
-    expect(options?.cronSelfRemoveOnlyJobId).toBe("job-current");
+    expect(mocks.createOpenClawToolsOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cronSelfRemoveOnlyJobId: "job-current",
+      }),
+    );
   });
 
   it("does not scope ordinary owner cron sessions", () => {
@@ -55,7 +58,10 @@ describe("createOpenClawCodingTools cron scope", () => {
       senderIsOwner: true,
     });
 
-    const [options] = mocks.createOpenClawToolsOptions.mock.calls[0] ?? [];
-    expect(options?.cronSelfRemoveOnlyJobId).toBeUndefined();
+    expect(mocks.createOpenClawToolsOptions).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        cronSelfRemoveOnlyJobId: expect.any(String),
+      }),
+    );
   });
 });

@@ -5,7 +5,7 @@ import {
   resolveModelRefFromString,
 } from "../../agents/model-selection.js";
 import { resolveProviderIdForAuth } from "../../agents/provider-auth-aliases.js";
-import type { OpenClawConfig } from "../../config/config.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { resolveProfileOverride } from "./directive-handling.auth-profile.js";
 import type { InlineDirectives } from "./directive-handling.parse.js";
 import { type ModelDirectiveSelection, resolveModelDirectiveSelection } from "./model-selection.js";
@@ -80,6 +80,7 @@ export function resolveModelSelectionFromDirective(params: {
         defaultModel: params.defaultModel,
         aliasIndex: params.aliasIndex,
         allowedModelKeys: params.allowedModelKeys,
+        rawRuntime: params.directives.rawModelRuntime,
       })
     : null;
   const useStoredNumericProfile =
@@ -131,6 +132,7 @@ export function resolveModelSelectionFromDirective(params: {
       defaultModel: params.defaultModel,
       aliasIndex: params.aliasIndex,
       allowedModelKeys: params.allowedModelKeys,
+      rawRuntime: params.directives.rawModelRuntime,
     });
 
     if (resolved.error) {

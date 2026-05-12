@@ -119,11 +119,6 @@ export async function resolveNodeExecutionTarget(
     throw err;
   }
   const nodeInfo = nodes.find((entry) => entry.nodeId === nodeId);
-  if (nodeInfo?.connected === false) {
-    throw new Error(
-      `exec host=node requires a connected node (${nodeId} is currently disconnected). Start or reconnect the companion app or node host, or select a connected node.`,
-    );
-  }
   const declaredCommands = Array.isArray(nodeInfo?.commands) ? nodeInfo.commands : [];
   const supportsSystemRun = declaredCommands.includes("system.run");
   if (!supportsSystemRun) {
@@ -153,10 +148,6 @@ export function buildNodeSystemRunInvoke(params: {
   cwd: string | undefined;
   agentId: string | undefined;
   sessionKey: string | undefined;
-  turnSourceChannel?: string;
-  turnSourceTo?: string;
-  turnSourceAccountId?: string;
-  turnSourceThreadId?: string | number;
   approved?: boolean;
   approvalDecision?: "allow-once" | "allow-always" | null;
   runId?: string;
@@ -178,14 +169,6 @@ export function buildNodeSystemRunInvoke(params: {
       timeoutMs,
       agentId: params.agentId,
       sessionKey: params.sessionKey,
-      ...(params.turnSourceChannel != null ? { turnSourceChannel: params.turnSourceChannel } : {}),
-      ...(params.turnSourceTo != null ? { turnSourceTo: params.turnSourceTo } : {}),
-      ...(params.turnSourceAccountId != null
-        ? { turnSourceAccountId: params.turnSourceAccountId }
-        : {}),
-      ...(params.turnSourceThreadId != null
-        ? { turnSourceThreadId: params.turnSourceThreadId }
-        : {}),
       approved: params.approved,
       approvalDecision: params.approvalDecision ?? undefined,
       runId: params.runId ?? undefined,
@@ -259,10 +242,9 @@ function buildLocalPreparedNodeRun(params: {
   request: ExecuteNodeHostCommandParams;
   target: NodeExecutionTarget;
 }): PreparedNodeRun {
-  const rawCommand = formatExecCommand(params.target.argv);
   const command = resolveSystemRunCommandRequest({
     command: params.target.argv,
-    rawCommand,
+    rawCommand: params.request.command,
   });
   if (!command.ok) {
     throw new Error(command.message);
@@ -271,7 +253,7 @@ function buildLocalPreparedNodeRun(params: {
     throw new Error("command required");
   }
   const commandText = formatExecCommand(command.argv);
-  const previewText = params.request.command.trim() || command.previewText?.trim();
+  const previewText = command.previewText?.trim();
   const commandPreview = previewText && previewText !== commandText ? previewText : null;
   const plan = {
     argv: [...command.argv],

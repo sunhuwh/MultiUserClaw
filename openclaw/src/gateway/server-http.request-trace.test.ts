@@ -56,6 +56,7 @@ describe("gateway HTTP request trace scope", () => {
       run: async () => {
         setLoggerOverride({ level: "info", file: logPath });
         const httpServer = createGatewayHttpServer({
+          canvasHost: null,
           clients: new Set(),
           controlUiEnabled: false,
           controlUiBasePath: "/__control__",

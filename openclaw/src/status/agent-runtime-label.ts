@@ -32,7 +32,10 @@ export function resolveAgentRuntimeLabel(args: {
     return backend ? `${acpAgent} (acp/${backend})` : `${acpAgent} (acp)`;
   }
 
-  const runtimeRaw = normalizeOptionalString(args.resolvedHarness);
+  const runtimeRaw =
+    normalizeOptionalString(args.resolvedHarness) ??
+    normalizeOptionalString(args.sessionEntry?.agentRuntimeOverride) ??
+    normalizeOptionalString(args.sessionEntry?.agentHarnessId);
   const runtime = normalizeOptionalLowercaseString(runtimeRaw);
   if (runtime && runtime !== "auto" && runtime !== "default") {
     return AGENT_RUNTIME_LABELS[runtime] ?? sanitizeTerminalText(runtimeRaw ?? runtime);

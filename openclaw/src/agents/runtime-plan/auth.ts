@@ -1,5 +1,4 @@
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { shouldRouteOpenAIPiThroughCodexAuthProvider } from "../openai-codex-routing.js";
 import { normalizeEmbeddedAgentRuntime } from "../pi-embedded-runner/runtime.js";
 import { resolveProviderIdForAuth } from "../provider-auth-aliases.js";
 import type { AgentRuntimeAuthPlan } from "./types.js";
@@ -42,19 +41,8 @@ export function buildAgentRuntimeAuthPlan(params: {
     params.allowHarnessAuthProfileForwarding !== false &&
     harnessProviderForAuth &&
     harnessProviderForAuth === authProfileProviderForAuth;
-  const openAIPiCanForwardCodexProfile = shouldRouteOpenAIPiThroughCodexAuthProvider({
-    provider: providerForAuth,
-    harnessRuntime: params.harnessRuntime,
-    agentHarnessId: params.harnessId,
-    authProfileProvider: authProfileProviderForAuth,
-    authProfileId: params.sessionAuthProfileId,
-    config: params.config,
-    workspaceDir: params.workspaceDir,
-  });
-  const providerCanForwardProfile =
-    !harnessProviderForAuth && providerForAuth === authProfileProviderForAuth;
   const canForwardProfile =
-    providerCanForwardProfile || harnessCanForwardProfile || openAIPiCanForwardCodexProfile;
+    providerForAuth === authProfileProviderForAuth || harnessCanForwardProfile;
 
   return {
     providerForAuth,

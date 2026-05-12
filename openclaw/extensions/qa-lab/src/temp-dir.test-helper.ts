@@ -1,23 +1,20 @@
-import {
-  tempWorkspace,
-  resolvePreferredOpenClawTmpDir,
-  type TempWorkspace,
-} from "openclaw/plugin-sdk/temp-path";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
 
 export function createTempDirHarness() {
-  const tempDirs: TempWorkspace[] = [];
+  const tempDirs: string[] = [];
 
   return {
     async cleanup() {
-      await Promise.all(tempDirs.splice(0).map((dir) => dir.cleanup()));
+      await Promise.all(
+        tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })),
+      );
     },
     async makeTempDir(prefix: string) {
-      const dir = await tempWorkspace({
-        rootDir: resolvePreferredOpenClawTmpDir(),
-        prefix,
-      });
+      const dir = await fs.mkdtemp(path.join(resolvePreferredOpenClawTmpDir(), prefix));
       tempDirs.push(dir);
-      return dir.dir;
+      return dir;
     },
   };
 }

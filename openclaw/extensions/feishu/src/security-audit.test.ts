@@ -47,13 +47,15 @@ describe("Feishu security audit findings", () => {
     },
   ])("$name", ({ cfg, expectedFinding, expectedNoFinding }) => {
     const findings = collectFeishuSecurityAuditFindings({ cfg });
-    const findingKeys = findings.map((finding) => `${finding.checkId}:${finding.severity}`);
-    const checkIds = findings.map((finding) => finding.checkId);
     if (expectedFinding) {
-      expect(findingKeys).toContain(`${expectedFinding}:warn`);
+      expect(
+        findings.some(
+          (finding) => finding.checkId === expectedFinding && finding.severity === "warn",
+        ),
+      ).toBe(true);
     }
     if (expectedNoFinding) {
-      expect(checkIds).not.toContain(expectedNoFinding);
+      expect(findings.some((finding) => finding.checkId === expectedNoFinding)).toBe(false);
     }
   });
 });

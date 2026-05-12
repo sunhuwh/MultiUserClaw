@@ -31,19 +31,6 @@ async function waitForPluginEventHandlers(): Promise<void> {
   });
 }
 
-function expectNoCleanupFailures(result: Awaited<ReturnType<typeof runPluginHostCleanup>>): void {
-  expect(result.failures).toEqual([]);
-}
-
-function requireFailureByHookId(
-  result: Awaited<ReturnType<typeof runPluginHostCleanup>>,
-  hookId: string,
-) {
-  const failure = result.failures.find((entry) => entry.hookId === hookId);
-  expect(failure).toBeTruthy();
-  return failure;
-}
-
 describe("plugin run context lifecycle", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -70,7 +57,7 @@ describe("plugin run context lifecycle", () => {
     setActivePluginRegistry(createEmptyPluginRegistry());
 
     expect(
-      capturedApi?.runContext?.setRunContext({
+      capturedApi?.setRunContext({
         runId: "stale-run",
         namespace: "state",
         value: { stale: true },
@@ -89,7 +76,7 @@ describe("plugin run context lifecycle", () => {
         patch: { runId: "stale-run", namespace: "state", value: { live: true } },
       }),
     ).toBe(true);
-    capturedApi?.runContext?.clearRunContext({ runId: "stale-run", namespace: "state" });
+    capturedApi?.clearRunContext({ runId: "stale-run", namespace: "state" });
     expect(
       getPluginRunContext({
         pluginId: "stale-run-context-plugin",
@@ -117,16 +104,16 @@ describe("plugin run context lifecycle", () => {
     setActivePluginRegistry(registry.registry);
 
     expect(
-      capturedApi?.runContext?.setRunContext({
+      capturedApi?.setRunContext({
         runId: "restored-run",
         namespace: "state",
         value: { restored: true },
       }),
     ).toBe(true);
     expect(
-      capturedApi?.runContext?.getRunContext({
-        runId: "restored-run",
-        namespace: "state",
+      getPluginRunContext({
+        pluginId: "restored-run-context-plugin",
+        get: { runId: "restored-run", namespace: "state" },
       }),
     ).toEqual({ restored: true });
   });
@@ -614,13 +601,13 @@ describe("plugin run context lifecycle", () => {
       },
     });
 
-    expectNoCleanupFailures(
-      await runPluginHostCleanup({
+    await expect(
+      runPluginHostCleanup({
         reason: "disable",
         pluginId: "scheduler-plugin",
         preserveSchedulerJobIds: new Set(["job-preserved"]),
       }),
-    );
+    ).resolves.toMatchObject({ failures: [] });
     expect(cleanup).not.toHaveBeenCalled();
     expect(listPluginSessionSchedulerJobs("scheduler-plugin")).toHaveLength(1);
   });
@@ -634,13 +621,13 @@ describe("plugin run context lifecycle", () => {
       }),
     ).toBe(true);
 
-    expectNoCleanupFailures(
-      await runPluginHostCleanup({
+    await expect(
+      runPluginHostCleanup({
         registry,
         pluginId: "restart-context-plugin",
         reason: "restart",
       }),
-    );
+    ).resolves.toMatchObject({ failures: [] });
     expect(
       getPluginRunContext({
         pluginId: "restart-context-plugin",
@@ -648,13 +635,13 @@ describe("plugin run context lifecycle", () => {
       }),
     ).toEqual({ keep: true });
 
-    expectNoCleanupFailures(
-      await runPluginHostCleanup({
+    await expect(
+      runPluginHostCleanup({
         registry,
         pluginId: "restart-context-plugin",
         reason: "disable",
       }),
-    );
+    ).resolves.toMatchObject({ failures: [] });
     expect(
       getPluginRunContext({
         pluginId: "restart-context-plugin",
@@ -715,14 +702,14 @@ describe("plugin run context lifecycle", () => {
             return undefined;
           });
 
-          expectNoCleanupFailures(
-            await runPluginHostCleanup({
+          await expect(
+            runPluginHostCleanup({
               cfg: tempConfig,
               registry: registry.registry,
               pluginId: "restart-state-fixture",
               reason: "restart",
             }),
-          );
+          ).resolves.toMatchObject({ failures: [] });
 
           const stored = loadSessionStore(storePath, { skipCache: true });
           expect(stored["agent:main:main"]?.pluginExtensions).toEqual({
@@ -774,10 +761,14 @@ describe("plugin run context lifecycle", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(cleanup).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(PLUGIN_HOST_CLEANUP_TIMEOUT_MS);
-    const result = await resultPromise;
-    expect(result.failures).toHaveLength(1);
-    expect(result.failures[0]?.pluginId).toBe("hung-cleanup-plugin");
-    expect(result.failures[0]?.hookId).toBe("scheduler:job-hung");
+    await expect(resultPromise).resolves.toMatchObject({
+      failures: [
+        {
+          pluginId: "hung-cleanup-plugin",
+          hookId: "scheduler:job-hung",
+        },
+      ],
+    });
   });
 
   it("bounds session, runtime, and scheduler cleanup callbacks so cleanup keeps moving", async () => {
@@ -818,16 +809,22 @@ describe("plugin run context lifecycle", () => {
     for (let index = 0; index < 3; index += 1) {
       await vi.advanceTimersByTimeAsync(PLUGIN_HOST_CLEANUP_TIMEOUT_MS + 1);
     }
-    const result = await cleanupPromise;
-    expect(result.failures).toHaveLength(3);
-    for (const hookId of [
-      "session:state",
-      "runtime:runtime-cleanup",
-      "scheduler:scheduler-cleanup",
-    ]) {
-      const failure = requireFailureByHookId(result, hookId);
-      expect(failure?.pluginId).toBe("hanging-cleanup-fixture");
-    }
+    await expect(cleanupPromise).resolves.toMatchObject({
+      failures: [
+        expect.objectContaining({
+          pluginId: "hanging-cleanup-fixture",
+          hookId: "session:state",
+        }),
+        expect.objectContaining({
+          pluginId: "hanging-cleanup-fixture",
+          hookId: "runtime:runtime-cleanup",
+        }),
+        expect.objectContaining({
+          pluginId: "hanging-cleanup-fixture",
+          hookId: "scheduler:scheduler-cleanup",
+        }),
+      ],
+    });
   });
 
   it("blocks setting run context after a run is closed", () => {

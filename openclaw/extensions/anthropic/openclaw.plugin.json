@@ -5,7 +5,7 @@
   },
   "enabledByDefault": true,
   "providers": ["anthropic"],
-  "providerCatalogEntry": "./provider-discovery.ts",
+  "providerDiscoveryEntry": "./provider-discovery.ts",
   "modelSupport": {
     "modelPrefixes": ["claude-"]
   },

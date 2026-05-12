@@ -8,7 +8,6 @@ import type {
   ChannelMessageToolDiscovery,
 } from "openclaw/plugin-sdk/channel-contract";
 import { createChatChannelPlugin } from "openclaw/plugin-sdk/channel-core";
-import { createChannelMessageAdapterFromOutbound } from "openclaw/plugin-sdk/channel-message";
 import { createPairingPrefixStripper } from "openclaw/plugin-sdk/channel-pairing";
 import {
   createChannelDirectoryAdapter,
@@ -20,8 +19,8 @@ import {
   createComputedAccountStatusAdapter,
   createDefaultChannelRuntimeState,
 } from "openclaw/plugin-sdk/status-helpers";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { resolveTargetsWithOptionalToken } from "openclaw/plugin-sdk/target-resolver-runtime";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import {
   listDiscordAccountIds,
   resolveDiscordAccount,
@@ -58,7 +57,6 @@ import {
   loadDiscordResolveChannelsModule,
   loadDiscordResolveUsersModule,
   loadDiscordSendModule,
-  loadDiscordTargetResolverModule,
   loadDiscordThreadBindingsManagerModule,
 } from "./channel.loaders.js";
 import { shouldSuppressLocalDiscordExecApprovalPrompt } from "./exec-approvals.js";
@@ -81,26 +79,9 @@ import { discordSetupAdapter } from "./setup-adapter.js";
 import { createDiscordPluginBase, discordConfigAdapter } from "./shared.js";
 import { collectDiscordStatusIssues } from "./status-issues.js";
 import { parseDiscordTarget } from "./target-parsing.js";
+import { resolveDiscordTarget } from "./target-resolver.js";
 
 const DISCORD_ACCOUNT_STARTUP_STAGGER_MS = 10_000;
-const discordMessageAdapter = createChannelMessageAdapterFromOutbound({
-  id: "discord",
-  outbound: discordOutbound,
-  live: {
-    capabilities: {
-      draftPreview: true,
-      previewFinalization: true,
-      progressUpdates: true,
-    },
-    finalizer: {
-      capabilities: {
-        finalEdit: true,
-        normalFallback: true,
-        discardPending: true,
-      },
-    },
-  },
-});
 
 function startDiscordStartupProbe(params: {
   accountId: string;
@@ -199,12 +180,6 @@ const discordMessageActions = {
   ) =>
     resolveRuntimeDiscordMessageActions()?.extractToolSend?.(ctx) ??
     discordMessageActionsImpl.extractToolSend?.(ctx) ??
-    null,
-  prepareSendPayload: (
-    ctx: Parameters<NonNullable<ChannelMessageActionAdapter["prepareSendPayload"]>>[0],
-  ) =>
-    resolveRuntimeDiscordMessageActions()?.prepareSendPayload?.(ctx) ??
-    discordMessageActionsImpl.prepareSendPayload?.(ctx) ??
     null,
   handleAction: async (
     ctx: Parameters<NonNullable<ChannelMessageActionAdapter["handleAction"]>>[0],
@@ -327,27 +302,20 @@ export const discordPlugin: ChannelPlugin<ResolvedDiscordAccount, DiscordProbe> 
         targetResolver: {
           looksLikeId: looksLikeDiscordTargetId,
           hint: "<channelId|user:ID|channel:ID>",
-          resolveTarget: async ({ cfg, accountId, input, normalized, preferredKind }) => {
-            const resolved = await (
-              await loadDiscordTargetResolverModule()
-            ).resolveDiscordTarget(
+          resolveTarget: async ({ cfg, accountId, input, preferredKind }) => {
+            const target = await resolveDiscordTarget(
               input,
-              { cfg, accountId },
-              preferredKind === "user"
-                ? { defaultKind: "user" }
-                : preferredKind === "channel" || preferredKind === "group"
-                  ? { defaultKind: "channel" }
-                  : {},
+              { cfg, accountId: accountId ?? undefined },
+              { defaultKind: preferredKind === "user" ? "user" : "channel" },
             );
-            if (!resolved) {
-              return null;
-            }
-            return {
-              to: resolved.normalized,
-              kind: resolved.kind === "user" ? "user" : "channel",
-              display: resolved.raw,
-              source: resolved.normalized === normalized ? "normalized" : "directory",
-            };
+            return target
+              ? {
+                  to: target.normalized,
+                  kind: target.kind,
+                  display: target.raw,
+                  source: "normalized",
+                }
+              : null;
           },
         },
       },
@@ -363,7 +331,6 @@ export const discordPlugin: ChannelPlugin<ResolvedDiscordAccount, DiscordProbe> 
           listGroupsLive: (runtime) => runtime.listDiscordDirectoryGroupsLive,
         }),
       }),
-      message: discordMessageAdapter,
       resolver: {
         resolveTargets: async ({ cfg, accountId, inputs, kind }) => {
           const account = resolveDiscordAccount({ cfg, accountId });

@@ -56,7 +56,6 @@ export type ReplyPayloadMetadata = {
    * assistant source replies are message-tool-only; sendPolicy deny still wins.
    */
   deliverDespiteSourceReplySuppression?: boolean;
-  beforeAgentRunBlocked?: boolean;
 };
 
 const replyPayloadMetadata = new WeakMap<object, ReplyPayloadMetadata>();

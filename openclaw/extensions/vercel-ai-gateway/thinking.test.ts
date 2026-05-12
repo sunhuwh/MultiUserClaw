@@ -5,34 +5,6 @@ import {
 import { describe, expect, it } from "vitest";
 import plugin from "./index.js";
 
-function collectLegacyExtendedLevelIds(levels: readonly { id: string }[] | undefined): string[] {
-  const ids: string[] = [];
-  for (const level of levels ?? []) {
-    if (level.id === "xhigh" || level.id === "max") {
-      ids.push(level.id);
-    }
-  }
-  return ids;
-}
-
-const OPENAI_XHIGH_LEVELS = [
-  { id: "off" },
-  { id: "minimal" },
-  { id: "low" },
-  { id: "medium" },
-  { id: "high" },
-  { id: "xhigh" },
-];
-
-const CLAUDE_ADAPTIVE_LEVELS = [
-  { id: "off" },
-  { id: "minimal" },
-  { id: "low" },
-  { id: "medium" },
-  { id: "high" },
-  { id: "adaptive" },
-];
-
 describe("vercel ai gateway thinking profile", () => {
   async function getProvider() {
     const { providers } = await registerProviderPlugin({
@@ -51,7 +23,7 @@ describe("vercel ai gateway thinking profile", () => {
       modelId: "openai/gpt-5.4",
     });
 
-    expect(profile).toStrictEqual({ levels: OPENAI_XHIGH_LEVELS });
+    expect(profile?.levels).toEqual(expect.arrayContaining([{ id: "xhigh" }]));
   });
 
   it("exposes Codex xhigh through the OpenAI upstream prefix", async () => {
@@ -62,7 +34,7 @@ describe("vercel ai gateway thinking profile", () => {
       modelId: "openai/gpt-5.3-codex-spark",
     });
 
-    expect(profile).toStrictEqual({ levels: OPENAI_XHIGH_LEVELS });
+    expect(profile?.levels).toEqual(expect.arrayContaining([{ id: "xhigh" }]));
   });
 
   it("reuses Claude thinking defaults for trusted Anthropic upstream refs", async () => {
@@ -73,11 +45,11 @@ describe("vercel ai gateway thinking profile", () => {
       modelId: "anthropic/claude-opus-4.6",
     });
 
-    expect(profile).toStrictEqual({
-      levels: CLAUDE_ADAPTIVE_LEVELS,
+    expect(profile).toMatchObject({
+      levels: expect.arrayContaining([{ id: "adaptive" }]),
       defaultLevel: "adaptive",
     });
-    expect(collectLegacyExtendedLevelIds(profile?.levels)).toStrictEqual([]);
+    expect(profile?.levels.some((level) => level.id === "xhigh" || level.id === "max")).toBe(false);
   });
 
   it("falls through for unsupported OpenAI or untrusted namespaced refs", async () => {

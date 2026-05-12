@@ -340,7 +340,7 @@ describe("SSRF external proxy routing", () => {
         import { fetch as undiciFetch } from "undici";
         import { WebSocket } from "ws";
         import { startProxy, stopProxy } from "./src/infra/net/proxy/proxy-lifecycle.ts";
-        import { registerManagedProxyGatewayLoopbackNoProxy } from "./src/infra/net/proxy/proxy-lifecycle.ts";
+        import { dangerouslyBypassManagedProxyForGatewayLoopbackControlPlane } from "./src/infra/net/proxy/proxy-lifecycle.ts";
 
         async function nodeHttpGet(url, options = {}) {
           return new Promise((resolve, reject) => {
@@ -396,18 +396,14 @@ describe("SSRF external proxy routing", () => {
 
         async function gatewayLoopbackBypassProbe(url) {
           return new Promise((resolve, reject) => {
-            const unregister = registerManagedProxyGatewayLoopbackNoProxy(url);
-            const ws = new WebSocket(url, { handshakeTimeout: ${PROBE_TIMEOUT_MS} });
-            const cleanup = () => unregister?.();
+            const ws = dangerouslyBypassManagedProxyForGatewayLoopbackControlPlane(url, () =>
+              new WebSocket(url, { handshakeTimeout: ${PROBE_TIMEOUT_MS} }),
+            );
             ws.once("open", () => {
               ws.close();
-              cleanup();
               resolve();
             });
-            ws.once("error", (err) => {
-              cleanup();
-              reject(err);
-            });
+            ws.once("error", reject);
           });
         }
 

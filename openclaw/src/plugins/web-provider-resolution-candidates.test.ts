@@ -70,7 +70,7 @@ describe("resolveManifestDeclaredWebProviderCandidatePluginIds", () => {
         configKey: "webSearch",
         onlyPluginIds: [],
       }),
-    ).toStrictEqual([]);
+    ).toEqual([]);
     expect(mocks.loadPluginManifestRegistryForInstalledIndex).not.toHaveBeenCalled();
   });
 
@@ -81,7 +81,7 @@ describe("resolveManifestDeclaredWebProviderCandidatePluginIds", () => {
         configKey: "webSearch",
         onlyPluginIds: ["missing-plugin"],
       }),
-    ).toStrictEqual([]);
+    ).toEqual([]);
     expect(mocks.loadPluginMetadataSnapshot).toHaveBeenCalledOnce();
   });
 
@@ -105,7 +105,7 @@ describe("resolveManifestDeclaredWebProviderCandidatePluginIds", () => {
         configKey: "webSearch",
         origin: "bundled",
       }),
-    ).toStrictEqual([]);
+    ).toEqual([]);
   });
 
   it("derives provider candidates from a single manifest-registry read", () => {

@@ -6,7 +6,6 @@ import {
   buildSessionEntry,
   listSessionFilesForAgent,
   sessionPathForFile,
-  type SessionFileEntry,
 } from "./session-files.js";
 
 let fixtureRoot: string;
@@ -36,13 +35,6 @@ afterEach(() => {
     process.env.OPENCLAW_STATE_DIR = originalStateDir;
   }
 });
-
-function requireSessionEntry(entry: SessionFileEntry | null): SessionFileEntry {
-  if (!entry) {
-    throw new Error("expected session entry");
-  }
-  return entry;
-}
 
 describe("listSessionFilesForAgent", () => {
   it("includes reset and deleted transcripts in session file listing", async () => {
@@ -118,9 +110,11 @@ describe("buildSessionEntry", () => {
     const filePath = path.join(tmpDir, "session.jsonl");
     fsSync.writeFileSync(filePath, jsonlLines.join("\n"));
 
-    const entry = requireSessionEntry(await buildSessionEntry(filePath));
+    const entry = await buildSessionEntry(filePath);
+    expect(entry).not.toBeNull();
+
     // The content should have 3 lines (3 message records)
-    const contentLines = entry.content.split("\n");
+    const contentLines = entry!.content.split("\n");
     expect(contentLines).toHaveLength(3);
     expect(contentLines[0]).toContain("User: Hello world");
     expect(contentLines[1]).toContain("Assistant: Hi there");
@@ -130,7 +124,8 @@ describe("buildSessionEntry", () => {
     // Content line 0 → JSONL line 4 (the first user message)
     // Content line 1 → JSONL line 6 (the assistant message)
     // Content line 2 → JSONL line 7 (the second user message)
-    expect(entry.lineMap).toEqual([4, 6, 7]);
+    expect(entry!.lineMap).toBeDefined();
+    expect(entry!.lineMap).toEqual([4, 6, 7]);
   });
 
   it("returns empty lineMap when no messages are found", async () => {
@@ -141,9 +136,10 @@ describe("buildSessionEntry", () => {
     const filePath = path.join(tmpDir, "empty-session.jsonl");
     fsSync.writeFileSync(filePath, jsonlLines.join("\n"));
 
-    const entry = requireSessionEntry(await buildSessionEntry(filePath));
-    expect(entry.content).toBe("");
-    expect(entry.lineMap).toStrictEqual([]);
+    const entry = await buildSessionEntry(filePath);
+    expect(entry).not.toBeNull();
+    expect(entry!.content).toBe("");
+    expect(entry!.lineMap).toEqual([]);
   });
 
   it("indexes usage-counted reset/deleted archives but still skips bak and checkpoint artifacts", async () => {
@@ -163,24 +159,26 @@ describe("buildSessionEntry", () => {
     fsSync.writeFileSync(bakPath, content);
     fsSync.writeFileSync(checkpointPath, content);
 
-    const resetEntry = requireSessionEntry(await buildSessionEntry(resetPath));
-    const deletedEntry = requireSessionEntry(await buildSessionEntry(deletedPath));
-    const bakEntry = requireSessionEntry(await buildSessionEntry(bakPath));
-    const checkpointEntry = requireSessionEntry(await buildSessionEntry(checkpointPath));
+    const resetEntry = await buildSessionEntry(resetPath);
+    const deletedEntry = await buildSessionEntry(deletedPath);
+    const bakEntry = await buildSessionEntry(bakPath);
+    const checkpointEntry = await buildSessionEntry(checkpointPath);
 
     // Usage-counted archives (reset, deleted) must surface real content so
     // post-reset memory_search can recover prior session history.
-    expect(resetEntry.content).toContain("User: Archived hello");
-    expect(resetEntry.lineMap).toEqual([1]);
-    expect(deletedEntry.content).toContain("User: Archived hello");
-    expect(deletedEntry.lineMap).toEqual([1]);
+    expect(resetEntry?.content).toContain("User: Archived hello");
+    expect(resetEntry?.lineMap).toEqual([1]);
+    expect(deletedEntry?.content).toContain("User: Archived hello");
+    expect(deletedEntry?.lineMap).toEqual([1]);
 
     // .bak and compaction checkpoints remain opaque pre-archive / snapshot
     // artifacts and stay empty so they do not get double-indexed.
-    expect(bakEntry.content).toBe("");
-    expect(bakEntry.lineMap).toStrictEqual([]);
-    expect(checkpointEntry.content).toBe("");
-    expect(checkpointEntry.lineMap).toStrictEqual([]);
+    expect(bakEntry).not.toBeNull();
+    expect(bakEntry?.content).toBe("");
+    expect(bakEntry?.lineMap).toEqual([]);
+    expect(checkpointEntry).not.toBeNull();
+    expect(checkpointEntry?.content).toBe("");
+    expect(checkpointEntry?.lineMap).toEqual([]);
   });
 
   it("keeps cron-run deleted archives opaque when the live session store entry is gone", async () => {
@@ -200,11 +198,12 @@ describe("buildSessionEntry", () => {
     ];
     fsSync.writeFileSync(archivePath, jsonlLines.join("\n"));
 
-    const entry = requireSessionEntry(await buildSessionEntry(archivePath));
+    const entry = await buildSessionEntry(archivePath);
 
-    expect(entry.content).toBe("");
-    expect(entry.lineMap).toStrictEqual([]);
-    expect(entry.generatedByCronRun).toBe(true);
+    expect(entry).not.toBeNull();
+    expect(entry?.content).toBe("");
+    expect(entry?.lineMap).toEqual([]);
+    expect(entry?.generatedByCronRun).toBe(true);
   });
 
   it("keeps cron-run reset archives opaque when session metadata preserves the cron key", async () => {
@@ -221,11 +220,12 @@ describe("buildSessionEntry", () => {
     ];
     fsSync.writeFileSync(archivePath, jsonlLines.join("\n"));
 
-    const entry = requireSessionEntry(await buildSessionEntry(archivePath));
+    const entry = await buildSessionEntry(archivePath);
 
-    expect(entry.content).toBe("");
-    expect(entry.lineMap).toStrictEqual([]);
-    expect(entry.generatedByCronRun).toBe(true);
+    expect(entry).not.toBeNull();
+    expect(entry?.content).toBe("");
+    expect(entry?.lineMap).toEqual([]);
+    expect(entry?.generatedByCronRun).toBe(true);
   });
 
   it("skips blank lines and invalid JSON without breaking lineMap", async () => {
@@ -239,8 +239,9 @@ describe("buildSessionEntry", () => {
     const filePath = path.join(tmpDir, "gaps.jsonl");
     fsSync.writeFileSync(filePath, jsonlLines.join("\n"));
 
-    const entry = requireSessionEntry(await buildSessionEntry(filePath));
-    expect(entry.lineMap).toEqual([3, 5]);
+    const entry = await buildSessionEntry(filePath);
+    expect(entry).not.toBeNull();
+    expect(entry!.lineMap).toEqual([3, 5]);
   });
 
   it("strips inbound metadata when a user envelope is split across text blocks", async () => {
@@ -268,8 +269,9 @@ describe("buildSessionEntry", () => {
     const filePath = path.join(tmpDir, "enveloped-session-array.jsonl");
     fsSync.writeFileSync(filePath, jsonlLines.join("\n"));
 
-    const entry = requireSessionEntry(await buildSessionEntry(filePath));
-    expect(entry.content).toBe("User: Actual user text");
+    const entry = await buildSessionEntry(filePath);
+    expect(entry).not.toBeNull();
+    expect(entry!.content).toBe("User: Actual user text");
   });
 
   it("skips inter-session user messages", async () => {
@@ -294,8 +296,9 @@ describe("buildSessionEntry", () => {
     const filePath = path.join(tmpDir, "inter-session-session.jsonl");
     fsSync.writeFileSync(filePath, jsonlLines.join("\n"));
 
-    const entry = requireSessionEntry(await buildSessionEntry(filePath));
-    expect(entry.content).toBe("Assistant: User-facing summary.\nUser: Actual user follow-up.");
-    expect(entry.lineMap).toEqual([2, 3]);
+    const entry = await buildSessionEntry(filePath);
+    expect(entry).not.toBeNull();
+    expect(entry!.content).toBe("Assistant: User-facing summary.\nUser: Actual user follow-up.");
+    expect(entry!.lineMap).toEqual([2, 3]);
   });
 });

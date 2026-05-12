@@ -43,14 +43,11 @@ test("sessions.reset recomputes model from defaults instead of stale runtime mod
   expect(reset.ok).toBe(true);
   expect(reset.payload?.key).toBe("agent:main:main");
   expect(reset.payload?.entry.sessionId).not.toBe("sess-stale-model");
-  const sessionFile = reset.payload?.entry.sessionFile;
-  if (!sessionFile) {
-    throw new Error("expected reset session file");
-  }
+  expect(reset.payload?.entry.sessionFile).toBeTruthy();
   expect(reset.payload?.entry.modelProvider).toBe("openai");
   expect(reset.payload?.entry.model).toBe("gpt-test-a");
   expect(reset.payload?.entry.contextTokens).toBeUndefined();
-  expect((await fs.stat(sessionFile)).isFile()).toBe(true);
+  await expect(fs.stat(reset.payload?.entry.sessionFile as string)).resolves.toBeTruthy();
 });
 
 test("sessions.reset drops cached skills snapshot so /new rebuilds visible skills", async () => {

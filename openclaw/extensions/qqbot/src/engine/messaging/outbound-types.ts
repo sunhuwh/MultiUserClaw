@@ -1,4 +1,3 @@
-import type { MessageReceipt } from "openclaw/plugin-sdk/channel-message";
 import type { GatewayAccount } from "../types.js";
 
 export interface OutboundContext {
@@ -29,7 +28,6 @@ export const DEFAULT_MEDIA_SEND_ERROR = "发送失败，请稍后重试。";
 export interface OutboundResult {
   channel: string;
   messageId?: string;
-  receipt?: MessageReceipt;
   timestamp?: string | number;
   error?: string;
   errorCode?: OutboundErrorCode;

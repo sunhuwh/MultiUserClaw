@@ -1,7 +1,6 @@
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { readRegularFile, statRegularFile } from "./fs-utils.js";
 import { hashText } from "./hash.js";
 import { createSubsystemLogger, redactSensitiveText } from "./openclaw-runtime-io.js";
 import {
@@ -27,7 +26,6 @@ const DREAMING_NARRATIVE_RUN_PREFIX = "dreaming-narrative-";
 // toxic line. Wrapped continuation lines still map back to the same JSONL line.
 // This limit applies to content only; the role label adds up to 11 chars.
 const SESSION_EXPORT_CONTENT_WRAP_CHARS = 800;
-const SESSION_ENTRY_PARSE_YIELD_LINES = 250;
 const DIRECT_CRON_PROMPT_RE = /^\[cron:[^\]]+\]\s*/;
 
 export type SessionFileEntry = {
@@ -52,8 +50,6 @@ export type BuildSessionEntryOptions = {
   generatedByDreamingNarrative?: boolean;
   /** Optional preclassification from a caller-managed cron transcript lookup. */
   generatedByCronRun?: boolean;
-  /** Override for tests or specialized callers that need a tighter parse yield cadence. */
-  parseYieldEveryLines?: number;
 };
 
 export type SessionTranscriptClassification = {
@@ -523,35 +519,12 @@ function parseSessionTimestampMs(
   return 0;
 }
 
-function resolveSessionEntryParseYieldLines(opts: BuildSessionEntryOptions): number {
-  const configured = opts.parseYieldEveryLines;
-  if (typeof configured === "number" && Number.isFinite(configured)) {
-    return Math.max(1, Math.floor(configured));
-  }
-  return SESSION_ENTRY_PARSE_YIELD_LINES;
-}
-
-async function yieldSessionEntryParseIfNeeded(
-  lineIndex: number,
-  everyLines: number,
-): Promise<void> {
-  if (lineIndex > 0 && lineIndex % everyLines === 0) {
-    await new Promise<void>((resolve) => {
-      setImmediate(resolve);
-    });
-  }
-}
-
 export async function buildSessionEntry(
   absPath: string,
   opts: BuildSessionEntryOptions = {},
 ): Promise<SessionFileEntry | null> {
   try {
-    const regularFile = await statRegularFile(absPath);
-    if (regularFile.missing) {
-      return null;
-    }
-    const stat = regularFile.stat;
+    const stat = await fs.stat(absPath);
     if (shouldSkipTranscriptFileForDreaming(absPath)) {
       return {
         path: sessionPathForFile(absPath),
@@ -564,11 +537,11 @@ export async function buildSessionEntry(
         messageTimestampsMs: [],
       };
     }
-    const raw = (await readRegularFile({ filePath: absPath })).buffer.toString("utf-8");
+    const raw = await fs.readFile(absPath, "utf-8");
+    const lines = raw.split("\n");
     const collected: string[] = [];
     const lineMap: number[] = [];
     const messageTimestampsMs: number[] = [];
-    const parseYieldEveryLines = resolveSessionEntryParseYieldLines(opts);
     const sessionStoreClassification =
       opts.generatedByDreamingNarrative === undefined || opts.generatedByCronRun === undefined
         ? classifySessionTranscriptFromSessionStore(absPath)
@@ -581,12 +554,8 @@ export async function buildSessionEntry(
       opts.generatedByCronRun ?? sessionStoreClassification?.generatedByCronRun ?? false;
     const allowArchiveContentCronClassification =
       isUsageCountedSessionArchiveTranscriptPath(absPath);
-    for (let jsonlIdx = 0, lineStart = 0; lineStart <= raw.length; jsonlIdx++) {
-      await yieldSessionEntryParseIfNeeded(jsonlIdx, parseYieldEveryLines);
-      const newlineIndex = raw.indexOf("\n", lineStart);
-      const lineEnd = newlineIndex === -1 ? raw.length : newlineIndex;
-      const line = raw.slice(lineStart, lineEnd);
-      lineStart = newlineIndex === -1 ? raw.length + 1 : newlineIndex + 1;
+    for (let jsonlIdx = 0; jsonlIdx < lines.length; jsonlIdx++) {
+      const line = lines[jsonlIdx];
       if (!line.trim()) {
         continue;
       }

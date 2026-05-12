@@ -40,14 +40,6 @@ class MockProxyAgent {
   readonly __testStub = true;
 }
 
-function requireFetchInit(mock: ReturnType<typeof vi.fn>): RequestInit {
-  const init = mock.mock.calls[0]?.[1] as RequestInit | undefined;
-  if (!init) {
-    throw new Error("expected runtime fetch init");
-  }
-  return init;
-}
-
 afterEach(() => {
   Reflect.deleteProperty(globalThis as object, TEST_UNDICI_RUNTIME_DEPS_KEY);
 });
@@ -82,9 +74,9 @@ describe("fetchWithRuntimeDispatcher", () => {
     });
 
     expect(response.status).toBe(200);
-    const sentHeaders = requireFetchInit(runtimeFetch).headers;
+    const sentHeaders = runtimeFetch.mock.calls[0]?.[1]?.headers;
     expect(sentHeaders).not.toBe(headers);
-    expect(Object.getOwnPropertySymbols(sentHeaders as object)).toStrictEqual([]);
+    expect(Object.getOwnPropertySymbols(sentHeaders as object)).toEqual([]);
     expect(Object.getOwnPropertySymbols(headers)).toHaveLength(1);
   });
 
@@ -132,7 +124,7 @@ describe("fetchWithRuntimeDispatcher", () => {
 
     expect(response.status).toBe(200);
     expect(runtimeFetch).toHaveBeenCalledTimes(1);
-    const sentInit = requireFetchInit(runtimeFetch);
+    const sentInit = runtimeFetch.mock.calls[0]?.[1] as RequestInit;
     const sentHeaders = new Headers(sentInit.headers);
     expect(sentHeaders.has("content-length")).toBe(false);
     expect(sentHeaders.has("content-type")).toBe(false);

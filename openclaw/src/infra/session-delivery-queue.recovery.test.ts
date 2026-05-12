@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { withTempDir } from "../test-helpers/temp-dir.js";
 import {
-  drainPendingSessionDeliveries,
   enqueueSessionDelivery,
   failSessionDelivery,
   isSessionDeliveryEligibleForRetry,
@@ -34,7 +33,7 @@ describe("session-delivery queue recovery", () => {
 
       expect(deliver).toHaveBeenCalledTimes(1);
       expect(summary.recovered).toBe(1);
-      expect(await loadPendingSessionDeliveries(tempDir)).toStrictEqual([]);
+      expect(await loadPendingSessionDeliveries(tempDir)).toEqual([]);
     });
   });
 
@@ -66,44 +65,6 @@ describe("session-delivery queue recovery", () => {
       expect(summary.failed).toBe(1);
       expect(failedEntry?.retryCount).toBe(1);
       expect(failedEntry?.lastError).toBe("transient failure");
-    });
-  });
-
-  it("uses the entry retry budget when draining entries", async () => {
-    await withTempDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
-      const id = await enqueueSessionDelivery(
-        {
-          kind: "agentTurn",
-          sessionKey: "agent:main:main",
-          message: "continue",
-          messageId: "restart-sentinel:agent:main:main:agentTurn:123",
-          maxRetries: 20,
-        },
-        tempDir,
-      );
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        await failSessionDelivery(id, "busy", tempDir);
-      }
-
-      const deliver = vi.fn(async () => undefined);
-      await drainPendingSessionDeliveries({
-        drainKey: "test-restart-continuation",
-        logLabel: "test restart continuation",
-        deliver,
-        stateDir: tempDir,
-        log: {
-          info: vi.fn(),
-          warn: vi.fn(),
-          error: vi.fn(),
-        },
-        selectEntry: (entry) => ({
-          match: entry.id === id,
-          bypassBackoff: true,
-        }),
-      });
-
-      expect(deliver).toHaveBeenCalledTimes(1);
-      expect(await loadPendingSessionDeliveries(tempDir)).toEqual([]);
     });
   });
 
@@ -173,15 +134,11 @@ describe("session-delivery queue recovery", () => {
       await failSessionDelivery(id, "transient failure", tempDir);
 
       const [failedEntry] = await loadPendingSessionDeliveries(tempDir);
-      if (!failedEntry) {
-        throw new Error("expected failed session delivery to remain pending");
-      }
-      expect(failedEntry.retryCount).toBe(1);
+      expect(failedEntry).toBeDefined();
+      expect(failedEntry?.retryCount).toBe(1);
+      expect(failedEntry?.lastAttemptAt).toBeDefined();
 
-      const lastAttemptAt = failedEntry.lastAttemptAt;
-      if (typeof lastAttemptAt !== "number") {
-        throw new Error("expected failed delivery attempt timestamp");
-      }
+      const lastAttemptAt = failedEntry?.lastAttemptAt ?? 0;
       const notReady = isSessionDeliveryEligibleForRetry(failedEntry, lastAttemptAt + 4_999);
       expect(notReady).toEqual({ eligible: false, remainingBackoffMs: 1 });
 

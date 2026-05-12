@@ -1,11 +1,11 @@
 import type { StreamFn } from "@mariozechner/pi-agent-core";
 import { streamSimple } from "@mariozechner/pi-ai";
-import type { ProviderWrapStreamFnContext } from "@openclaw/plugin-sdk/plugin-entry";
+import type { ProviderWrapStreamFnContext } from "openclaw/plugin-sdk/plugin-entry";
 import {
   composeProviderStreamWrappers,
   createHtmlEntityToolCallArgumentDecodingWrapper,
   createToolStreamWrapper,
-} from "@openclaw/plugin-sdk/provider-stream-shared";
+} from "openclaw/plugin-sdk/provider-stream-shared";
 
 const XAI_FAST_MODEL_IDS = new Map<string, string>([
   ["grok-3", "grok-3-fast"],
@@ -160,8 +160,10 @@ export function createXaiToolPayloadCompatibilityWrapper(
 ): StreamFn {
   const underlying = baseStreamFn ?? streamSimple;
   return (model, context, options) => {
+    const transportModel =
+      model.provider === "xai" && model.reasoning ? { ...model, reasoning: false } : model;
     const originalOnPayload = options?.onPayload;
-    return underlying(model, context, {
+    return underlying(transportModel, context, {
       ...options,
       onPayload: (payload) => {
         if (payload && typeof payload === "object") {
@@ -174,7 +176,7 @@ export function createXaiToolPayloadCompatibilityWrapper(
           delete payloadObj.reasoningEffort;
           delete payloadObj.reasoning_effort;
         }
-        return originalOnPayload?.(payload, model);
+        return originalOnPayload?.(payload, transportModel);
       },
     });
   };
@@ -201,8 +203,7 @@ export function createXaiFastModeWrapper(
   };
 }
 
-export const createXaiToolCallArgumentDecodingWrapper =
-  createHtmlEntityToolCallArgumentDecodingWrapper;
+const createXaiToolCallArgumentDecodingWrapper = createHtmlEntityToolCallArgumentDecodingWrapper;
 
 export function wrapXaiProviderStream(ctx: ProviderWrapStreamFnContext): StreamFn | undefined {
   const extraParams = ctx.extraParams;

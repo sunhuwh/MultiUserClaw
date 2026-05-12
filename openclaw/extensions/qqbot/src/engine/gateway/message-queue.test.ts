@@ -14,13 +14,6 @@ function groupMsg(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
   };
 }
 
-function requireMergeMetadata(message: QueuedMessage): NonNullable<QueuedMessage["merge"]> {
-  if (!message.merge) {
-    throw new Error("expected QQBot merged message metadata");
-  }
-  return message.merge;
-}
-
 describe("engine/gateway/message-queue", () => {
   describe("mergeGroupMessages", () => {
     it("returns the single message unchanged", () => {
@@ -35,9 +28,8 @@ describe("engine/gateway/message-queue", () => {
         groupMsg({ senderName: "B", content: "yo" }),
       ]);
       expect(merged.content).toBe("[A]: hi\n[B]: yo");
-      const merge = requireMergeMetadata(merged);
-      expect(merge.count).toBe(2);
-      expect(merge.messages).toHaveLength(2);
+      expect(merged.merge?.count).toBe(2);
+      expect(merged.merge?.messages).toHaveLength(2);
     });
 
     it("takes messageId / msgIdx / timestamp from the last message", () => {
@@ -70,10 +62,7 @@ describe("engine/gateway/message-queue", () => {
           ],
         }),
       ]);
-      if (!merged.attachments) {
-        throw new Error("expected QQBot merged attachments");
-      }
-      expect(merged.attachments.map((a) => a.url)).toEqual(["a", "b", "c"]);
+      expect(merged.attachments?.map((a) => a.url)).toEqual(["a", "b", "c"]);
     });
 
     it("deduplicates mentions by member/user openid", () => {
@@ -81,10 +70,7 @@ describe("engine/gateway/message-queue", () => {
         groupMsg({ mentions: [{ member_openid: "X" }, { member_openid: "Y" }] }),
         groupMsg({ mentions: [{ member_openid: "X" }, { member_openid: "Z" }] }),
       ]);
-      if (!merged.mentions) {
-        throw new Error("expected QQBot merged mentions");
-      }
-      expect(merged.mentions.map((m) => m.member_openid)).toEqual(["X", "Y", "Z"]);
+      expect(merged.mentions?.map((m) => m.member_openid)).toEqual(["X", "Y", "Z"]);
     });
 
     it("flags merged turn as @bot when ANY source was GROUP_AT_MESSAGE_CREATE", () => {
@@ -175,7 +161,7 @@ describe("engine/gateway/message-queue", () => {
 
     it("group overflow drops bot messages first (via processor)", async () => {
       const seen: QueuedMessage[] = [];
-      let gate: ((value?: unknown) => void) | undefined;
+      let gate!: (value?: unknown) => void;
       const blocker = new Promise((res) => {
         gate = res;
       });
@@ -202,9 +188,6 @@ describe("engine/gateway/message-queue", () => {
       const peerQueueIds = q.getSnapshot("group:G1");
       expect(peerQueueIds.senderPending).toBe(3);
       // Release the processor and drain.
-      if (!gate) {
-        throw new Error("Expected QQBot queue gate callback to be initialized");
-      }
       gate();
       await new Promise((res) => setTimeout(res, 0));
       const seenIds = seen.map((m) => m.messageId);
@@ -214,9 +197,7 @@ describe("engine/gateway/message-queue", () => {
       //  varies; we only assert the bot message id never appeared.)
       const mergedCall = seen.find((m) => (m.merge?.count ?? 0) > 1);
       if (mergedCall) {
-        expect(requireMergeMetadata(mergedCall).messages.map((m) => m.messageId)).not.toContain(
-          "B1",
-        );
+        expect(mergedCall.merge?.messages.map((m) => m.messageId)).not.toContain("B1");
       } else {
         expect(seenIds).not.toContain("B1");
       }
@@ -226,7 +207,7 @@ describe("engine/gateway/message-queue", () => {
       // Use a processor that never resolves so enqueued messages stay
       // buffered behind a single active worker — then clearUserQueue
       // should drop the rest.
-      let release: (() => void) | undefined;
+      let release!: () => void;
       const blocker = new Promise<void>((res) => {
         release = res;
       });
@@ -241,9 +222,6 @@ describe("engine/gateway/message-queue", () => {
       expect(q.getSnapshot("group:G1").senderPending).toBeGreaterThanOrEqual(0);
       const dropped = q.clearUserQueue("group:G1");
       expect(dropped).toBeGreaterThanOrEqual(0);
-      if (!release) {
-        throw new Error("Expected QQBot queue release callback to be initialized");
-      }
       release();
     });
   });
@@ -275,8 +253,8 @@ describe("engine/gateway/message-queue", () => {
       expect(seen.length).toBeGreaterThanOrEqual(1);
       expect(seen.length).toBeLessThan(3);
       const mergedCall = seen.find((m) => (m.merge?.count ?? 0) > 1);
+      expect(mergedCall).toBeDefined();
       expect(mergedCall?.content).toContain("[Alice]:");
-      expect(mergedCall?.merge?.count).toBeGreaterThan(1);
     });
 
     it("processes slash commands independently from regular messages", async () => {
@@ -297,8 +275,8 @@ describe("engine/gateway/message-queue", () => {
       aborted = true;
       // Command should appear as its own call (not merged with the others).
       const cmdCall = seen.find((m) => m.content === "/stop");
-      expect(cmdCall?.content).toBe("/stop");
-      expect(cmdCall).not.toHaveProperty("merge");
+      expect(cmdCall).toBeDefined();
+      expect(cmdCall?.merge).toBeUndefined();
     });
   });
 });

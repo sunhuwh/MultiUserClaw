@@ -3,10 +3,14 @@ import { opencodeGoMediaUnderstandingProvider } from "./media-understanding-prov
 
 describe("opencode-go media understanding provider", () => {
   it("declares image understanding support", () => {
-    expect(opencodeGoMediaUnderstandingProvider.id).toBe("opencode-go");
-    expect(opencodeGoMediaUnderstandingProvider.capabilities).toEqual(["image"]);
-    expect(opencodeGoMediaUnderstandingProvider.defaultModels).toEqual({ image: "kimi-k2.6" });
-    expect(typeof opencodeGoMediaUnderstandingProvider.describeImage).toBe("function");
-    expect(typeof opencodeGoMediaUnderstandingProvider.describeImages).toBe("function");
+    expect(opencodeGoMediaUnderstandingProvider).toEqual(
+      expect.objectContaining({
+        id: "opencode-go",
+        capabilities: ["image"],
+        defaultModels: { image: "kimi-k2.6" },
+        describeImage: expect.any(Function),
+        describeImages: expect.any(Function),
+      }),
+    );
   });
 });

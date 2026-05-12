@@ -79,7 +79,7 @@ describe("isSameOAuthIdentity", () => {
       expect(isSameOAuthIdentity({ accountId: "  acct-1  " }, { accountId: "acct-1" })).toBe(true);
     });
 
-    it("treats accountId comparisons as case-sensitive", () => {
+    it("accountId is case-sensitive", () => {
       expect(isSameOAuthIdentity({ accountId: "Acct-1" }, { accountId: "acct-1" })).toBe(false);
     });
   });
@@ -254,7 +254,7 @@ describe("isSafeToCopyOAuthIdentity (unified copy gate, used for mirror and adop
       ).toBe(false);
     });
 
-    it("keeps accountId case-sensitive in the copy gate", () => {
+    it("accountId is case-sensitive", () => {
       expect(isSafeToCopyOAuthIdentity({ accountId: "X" }, { accountId: "x" })).toBe(false);
     });
   });

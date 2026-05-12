@@ -10,14 +10,12 @@ describe("resolveLiveTransportQaRunOptions", () => {
         providerMode: "live-frontier",
         primaryModel: " ",
         alternateModel: "",
-        listScenarios: true,
       }),
     ).toMatchObject({
       repoRoot: path.resolve("/tmp/openclaw-repo"),
       providerMode: "live-frontier",
       primaryModel: undefined,
       alternateModel: undefined,
-      listScenarios: true,
     });
   });
 });

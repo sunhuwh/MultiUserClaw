@@ -58,13 +58,7 @@ function resolveThinkingLevelsConsumerSide(
       session?.modelProvider ?? defaults?.modelProvider,
       session?.model ?? defaults?.model,
     ).split(/\s*,\s*/);
-  const resolvedLabels: string[] = [];
-  for (const label of labels) {
-    if (label) {
-      resolvedLabels.push(label);
-    }
-  }
-  return resolvedLabels;
+  return labels.filter(Boolean);
 }
 
 test("e2e #76482: session with different model gets its own thinking levels through gateway row + consumer fallback", async () => {

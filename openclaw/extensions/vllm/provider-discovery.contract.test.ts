@@ -56,7 +56,7 @@ type ProviderDiscoveryRun = (ctx: {
 
 type RegisteredVllmProvider = {
   id: string;
-  catalog?: {
+  discovery?: {
     order?: string;
     run: ProviderDiscoveryRun;
   };
@@ -77,11 +77,9 @@ describe("vllm provider discovery contract", () => {
       },
     } as OpenClawPluginApi);
     expect(provider?.id).toBe("vllm");
-    expect(provider?.catalog?.order).toBe("late");
-    const catalog = provider?.catalog;
-    if (!catalog) {
-      throw new Error("expected vllm provider catalog hook");
-    }
+    expect(provider?.discovery?.order).toBe("late");
+    const discovery = provider?.discovery;
+    expect(discovery).toBeDefined();
 
     buildVllmProviderMock.mockResolvedValueOnce({
       baseUrl: "http://127.0.0.1:8000/v1",
@@ -90,7 +88,7 @@ describe("vllm provider discovery contract", () => {
     });
 
     await expect(
-      catalog.run({
+      discovery!.run({
         config: {},
         env: {
           VLLM_API_KEY: "env-vllm-key",
@@ -117,9 +115,11 @@ describe("vllm provider discovery contract", () => {
     expect(buildVllmProviderMock).toHaveBeenCalledWith({
       apiKey: "env-vllm-key",
     });
-    expect(discoverOpenAICompatibleSelfHostedProviderMock).toHaveBeenCalledTimes(1);
-    const [discoveryParams] = discoverOpenAICompatibleSelfHostedProviderMock.mock.calls[0];
-    expect(discoveryParams.providerId).toBe("vllm");
-    expect(discoveryParams.buildProvider).toBeTypeOf("function");
+    expect(discoverOpenAICompatibleSelfHostedProviderMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: "vllm",
+        buildProvider: expect.any(Function),
+      }),
+    );
   });
 });

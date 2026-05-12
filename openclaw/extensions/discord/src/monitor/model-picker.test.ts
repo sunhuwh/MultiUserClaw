@@ -392,8 +392,9 @@ describe("Discord model picker rendering", () => {
       return parsed?.action === "provider";
     });
     expect(providerButtons).toHaveLength(Object.keys(entries).length);
-    const customIds = allButtons.map((component) => component.custom_id ?? "");
-    expect(customIds.every((customId) => !customId.includes(";a=nav;"))).toBe(true);
+    expect(allButtons.some((component) => (component.custom_id ?? "").includes(";a=nav;"))).toBe(
+      false,
+    );
   });
 
   it("does not render navigation buttons even when provider count exceeds one page", () => {
@@ -418,8 +419,9 @@ describe("Discord model picker rendering", () => {
     expect(rows.length).toBeGreaterThan(0);
 
     const allButtons = rows.flatMap((row) => row.components ?? []);
-    const customIds = allButtons.map((component) => component.custom_id ?? "");
-    expect(customIds.every((customId) => !customId.includes(";a=nav;"))).toBe(true);
+    expect(allButtons.some((component) => (component.custom_id ?? "").includes(";a=nav;"))).toBe(
+      false,
+    );
   });
 
   it("supports classic fallback rendering with content + action rows", () => {
@@ -495,10 +497,7 @@ describe("Discord model picker rendering", () => {
       throw new Error("models view did not render a provider select");
     }
     expect(providerSelect.options?.length).toBe(2);
-    const openaiProviderOption = providerSelect.options?.find(
-      (option) => option.value === "openai",
-    );
-    expect(openaiProviderOption?.default).toBe(true);
+    expect(providerSelect.options?.find((option) => option.value === "openai")?.default).toBe(true);
     const parsedProviderState = parseDiscordModelPickerCustomId(providerSelect.custom_id ?? "");
     expect(parsedProviderState?.action).toBe("provider");
 
@@ -509,8 +508,7 @@ describe("Discord model picker rendering", () => {
       throw new Error("models view did not render a model select");
     }
     expect(modelSelect.options?.length).toBe(3);
-    const o3ModelOption = modelSelect.options?.find((option) => option.value === "o3");
-    expect(o3ModelOption?.default).toBe(true);
+    expect(modelSelect.options?.find((option) => option.value === "o3")?.default).toBe(true);
 
     const parsedModelSelectState = parseDiscordModelPickerCustomId(modelSelect.custom_id ?? "");
     expect(parsedModelSelectState?.action).toBe("model");
@@ -581,8 +579,7 @@ describe("Discord model picker rendering", () => {
     expect(runtimeSelect.options?.find((option) => option.value === "pi")?.label).toBe(
       "OpenClaw Pi Default",
     );
-    const codexRuntimeOption = runtimeSelect.options?.find((option) => option.value === "codex");
-    expect(codexRuntimeOption?.default).toBe(true);
+    expect(runtimeSelect.options?.find((option) => option.value === "codex")?.default).toBe(true);
 
     const submitButton = rows[3]?.components?.at(-1);
     const submitState = requireValue(

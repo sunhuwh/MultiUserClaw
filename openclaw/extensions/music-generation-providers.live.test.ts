@@ -1,8 +1,8 @@
 import {
   resolveApiKeyForProvider,
-  resolveDefaultAgentDir,
+  resolveOpenClawAgentDir,
 } from "openclaw/plugin-sdk/agent-runtime";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import {
   registerProviderPlugin,
   requireRegisteredProvider,
@@ -159,7 +159,7 @@ describeLive("music generation provider live", () => {
     async () => {
       const cfg = withPluginsEnabled(getRuntimeConfig());
       const configuredModels = resolveConfiguredLiveMusicModels(cfg);
-      const agentDir = resolveDefaultAgentDir(cfg as never);
+      const agentDir = resolveOpenClawAgentDir();
       const attempted: string[] = [];
       const skipped: string[] = [];
       const failures: string[] = [];
@@ -285,11 +285,11 @@ describeLive("music generation provider live", () => {
       );
 
       if (attempted.length === 0) {
-        expect(failures).toStrictEqual([]);
+        expect(failures).toEqual([]);
         console.warn("[live:music-generation] no provider had usable auth; skipping assertions");
         return;
       }
-      expect(failures).toStrictEqual([]);
+      expect(failures).toEqual([]);
     },
     10 * 60_000,
   );

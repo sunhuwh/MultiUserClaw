@@ -930,7 +930,6 @@ Current Slack message actions include `send`, `upload-file`, `download-file`, `r
 - With default `session.dmScope=main`, Slack DMs collapse to agent main session.
 - Channel sessions: `agent:<agentId>:slack:channel:<channelId>`.
 - Thread replies can create thread session suffixes (`:thread:<threadTs>`) when applicable.
-- In channels where OpenClaw handles top-level messages without requiring an explicit mention, non-`off` `replyToMode` routes each handled root into `agent:<agentId>:slack:channel:<channelId>:thread:<rootTs>` so the visible Slack thread maps to one OpenClaw session from the first turn.
 - `channels.slack.thread.historyScope` default is `thread`; `thread.inheritParent` default is `false`.
 - `channels.slack.thread.initialHistoryLimit` controls how many existing thread messages are fetched when a new thread session starts (default `20`; set `0` to disable).
 - `channels.slack.thread.requireExplicitMention` (default `false`): when `true`, suppress implicit thread mentions so the bot only responds to explicit `@bot` mentions inside threads, even when the bot already participated in the thread. Without this, replies in a bot-participated thread bypass `requireMention` gating.
@@ -945,10 +944,6 @@ Manual reply tags are supported:
 
 - `[[reply_to_current]]`
 - `[[reply_to:<id>]]`
-
-For explicit Slack thread replies from the `message` tool, set `replyBroadcast: true` with `action: "send"` and `threadId` or `replyTo` to ask Slack to also broadcast the thread reply to the parent channel. This maps to Slack's `chat.postMessage` `reply_broadcast` flag and is only supported for text or Block Kit sends, not media uploads.
-
-When a `message` tool call runs inside a Slack thread and targets the same channel, OpenClaw normally inherits the current Slack thread according to `replyToMode`. Set `topLevel: true` on `action: "send"` or `action: "upload-file"` to force a new parent-channel message instead. `threadId: null` is accepted as the same top-level opt-out.
 
 <Note>
 `replyToMode="off"` disables **all** reply threading in Slack, including explicit `[[reply_to_*]]` tags. This differs from Telegram, where explicit tags are still honored in `"off"` mode. Slack threads hide messages from the channel while Telegram replies stay visible inline.
@@ -1025,10 +1020,9 @@ Use draft preview instead of Slack native text streaming:
 
 Legacy keys:
 
-- `channels.slack.streamMode` (`replace | status_final | append`) is a legacy runtime alias for `channels.slack.streaming.mode`.
-- boolean `channels.slack.streaming` is a legacy runtime alias for `channels.slack.streaming.mode` and `channels.slack.streaming.nativeTransport`.
-- legacy `channels.slack.nativeStreaming` is a runtime alias for `channels.slack.streaming.nativeTransport`.
-- Run `openclaw doctor --fix` to rewrite persisted Slack streaming config to the canonical keys.
+- `channels.slack.streamMode` (`replace | status_final | append`) is auto-migrated to `channels.slack.streaming.mode`.
+- boolean `channels.slack.streaming` is auto-migrated to `channels.slack.streaming.mode` and `channels.slack.streaming.nativeTransport`.
+- legacy `channels.slack.nativeStreaming` is auto-migrated to `channels.slack.streaming.nativeTransport`.
 
 ## Typing reaction fallback
 
@@ -1241,7 +1235,6 @@ Primary reference: [Configuration reference - Slack](/gateway/config-channels#sl
 - channel access: `groupPolicy`, `channels.*`, `channels.*.users`, `channels.*.requireMention`
 - threading/history: `replyToMode`, `replyToModeByChatType`, `thread.*`, `historyLimit`, `dmHistoryLimit`, `dms.*.historyLimit`
 - delivery: `textChunkLimit`, `chunkMode`, `mediaMaxMb`, `streaming`, `streaming.nativeTransport`, `streaming.preview.toolProgress`
-- unfurls: `unfurlLinks`, `unfurlMedia` for `chat.postMessage` link/media preview control
 - ops/features: `configWrites`, `commands.native`, `slashCommand.*`, `actions.*`, `userToken`, `userTokenReadOnly`
 
 </Accordion>

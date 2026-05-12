@@ -184,35 +184,6 @@ describe("runDiscordGatewayLifecycle", () => {
     expect(params.gatewaySupervisor.detachLifecycle).toHaveBeenCalledTimes(params.detachCalls ?? 1);
   }
 
-  function mockMessages(mock: ReturnType<typeof vi.fn>): string[] {
-    return mock.mock.calls.map((call) => String(call[0] ?? ""));
-  }
-
-  function expectMockMessageContains(mock: ReturnType<typeof vi.fn>, expected: string): void {
-    expect(mockMessages(mock).some((message) => message.includes(expected))).toBe(true);
-  }
-
-  function expectMockMessageNotContains(mock: ReturnType<typeof vi.fn>, expected: string): void {
-    expect(mockMessages(mock).every((message) => !message.includes(expected))).toBe(true);
-  }
-
-  type StatusPatch = {
-    connected?: boolean;
-    lastDisconnect?: null | Record<string, unknown>;
-    lastError?: string | null;
-  };
-
-  function statusPatches(statusSink: ReturnType<typeof vi.fn>): StatusPatch[] {
-    return statusSink.mock.calls.map((call) => call[0] as StatusPatch);
-  }
-
-  function expectStatusPatch(
-    statusSink: ReturnType<typeof vi.fn>,
-    predicate: (patch: StatusPatch) => boolean,
-  ): void {
-    expect(statusPatches(statusSink).some(predicate)).toBe(true);
-  }
-
   it("resolves gateway READY timeouts from config, env, then defaults", () => {
     expect(resolveDiscordGatewayReadyTimeoutMs({ configuredTimeoutMs: 45_000 })).toBe(45_000);
     expect(
@@ -269,9 +240,11 @@ describe("runDiscordGatewayLifecycle", () => {
     const { lifecycleParams, statusSink } = createLifecycleHarness({ gateway });
     await expect(runDiscordGatewayLifecycle(lifecycleParams)).resolves.toBeUndefined();
 
-    expectStatusPatch(
-      statusSink,
-      (patch) => patch.connected === true && patch.lastDisconnect === null,
+    expect(statusSink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connected: true,
+        lastDisconnect: null,
+      }),
     );
   });
 
@@ -293,7 +266,11 @@ describe("runDiscordGatewayLifecycle", () => {
       await expect(lifecyclePromise).rejects.toThrow(
         "discord gateway did not reach READY within 5000ms",
       );
-      expect(statusPatches(statusSink).every((patch) => patch.connected !== true)).toBe(true);
+      expect(statusSink).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          connected: true,
+        }),
+      );
       expectLifecycleCleanup({
         threadStop,
         waitCalls: 0,
@@ -338,10 +315,8 @@ describe("runDiscordGatewayLifecycle", () => {
       ),
     ).toBe(true);
 
-    if (!resolveWait) {
-      throw new Error("expected lifecycle wait resolver");
-    }
-    resolveWait();
+    expect(resolveWait).toBeDefined();
+    resolveWait?.();
     await expect(lifecyclePromise).resolves.toBeUndefined();
   });
 
@@ -375,18 +350,21 @@ describe("runDiscordGatewayLifecycle", () => {
       await vi.advanceTimersByTimeAsync(18_500);
       await expect(lifecyclePromise).resolves.toBeUndefined();
 
-      expectMockMessageContains(runtimeError, "gateway READY wait timed out after 15000ms");
-      expectMockMessageNotContains(
-        runtimeError,
-        "gateway was not ready after 15000ms; restarting gateway",
+      expect(runtimeError).toHaveBeenCalledWith(
+        expect.stringContaining("gateway READY wait timed out after 15000ms"),
+      );
+      expect(runtimeError).not.toHaveBeenCalledWith(
+        expect.stringContaining("gateway was not ready after 15000ms; restarting gateway"),
       );
       expect(gateway.disconnect).toHaveBeenCalledTimes(1);
       expect(gateway.connect).toHaveBeenCalledTimes(1);
       expect(gateway.connect).toHaveBeenCalledWith(false);
-      expectStatusPatch(
-        statusSink,
-        (patch) =>
-          patch.connected === true && patch.lastDisconnect === null && patch.lastError === null,
+      expect(statusSink).toHaveBeenCalledWith(
+        expect.objectContaining({
+          connected: true,
+          lastDisconnect: null,
+          lastError: null,
+        }),
       );
     } finally {
       vi.useRealTimers();
@@ -467,7 +445,9 @@ describe("runDiscordGatewayLifecycle", () => {
 
     await expect(runDiscordGatewayLifecycle(lifecycleParams)).resolves.toBeUndefined();
 
-    expectMockMessageContains(runtimeError, "discord: gateway closed with code 4014");
+    expect(runtimeError).toHaveBeenCalledWith(
+      expect.stringContaining("discord: gateway closed with code 4014"),
+    );
     expectLifecycleCleanup({
       threadStop,
       waitCalls: 0,
@@ -484,9 +464,8 @@ describe("runDiscordGatewayLifecycle", () => {
 
     await expect(runDiscordGatewayLifecycle(lifecycleParams)).resolves.toBeUndefined();
 
-    expectMockMessageContains(
-      runtimeError,
-      "discord gateway error: Error: transient startup error",
+    expect(runtimeError).toHaveBeenCalledWith(
+      expect.stringContaining("discord gateway error: Error: transient startup error"),
     );
     expectLifecycleCleanup({
       threadStop,
@@ -569,15 +548,15 @@ describe("runDiscordGatewayLifecycle", () => {
     await expect(runDiscordGatewayLifecycle(lifecycleParams)).resolves.toBeUndefined();
 
     expect(gatewaySupervisor.attachLifecycle).toHaveBeenCalledTimes(1);
-    expectMockMessageContains(
-      runtimeLog,
-      "treating reconnect-exhausted during expected shutdown as clean",
+    expect(runtimeLog).toHaveBeenCalledWith(
+      expect.stringContaining("treating reconnect-exhausted during expected shutdown as clean"),
     );
-    expectMockMessageContains(
-      runtimeLog,
-      "Max reconnect attempts (50) reached after close code 1005",
+    expect(runtimeLog).toHaveBeenCalledWith(
+      expect.stringContaining("Max reconnect attempts (50) reached after close code 1005"),
     );
-    expectMockMessageNotContains(runtimeError, "discord gateway reconnect-exhausted");
+    expect(runtimeError).not.toHaveBeenCalledWith(
+      expect.stringContaining("discord gateway reconnect-exhausted"),
+    );
     expectLifecycleCleanup({
       threadStop,
       waitCalls: 1,
@@ -609,9 +588,8 @@ describe("runDiscordGatewayLifecycle", () => {
       await expect(lifecyclePromise).rejects.toThrow(
         "discord gateway fatal: Error: Fatal Gateway error: 4001",
       );
-      expectMockMessageContains(
-        runtimeError,
-        "discord gateway fatal: Error: Fatal Gateway error: 4001",
+      expect(runtimeError).toHaveBeenCalledWith(
+        expect.stringContaining("discord gateway fatal: Error: Fatal Gateway error: 4001"),
       );
       expect(gateway.disconnect).not.toHaveBeenCalled();
       expect(gateway.connect).not.toHaveBeenCalled();
@@ -637,12 +615,11 @@ describe("runDiscordGatewayLifecycle", () => {
 
     await expect(runDiscordGatewayLifecycle(lifecycleParams)).resolves.toBeUndefined();
 
-    expectStatusPatch(
-      statusSink,
-      (patch) =>
-        patch.connected === false &&
-        patch.lastDisconnect !== null &&
-        patch.lastDisconnect?.status === 1006,
+    expect(statusSink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connected: false,
+        lastDisconnect: expect.objectContaining({ status: 1006 }),
+      }),
     );
   });
 
@@ -658,11 +635,11 @@ describe("runDiscordGatewayLifecycle", () => {
 
     await expect(runDiscordGatewayLifecycle(lifecycleParams)).resolves.toBeUndefined();
 
-    expectStatusPatch(
-      statusSink,
-      (patch) =>
-        patch.connected === false &&
-        patch.lastError === "Gateway reconnect scheduled in 1000ms (zombie, resume=true)",
+    expect(statusSink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connected: false,
+        lastError: "Gateway reconnect scheduled in 1000ms (zombie, resume=true)",
+      }),
     );
   });
 
@@ -685,10 +662,12 @@ describe("runDiscordGatewayLifecycle", () => {
 
       await expect(runDiscordGatewayLifecycle(lifecycleParams)).resolves.toBeUndefined();
 
-      expectStatusPatch(statusSink, (patch) => patch.connected === false);
-      expectStatusPatch(
-        statusSink,
-        (patch) => patch.connected === true && patch.lastDisconnect === null,
+      expect(statusSink).toHaveBeenCalledWith(expect.objectContaining({ connected: false }));
+      expect(statusSink).toHaveBeenCalledWith(
+        expect.objectContaining({
+          connected: true,
+          lastDisconnect: null,
+        }),
       );
     } finally {
       vi.useRealTimers();
@@ -719,13 +698,14 @@ describe("runDiscordGatewayLifecycle", () => {
       await expect(lifecyclePromise).rejects.toThrow(
         "discord gateway opened but did not reach READY within 5000ms",
       );
-      expectMockMessageContains(runtimeError, "did not reach READY within 5000ms");
-      expectStatusPatch(
-        statusSink,
-        (patch) =>
-          patch.connected === false &&
-          patch.lastDisconnect !== null &&
-          patch.lastDisconnect?.error === "runtime-not-ready",
+      expect(runtimeError).toHaveBeenCalledWith(
+        expect.stringContaining("did not reach READY within 5000ms"),
+      );
+      expect(statusSink).toHaveBeenCalledWith(
+        expect.objectContaining({
+          connected: false,
+          lastDisconnect: expect.objectContaining({ error: "runtime-not-ready" }),
+        }),
       );
     } finally {
       vi.useRealTimers();

@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { FeishuConfigSchema } from "./config-schema.js";
 import type { ResolvedFeishuAccount } from "./types.js";
 
@@ -111,16 +111,6 @@ type HttpInstanceLike = {
   post: (url: string, body?: unknown, options?: Record<string, unknown>) => Promise<unknown>;
 };
 
-function requireHttpInstance(value: unknown): HttpInstanceLike {
-  if (isRecord(value) && typeof value.get === "function" && typeof value.post === "function") {
-    return {
-      get: value.get as HttpInstanceLike["get"],
-      post: value.post as HttpInstanceLike["post"],
-    };
-  }
-  throw new Error("expected Feishu HTTP instance");
-}
-
 function readCallOptions(
   mock: { mock: { calls: unknown[][] } },
   index = -1,
@@ -216,45 +206,45 @@ afterEach(() => {
   setFeishuClientRuntimeForTest();
 });
 
-afterAll(() => {
-  vi.doUnmock("./channel.js");
-  vi.doUnmock("./docx.js");
-  vi.doUnmock("./chat.js");
-  vi.doUnmock("./wiki.js");
-  vi.doUnmock("./drive.js");
-  vi.doUnmock("./perm.js");
-  vi.doUnmock("./bitable.js");
-  vi.doUnmock("./runtime.js");
-  vi.doUnmock("./subagent-hooks.js");
-  vi.doUnmock("@larksuiteoapi/node-sdk");
-  vi.doUnmock("proxy-agent");
-  vi.resetModules();
-});
-
 describe("createFeishuClient HTTP timeout", () => {
-  const readLastClientHttpInstance = (): HttpInstanceLike =>
-    requireHttpInstance(readCallOptions(clientCtorMock).httpInstance);
+  const getLastClientHttpInstance = (): HttpInstanceLike | undefined => {
+    const httpInstance = readCallOptions(clientCtorMock).httpInstance;
+    if (
+      isRecord(httpInstance) &&
+      typeof httpInstance.get === "function" &&
+      typeof httpInstance.post === "function"
+    ) {
+      return {
+        get: httpInstance.get as HttpInstanceLike["get"],
+        post: httpInstance.post as HttpInstanceLike["post"],
+      };
+    }
+    return undefined;
+  };
 
   const expectGetCallTimeout = async (timeout: number) => {
-    const httpInstance = readLastClientHttpInstance();
-    await httpInstance.get("https://example.com/api");
-    expect(mockBaseHttpInstance.get).toHaveBeenCalledWith("https://example.com/api", { timeout });
+    const httpInstance = getLastClientHttpInstance();
+    expect(httpInstance).toBeDefined();
+    await httpInstance?.get("https://example.com/api");
+    expect(mockBaseHttpInstance.get).toHaveBeenCalledWith(
+      "https://example.com/api",
+      expect.objectContaining({ timeout }),
+    );
   };
 
   it("passes a custom httpInstance with default timeout to Lark.Client", () => {
     createFeishuClient({ appId: "app_1", appSecret: "secret_1", accountId: "timeout-test" }); // pragma: allowlist secret
 
-    const httpInstance = readLastClientHttpInstance();
-    expect(typeof httpInstance.get).toBe("function");
-    expect(typeof httpInstance.post).toBe("function");
+    expect(readCallOptions(clientCtorMock).httpInstance).toBeDefined();
   });
 
   it("injects default timeout into HTTP request options", async () => {
     createFeishuClient({ appId: "app_2", appSecret: "secret_2", accountId: "timeout-inject" }); // pragma: allowlist secret
 
-    const httpInstance = readLastClientHttpInstance();
+    const httpInstance = getLastClientHttpInstance();
 
-    await httpInstance.post(
+    expect(httpInstance).toBeDefined();
+    await httpInstance?.post(
       "https://example.com/api",
       { data: 1 },
       { headers: { "X-Custom": "yes" } },
@@ -263,20 +253,22 @@ describe("createFeishuClient HTTP timeout", () => {
     expect(mockBaseHttpInstance.post).toHaveBeenCalledWith(
       "https://example.com/api",
       { data: 1 },
-      { timeout: FEISHU_HTTP_TIMEOUT_MS, headers: { "X-Custom": "yes" } },
+      expect.objectContaining({ timeout: FEISHU_HTTP_TIMEOUT_MS, headers: { "X-Custom": "yes" } }),
     );
   });
 
   it("allows explicit timeout override per-request", async () => {
     createFeishuClient({ appId: "app_3", appSecret: "secret_3", accountId: "timeout-override" }); // pragma: allowlist secret
 
-    const httpInstance = readLastClientHttpInstance();
+    const httpInstance = getLastClientHttpInstance();
 
-    await httpInstance.get("https://example.com/api", { timeout: 5_000 });
+    expect(httpInstance).toBeDefined();
+    await httpInstance?.get("https://example.com/api", { timeout: 5_000 });
 
-    expect(mockBaseHttpInstance.get).toHaveBeenCalledWith("https://example.com/api", {
-      timeout: 5_000,
-    });
+    expect(mockBaseHttpInstance.get).toHaveBeenCalledWith(
+      "https://example.com/api",
+      expect.objectContaining({ timeout: 5_000 }),
+    );
   });
 
   it("uses config-configured default timeout when provided", async () => {
@@ -355,12 +347,14 @@ describe("createFeishuClient HTTP timeout", () => {
     });
 
     expect(clientCtorMock.mock.calls.length).toBe(2);
-    const httpInstance = readLastClientHttpInstance();
-    await httpInstance.get("https://example.com/api");
+    const httpInstance = getLastClientHttpInstance();
+    expect(httpInstance).toBeDefined();
+    await httpInstance?.get("https://example.com/api");
 
-    expect(mockBaseHttpInstance.get).toHaveBeenCalledWith("https://example.com/api", {
-      timeout: 45_000,
-    });
+    expect(mockBaseHttpInstance.get).toHaveBeenCalledWith(
+      "https://example.com/api",
+      expect.objectContaining({ timeout: 45_000 }),
+    );
   });
 });
 

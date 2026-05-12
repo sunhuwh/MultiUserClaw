@@ -19,24 +19,24 @@ afterEach(() => {
   resetPluginStateStoreForTests();
 });
 
-async function expectPluginStateStoreError(
-  promise: Promise<unknown>,
-  expected: { code: string },
-): Promise<void> {
-  let storeError: unknown;
-  try {
-    await promise;
-  } catch (error) {
-    storeError = error;
-  }
-  expect(storeError).toBeInstanceOf(PluginStateStoreError);
-  expect((storeError as PluginStateStoreError | undefined)?.code).toBe(expected.code);
-}
-
 // ---------------------------------------------------------------------------
 // Runtime smoke
 // ---------------------------------------------------------------------------
 describe("runtime smoke", () => {
+  it("creates and exercises a keyed store directly", async () => {
+    await withOpenClawTestState({ label: "e2e-smoke-load" }, async () => {
+      const store = createPluginStateKeyedStore<{ ready: boolean }>("fixture-plugin", {
+        namespace: "boot",
+        maxEntries: 10,
+      });
+      expect(store).toBeDefined();
+      expect(typeof store.register).toBe("function");
+      expect(typeof store.registerIfAbsent).toBe("function");
+      expect(typeof store.lookup).toBe("function");
+      expect(typeof store.consume).toBe("function");
+    });
+  });
+
   it("writes and reads a value", async () => {
     await withOpenClawTestState({ label: "e2e-smoke-rw" }, async () => {
       const store = createPluginStateKeyedStore<{ msg: string }>("fixture-plugin", {
@@ -188,7 +188,7 @@ describe("limits", () => {
       });
       // 65 535 chars → 65 537 bytes of JSON → over limit.
       const oversize = "x".repeat(65_535);
-      await expectPluginStateStoreError(store.register("big", oversize), {
+      await expect(store.register("big", oversize)).rejects.toMatchObject({
         code: "PLUGIN_STATE_LIMIT_EXCEEDED",
       });
     });
@@ -218,7 +218,7 @@ describe("limits", () => {
       });
 
       // One more row tips over the plugin-wide limit.
-      await expectPluginStateStoreError(store.register("overflow", { boom: true }), {
+      await expect(store.register("overflow", { boom: true })).rejects.toMatchObject({
         code: "PLUGIN_STATE_LIMIT_EXCEEDED",
       });
     });
@@ -268,7 +268,7 @@ describe("failure safety", () => {
       });
       const error = await store.register("k", { ok: true }).catch((e: unknown) => e);
       expect(error).toBeInstanceOf(PluginStateStoreError);
-      expect((error as PluginStateStoreError).code).toBe("PLUGIN_STATE_SCHEMA_UNSUPPORTED");
+      expect(error).toMatchObject({ code: "PLUGIN_STATE_SCHEMA_UNSUPPORTED" });
     });
   });
 
@@ -278,8 +278,7 @@ describe("failure safety", () => {
       expect(result.ok).toBe(true);
       expect(result.dbPath).toContain("state.sqlite");
       expect(result.steps.length).toBeGreaterThanOrEqual(4);
-      const failedSteps = result.steps.filter((step) => !step.ok);
-      expect(failedSteps).toStrictEqual([]);
+      expect(result.steps.every((s) => s.ok)).toBe(true);
 
       // The probe's temporary stored value must not leak into the result.
       const serialised = JSON.stringify(result);

@@ -305,7 +305,6 @@ export async function runPluginHostCleanup(params: {
   preserveSchedulerJobIds?: ReadonlySet<string>;
   shouldCleanup?: () => boolean;
   restartPromotedSessionEntrySlotKeys?: ReadonlySet<string>;
-  preserveSchedulerOwnerRegistry?: PluginRegistry | null;
 }): Promise<PluginHostCleanupResult> {
   const failures: PluginHostCleanupFailure[] = [];
   const shouldCleanup = params.shouldCleanup ?? (() => true);
@@ -409,7 +408,6 @@ export async function runPluginHostCleanup(params: {
       sessionKey: params.sessionKey,
       records: registry.sessionSchedulerJobs,
       preserveJobIds: params.preserveSchedulerJobIds,
-      preserveOwnerRegistry: params.preserveSchedulerOwnerRegistry,
       shouldCleanup,
     });
     for (const failure of schedulerFailures) {
@@ -540,7 +538,6 @@ export async function cleanupReplacedPluginHostRegistry(params: {
             pluginId,
           )
         : undefined,
-      preserveSchedulerOwnerRegistry: restarted ? params.nextRegistry : undefined,
     });
     cleanupCount += result.cleanupCount;
     failures.push(...result.failures);

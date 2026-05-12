@@ -81,7 +81,7 @@ export default definePluginEntry({
           },
         },
       ],
-      catalog: {
+      discovery: {
         // Run after early providers so local LM Studio detection does not dominate resolution.
         order: "late",
         run: async (ctx) => {

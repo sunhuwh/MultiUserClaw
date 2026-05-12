@@ -10,7 +10,6 @@ type GoogleProviderConfigLike = GoogleApiCarrier & {
 };
 
 export const DEFAULT_GOOGLE_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
-const GOOGLE_MODEL_ID_PROVIDERS = new Set(["google", "google-gemini-cli", "google-vertex"]);
 
 function normalizeOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -153,7 +152,9 @@ export function normalizeGoogleProviderConfig(
   provider: ModelProviderConfig,
 ): ModelProviderConfig {
   let nextProvider = provider;
-  const shouldNormalizeModelIds = GOOGLE_MODEL_ID_PROVIDERS.has(providerKey);
+  const shouldNormalizeModelIds =
+    providerKey === "google-vertex" ||
+    shouldNormalizeGoogleGenerativeAiProviderConfig(providerKey, nextProvider);
 
   if (shouldNormalizeModelIds) {
     const modelNormalized = normalizeProviderModels(nextProvider, normalizeGoogleModelId);

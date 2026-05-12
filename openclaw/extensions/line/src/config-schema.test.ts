@@ -9,14 +9,16 @@ describe("LineConfigSchema", () => {
       dmPolicy: "open",
     });
 
+    expect(result.success).toBe(false);
     if (result.success) {
-      throw new Error("Expected config validation to fail");
+      throw new Error("expected dmPolicy open without wildcard allowFrom to fail validation");
     }
-    expect(result.error.issues).toHaveLength(1);
-    expect(result.error.issues[0]?.path).toEqual(["allowFrom"]);
-    expect(result.error.issues[0]?.message).toBe(
-      'channels.line.dmPolicy="open" requires channels.line.allowFrom to include "*"',
-    );
+    expect(result.error.issues).toEqual([
+      expect.objectContaining({
+        path: ["allowFrom"],
+        message: 'channels.line.dmPolicy="open" requires channels.line.allowFrom to include "*"',
+      }),
+    ]);
   });
 
   it('accepts dmPolicy="open" with wildcard allowFrom', () => {
@@ -41,13 +43,17 @@ describe("LineConfigSchema", () => {
       },
     });
 
+    expect(result.success).toBe(false);
     if (result.success) {
-      throw new Error("Expected account config validation to fail");
+      throw new Error(
+        "expected account dmPolicy open without wildcard allowFrom to fail validation",
+      );
     }
-    expect(result.error.issues).toHaveLength(1);
-    expect(result.error.issues[0]?.path).toEqual(["accounts", "work", "allowFrom"]);
-    expect(result.error.issues[0]?.message).toBe(
-      'channels.line.dmPolicy="open" requires channels.line.allowFrom to include "*"',
-    );
+    expect(result.error.issues).toEqual([
+      expect.objectContaining({
+        path: ["accounts", "work", "allowFrom"],
+        message: 'channels.line.dmPolicy="open" requires channels.line.allowFrom to include "*"',
+      }),
+    ]);
   });
 });

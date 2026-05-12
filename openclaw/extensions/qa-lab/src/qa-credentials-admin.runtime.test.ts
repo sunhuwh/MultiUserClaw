@@ -16,14 +16,6 @@ function jsonResponse(payload: unknown, status = 200) {
   });
 }
 
-function requireFirstFetchInput(fetchImpl: ReturnType<typeof vi.fn>): RequestInfo | URL {
-  const input = fetchImpl.mock.calls[0]?.[0] as RequestInfo | URL | undefined;
-  if (!input) {
-    throw new Error("expected fetch input");
-  }
-  return input;
-}
-
 describe("qa credential admin runtime", () => {
   it("adds a credential set through the admin endpoint", async () => {
     const fetchImpl = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
@@ -120,9 +112,7 @@ describe("qa credential admin runtime", () => {
       fetchImpl,
     });
 
-    expect(requireFirstFetchInput(fetchImpl)).toBe(
-      "http://127.0.0.1:3210/qa-credentials/v1/admin/list",
-    );
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe("http://127.0.0.1:3210/qa-credentials/v1/admin/list");
   });
 
   it("rejects unsafe endpoint-prefix overrides", async () => {

@@ -13,7 +13,7 @@ vi.mock("openclaw/plugin-sdk/runtime-config-snapshot", async () => {
   };
 });
 
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import {
   getSessionBindingService,
   registerSessionBindingAdapter,
@@ -203,12 +203,9 @@ describe("Discord ACP bind here end-to-end flow", () => {
       allowFrom: ["*"],
     });
 
-    expect(preflight).toMatchObject({
-      boundSessionKey: binding.targetSessionKey,
-      route: {
-        sessionKey: binding.targetSessionKey,
-        agentId: "codex",
-      },
-    });
+    expect(preflight).not.toBeNull();
+    expect(preflight?.boundSessionKey).toBe(binding.targetSessionKey);
+    expect(preflight?.route.sessionKey).toBe(binding.targetSessionKey);
+    expect(preflight?.route.agentId).toBe("codex");
   });
 });

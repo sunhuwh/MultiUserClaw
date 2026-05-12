@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createWebSearchTool } from "./web-search.js";
 
 const mocks = vi.hoisted(() => ({
   runWebSearch: vi.fn(),
@@ -25,28 +24,6 @@ vi.mock("../../secrets/runtime.js", () => ({
   getActiveSecretsRuntimeSnapshot: mocks.getActiveSecretsRuntimeSnapshot,
 }));
 
-type RunWebSearchParams = {
-  config?: unknown;
-  preferRuntimeProviders?: boolean;
-  runtimeWebSearch?: {
-    selectedProvider?: string;
-  };
-};
-
-type ProviderResolutionParams = {
-  value?: string;
-};
-
-function firstRunWebSearchParams(): RunWebSearchParams | undefined {
-  return mocks.runWebSearch.mock.calls[0]?.[0] as RunWebSearchParams | undefined;
-}
-
-function firstProviderResolutionParams(): ProviderResolutionParams | undefined {
-  return mocks.resolveManifestContractOwnerPluginId.mock.calls[0]?.[0] as
-    | ProviderResolutionParams
-    | undefined;
-}
-
 describe("web_search late-bound runtime fallback", () => {
   beforeEach(() => {
     mocks.runWebSearch.mockReset();
@@ -63,6 +40,7 @@ describe("web_search late-bound runtime fallback", () => {
   });
 
   it("falls back to options.runtimeWebSearch when active runtime web tools metadata is absent", async () => {
+    const { createWebSearchTool } = await import("./web-search.js");
     const tool = createWebSearchTool({
       config: {},
       lateBindRuntimeConfig: true,
@@ -76,10 +54,15 @@ describe("web_search late-bound runtime fallback", () => {
 
     await tool?.execute("call-search", { query: "openclaw" }, undefined);
 
-    expect(firstRunWebSearchParams()?.runtimeWebSearch?.selectedProvider).toBe("brave");
+    expect(mocks.runWebSearch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeWebSearch: expect.objectContaining({ selectedProvider: "brave" }),
+      }),
+    );
   });
 
   it("falls back to options.config when getActiveSecretsRuntimeSnapshot is null", async () => {
+    const { createWebSearchTool } = await import("./web-search.js");
     const fallbackConfig = {
       tools: { web: { search: { provider: "brave" } } },
     };
@@ -90,10 +73,15 @@ describe("web_search late-bound runtime fallback", () => {
 
     await tool?.execute("call-search", { query: "openclaw" }, undefined);
 
-    expect(firstRunWebSearchParams()?.config).toBe(fallbackConfig);
+    expect(mocks.runWebSearch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: fallbackConfig,
+      }),
+    );
   });
 
   it("uses configured provider id from config when no runtime selection is present", async () => {
+    const { createWebSearchTool } = await import("./web-search.js");
     const config = {
       tools: { web: { search: { provider: "Brave" } } },
     };
@@ -104,11 +92,16 @@ describe("web_search late-bound runtime fallback", () => {
 
     await tool?.execute("call-search", { query: "openclaw" }, undefined);
 
-    expect(firstProviderResolutionParams()?.value).toBe("brave");
-    expect(firstRunWebSearchParams()?.preferRuntimeProviders).toBe(true);
+    expect(mocks.resolveManifestContractOwnerPluginId).toHaveBeenCalledWith(
+      expect.objectContaining({ value: "brave" }),
+    );
+    expect(mocks.runWebSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ preferRuntimeProviders: true }),
+    );
   });
 
   it("keeps runtime provider discovery enabled when no provider id is selected anywhere", async () => {
+    const { createWebSearchTool } = await import("./web-search.js");
     const tool = createWebSearchTool({
       config: {},
       lateBindRuntimeConfig: true,
@@ -117,11 +110,14 @@ describe("web_search late-bound runtime fallback", () => {
     await tool?.execute("call-search", { query: "openclaw" }, undefined);
 
     expect(mocks.resolveManifestContractOwnerPluginId).not.toHaveBeenCalled();
-    expect(firstRunWebSearchParams()?.preferRuntimeProviders).toBe(true);
+    expect(mocks.runWebSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ preferRuntimeProviders: true }),
+    );
   });
 
   it("does not prefer runtime providers when the configured provider is a bundled manifest owner", async () => {
     mocks.resolveManifestContractOwnerPluginId.mockReturnValue("openclaw-bundled-brave");
+    const { createWebSearchTool } = await import("./web-search.js");
     const config = {
       tools: { web: { search: { provider: "brave" } } },
     };
@@ -132,7 +128,9 @@ describe("web_search late-bound runtime fallback", () => {
 
     await tool?.execute("call-search", { query: "openclaw" }, undefined);
 
-    expect(firstRunWebSearchParams()?.preferRuntimeProviders).toBe(false);
+    expect(mocks.runWebSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ preferRuntimeProviders: false }),
+    );
   });
 
   it("prefers active runtime metadata over options.runtimeWebSearch when present", async () => {
@@ -144,6 +142,7 @@ describe("web_search late-bound runtime fallback", () => {
         diagnostics: [],
       },
     });
+    const { createWebSearchTool } = await import("./web-search.js");
     const tool = createWebSearchTool({
       config: {},
       lateBindRuntimeConfig: true,
@@ -157,13 +156,18 @@ describe("web_search late-bound runtime fallback", () => {
 
     await tool?.execute("call-search", { query: "openclaw" }, undefined);
 
-    expect(firstRunWebSearchParams()?.runtimeWebSearch?.selectedProvider).toBe("perplexity");
+    expect(mocks.runWebSearch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeWebSearch: expect.objectContaining({ selectedProvider: "perplexity" }),
+      }),
+    );
   });
 
   it("honors late-bound disabled search config at execute time", async () => {
     mocks.getActiveSecretsRuntimeSnapshot.mockReturnValue({
       config: { tools: { web: { search: { enabled: false } } } },
     });
+    const { createWebSearchTool } = await import("./web-search.js");
     const tool = createWebSearchTool({
       config: { tools: { web: { search: { provider: "brave" } } } },
       lateBindRuntimeConfig: true,

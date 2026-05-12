@@ -1,12 +1,8 @@
-import type {
-  ChannelMessageActionAdapter,
-  ChannelMessageActionName,
-  ChannelOutboundAdapter,
-} from "openclaw/plugin-sdk/channel-contract";
+import type { ChannelOutboundAdapter } from "openclaw/plugin-sdk/channel-contract";
 import type { ChannelPlugin } from "openclaw/plugin-sdk/core";
 import { resolveOutboundSendDep } from "openclaw/plugin-sdk/outbound-send-deps";
 import { collectStatusIssuesFromLastError } from "openclaw/plugin-sdk/status-helpers";
-import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 
 function normalizeIMessageTestHandle(raw: string): string {
   let trimmed = raw.trim();
@@ -52,14 +48,6 @@ function normalizeIMessageTestHandle(raw: string): string {
 
 const defaultIMessageOutbound: ChannelOutboundAdapter = {
   deliveryMode: "direct",
-  deliveryCapabilities: {
-    durableFinal: {
-      text: true,
-      media: true,
-      replyTo: true,
-      messageSendingHooks: true,
-    },
-  },
   sendText: async ({ to, text, accountId, replyToId, deps, cfg }) => {
     const sendIMessage = resolveOutboundSendDep<
       (
@@ -94,42 +82,8 @@ const defaultIMessageOutbound: ChannelOutboundAdapter = {
   },
 };
 
-const defaultIMessageActions: ChannelMessageActionAdapter = {
-  describeMessageTool: () => ({
-    actions: [
-      "react",
-      "edit",
-      "unsend",
-      "reply",
-      "sendWithEffect",
-      "upload-file",
-      "renameGroup",
-      "setGroupIcon",
-      "addParticipant",
-      "removeParticipant",
-      "leaveGroup",
-    ],
-  }),
-  supportsAction: ({ action }) =>
-    new Set<ChannelMessageActionName>([
-      "react",
-      "edit",
-      "unsend",
-      "reply",
-      "sendWithEffect",
-      "upload-file",
-      "sendAttachment",
-      "renameGroup",
-      "setGroupIcon",
-      "addParticipant",
-      "removeParticipant",
-      "leaveGroup",
-    ]).has(action),
-};
-
 export const createIMessageTestPlugin = (params?: {
   outbound?: ChannelOutboundAdapter;
-  actions?: ChannelMessageActionAdapter;
 }): ChannelPlugin => ({
   id: "imessage",
   meta: {
@@ -148,7 +102,6 @@ export const createIMessageTestPlugin = (params?: {
   status: {
     collectStatusIssues: (accounts) => collectStatusIssuesFromLastError("imessage", accounts),
   },
-  actions: params?.actions ?? defaultIMessageActions,
   outbound: params?.outbound ?? defaultIMessageOutbound,
   messaging: {
     targetResolver: {

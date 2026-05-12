@@ -142,11 +142,8 @@ describe("fetchDiscord", () => {
     });
 
     expect(result).toEqual({ id: "42" });
-    if (!request) {
-      throw new Error("expected Discord request init");
-    }
-    expect(request.method).toBe("POST");
-    expect(request.body).toBe(JSON.stringify({ content: "hello" }));
-    expect(new Headers(request.headers).get("content-type")).toBe("application/json");
+    expect(request?.method).toBe("POST");
+    expect(request?.body).toBe(JSON.stringify({ content: "hello" }));
+    expect(new Headers(request?.headers).get("content-type")).toBe("application/json");
   });
 });

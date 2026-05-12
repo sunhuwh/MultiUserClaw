@@ -2,7 +2,7 @@ import type {
   ProviderAuthContext,
   ProviderAuthMethodNonInteractiveContext,
 } from "openclaw/plugin-sdk/plugin-entry";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const { readClaudeCliCredentialsForSetup, readClaudeCliCredentialsForSetupNonInteractive } =
   vi.hoisted(() => ({
@@ -23,16 +23,6 @@ const { buildAnthropicCliMigrationResult, hasClaudeCliAuth } = await import("./c
 const { createTestWizardPrompter, registerSingleProviderPlugin } =
   await import("openclaw/plugin-sdk/plugin-test-runtime");
 const { default: anthropicPlugin } = await import("./index.js");
-
-beforeEach(() => {
-  readClaudeCliCredentialsForSetup.mockReset();
-  readClaudeCliCredentialsForSetupNonInteractive.mockReset();
-});
-
-afterAll(() => {
-  vi.doUnmock("./cli-auth-seam.js");
-  vi.resetModules();
-});
 
 async function resolveAnthropicCliAuthMethod() {
   const provider = await registerSingleProviderPlugin(anthropicPlugin);
@@ -122,7 +112,7 @@ describe("anthropic cli migration", () => {
       },
     });
 
-    expect(result.profiles).toStrictEqual([]);
+    expect(result.profiles).toEqual([]);
     expect(result.defaultModel).toBe("anthropic/claude-opus-4-7");
     expect(result.configPatch).toEqual({
       agents: {

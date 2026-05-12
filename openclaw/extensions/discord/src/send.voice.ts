@@ -1,7 +1,8 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { recordChannelActivity } from "openclaw/plugin-sdk/channel-activity-runtime";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import {
   extensionForMime,
   maxBytesForKind,
@@ -9,12 +10,11 @@ import {
 } from "openclaw/plugin-sdk/media-runtime";
 import { requireRuntimeConfig } from "openclaw/plugin-sdk/plugin-config-runtime";
 import type { RetryConfig } from "openclaw/plugin-sdk/retry-runtime";
-import { tempWorkspace, resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
+import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
 import { loadWebMediaRaw } from "openclaw/plugin-sdk/web-media";
 import { resolveDiscordAccount } from "./accounts.js";
 import type { RequestClient } from "./internal/discord.js";
 import { parseAndResolveRecipient } from "./recipient-resolution.js";
-import { createDiscordSendResult } from "./send.receipt.js";
 import { buildDiscordSendError, createDiscordClient, resolveChannelId } from "./send.shared.js";
 import type { DiscordSendResult } from "./send.types.js";
 import {
@@ -38,28 +38,23 @@ function toDiscordSendResult(
   result: { id?: string | null; channel_id?: string | null },
   fallbackChannelId: string,
 ): DiscordSendResult {
-  return createDiscordSendResult({
-    result,
-    fallbackChannelId,
-    kind: "voice",
-  });
+  return {
+    messageId: result.id || "unknown",
+    channelId: result.channel_id ?? fallbackChannelId,
+  };
 }
 
-async function materializeVoiceMessageInput(
-  mediaUrl: string,
-): Promise<{ filePath: string; cleanup: () => Promise<void> }> {
+async function materializeVoiceMessageInput(mediaUrl: string): Promise<{ filePath: string }> {
   // Security: reuse the standard media loader so we apply SSRF guards + allowed-local-root checks.
   // Then write to a private temp file so ffmpeg/ffprobe never sees the original URL/path string.
   const media = await loadWebMediaRaw(mediaUrl, maxBytesForKind("audio"));
   const extFromName = media.fileName ? path.extname(media.fileName) : "";
   const extFromMime = media.contentType ? extensionForMime(media.contentType) : "";
   const ext = extFromName || extFromMime || ".bin";
-  const workspace = await tempWorkspace({
-    rootDir: resolvePreferredOpenClawTmpDir(),
-    prefix: "voice-src-",
-  });
-  const filePath = await workspace.write(`input${ext}`, media.buffer);
-  return { filePath, cleanup: async () => await workspace.cleanup() };
+  const tempDir = resolvePreferredOpenClawTmpDir();
+  const filePath = path.join(tempDir, `voice-src-${crypto.randomUUID()}${ext}`);
+  await fs.writeFile(filePath, media.buffer, { mode: 0o600 });
+  return { filePath };
 }
 
 /**
@@ -77,8 +72,7 @@ export async function sendVoiceMessageDiscord(
   audioPath: string,
   opts: VoiceMessageOpts,
 ): Promise<DiscordSendResult> {
-  const { filePath: localInputPath, cleanup: cleanupLocalInput } =
-    await materializeVoiceMessageInput(audioPath);
+  const { filePath: localInputPath } = await materializeVoiceMessageInput(audioPath);
   let oggPath: string | null = null;
   let oggCleanup = false;
   let token: string | undefined;
@@ -135,6 +129,6 @@ export async function sendVoiceMessageDiscord(
     throw err;
   } finally {
     await unlinkIfExists(oggCleanup ? oggPath : null);
-    await cleanupLocalInput();
+    await unlinkIfExists(localInputPath);
   }
 }

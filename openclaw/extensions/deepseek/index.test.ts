@@ -16,54 +16,6 @@ type PayloadCapture = {
   payload?: Record<string, unknown>;
 };
 
-type ThinkingPayload = {
-  type?: unknown;
-};
-
-type ReplayToolCall = {
-  id?: unknown;
-  type?: unknown;
-  function?: {
-    name?: unknown;
-    arguments?: unknown;
-  };
-};
-
-type RegisteredProvider = Awaited<ReturnType<typeof registerSingleProviderPlugin>>;
-
-const emptyUsage = {
-  input: 0,
-  output: 0,
-  cacheRead: 0,
-  cacheWrite: 0,
-  totalTokens: 0,
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-};
-
-function requireThinkingProfileResolver(
-  provider: RegisteredProvider,
-): NonNullable<RegisteredProvider["resolveThinkingProfile"]> {
-  if (!provider.resolveThinkingProfile) {
-    throw new Error("DeepSeek provider did not register a thinking profile resolver");
-  }
-  return provider.resolveThinkingProfile;
-}
-
-const readToolCall = { type: "toolCall", id: "call_1", name: "read", arguments: {} };
-const readToolResult = {
-  role: "toolResult",
-  toolCallId: "call_1",
-  toolName: "read",
-  content: [{ type: "text", text: "ok" }],
-  isError: false,
-  timestamp: 3,
-};
-const readTool = {
-  name: "read",
-  description: "Read data",
-  parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
-};
-
 function deepSeekV4Model(id: "deepseek-v4-flash" | "deepseek-v4-pro"): OpenAICompletionsModel {
   return {
     provider: "deepseek",
@@ -84,49 +36,6 @@ function deepSeekV4Model(id: "deepseek-v4-flash" | "deepseek-v4-pro"): OpenAICom
   } as OpenAICompletionsModel;
 }
 
-function replayAssistantMessage(params: {
-  provider: string;
-  model: string;
-  content: Array<Record<string, unknown>>;
-  stopReason: "stop" | "toolUse";
-}) {
-  return {
-    role: "assistant",
-    api: "openai-completions",
-    provider: params.provider,
-    model: params.model,
-    content: params.content,
-    usage: emptyUsage,
-    stopReason: params.stopReason,
-    timestamp: 2,
-  };
-}
-
-function readToolReplayContext(assistantMessage: ReturnType<typeof replayAssistantMessage>) {
-  return {
-    messages: [{ role: "user", content: "hi", timestamp: 1 }, assistantMessage, readToolResult],
-    tools: [readTool],
-  } as Context;
-}
-
-function deepSeekReasoningToolReplayContext() {
-  return readToolReplayContext(
-    replayAssistantMessage({
-      provider: "deepseek",
-      model: "deepseek-v4-flash",
-      content: [
-        {
-          type: "thinking",
-          thinking: "call reasoning",
-          thinkingSignature: "reasoning_content",
-        },
-        readToolCall,
-      ],
-      stopReason: "toolUse",
-    }),
-  );
-}
-
 function createPayloadCapturingStream(capture: PayloadCapture) {
   return (
     streamModel: OpenAICompletionsModel,
@@ -143,33 +52,6 @@ function createPayloadCapturingStream(capture: PayloadCapture) {
   };
 }
 
-function requireThinkingWrapper(
-  wrapper: ReturnType<typeof createDeepSeekV4ThinkingWrapper>,
-  label: string,
-): NonNullable<ReturnType<typeof createDeepSeekV4ThinkingWrapper>> {
-  if (!wrapper) {
-    throw new Error(`expected DeepSeek thinking wrapper for ${label}`);
-  }
-  return wrapper;
-}
-
-function readThinking(payload: Record<string, unknown> | undefined): ThinkingPayload | undefined {
-  return payload?.thinking as ThinkingPayload | undefined;
-}
-
-function readPayloadMessage(
-  capture: PayloadCapture,
-  index: number,
-): Record<string, unknown> | undefined {
-  return (capture.payload?.messages as Array<Record<string, unknown>> | undefined)?.[index];
-}
-
-function readFirstToolCall(
-  message: Record<string, unknown> | undefined,
-): ReplayToolCall | undefined {
-  return (message?.tool_calls as ReplayToolCall[] | undefined)?.[0];
-}
-
 describe("deepseek provider plugin", () => {
   it("registers DeepSeek with api-key auth wizard metadata", async () => {
     const provider = await registerSingleProviderPlugin(deepseekPlugin);
@@ -182,11 +64,9 @@ describe("deepseek provider plugin", () => {
     expect(provider.label).toBe("DeepSeek");
     expect(provider.envVars).toEqual(["DEEPSEEK_API_KEY"]);
     expect(provider.auth).toHaveLength(1);
-    if (!resolved) {
-      throw new Error("expected DeepSeek api-key auth choice");
-    }
-    expect(resolved.provider.id).toBe("deepseek");
-    expect(resolved.method.id).toBe("api-key");
+    expect(resolved).not.toBeNull();
+    expect(resolved?.provider.id).toBe("deepseek");
+    expect(resolved?.method.id).toBe("api-key");
   });
 
   it("builds the static DeepSeek model catalog", async () => {
@@ -201,12 +81,17 @@ describe("deepseek provider plugin", () => {
       "deepseek-chat",
       "deepseek-reasoner",
     ]);
-    const flashModel = catalogProvider.models?.find((model) => model.id === "deepseek-v4-flash");
-    expect(flashModel?.reasoning).toBe(true);
-    expect(flashModel?.contextWindow).toBe(1_000_000);
-    expect(flashModel?.maxTokens).toBe(384_000);
-    expect(flashModel?.compat?.supportsReasoningEffort).toBe(true);
-    expect(flashModel?.compat?.maxTokensField).toBe("max_tokens");
+    expect(catalogProvider.models?.find((model) => model.id === "deepseek-v4-flash")).toMatchObject(
+      {
+        reasoning: true,
+        contextWindow: 1_000_000,
+        maxTokens: 384_000,
+        compat: expect.objectContaining({
+          supportsReasoningEffort: true,
+          maxTokensField: "max_tokens",
+        }),
+      },
+    );
     expect(
       catalogProvider.models?.find((model) => model.id === "deepseek-reasoner")?.reasoning,
     ).toBe(true);
@@ -215,16 +100,19 @@ describe("deepseek provider plugin", () => {
   it("owns OpenAI-compatible replay policy", async () => {
     const provider = await registerSingleProviderPlugin(deepseekPlugin);
 
-    const replayPolicy = provider.buildReplayPolicy?.({ modelApi: "openai-completions" } as never);
-    expect(replayPolicy?.sanitizeToolCallIds).toBe(true);
-    expect(replayPolicy?.toolCallIdMode).toBe("strict");
-    expect(replayPolicy?.validateGeminiTurns).toBe(true);
-    expect(replayPolicy?.validateAnthropicTurns).toBe(true);
+    expect(provider.buildReplayPolicy?.({ modelApi: "openai-completions" } as never)).toMatchObject(
+      {
+        sanitizeToolCallIds: true,
+        toolCallIdMode: "strict",
+        validateGeminiTurns: true,
+        validateAnthropicTurns: true,
+      },
+    );
   });
 
   it("advertises max thinking levels for DeepSeek V4 models only", async () => {
     const provider = await registerSingleProviderPlugin(deepseekPlugin);
-    const resolveThinkingProfile = requireThinkingProfileResolver(provider);
+    const resolveThinkingProfile = provider.resolveThinkingProfile!;
     const expectedV4Levels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
     expect(
@@ -270,11 +158,9 @@ describe("deepseek provider plugin", () => {
       return stream;
     };
 
-    const wrapThinkingOff = requireThinkingWrapper(
-      createDeepSeekV4ThinkingWrapper(baseStreamFn as never, "off"),
-      "off",
-    );
-    await wrapThinkingOff(
+    const wrapThinkingOff = createDeepSeekV4ThinkingWrapper(baseStreamFn as never, "off");
+    expect(wrapThinkingOff).toBeDefined();
+    await wrapThinkingOff?.(
       {
         provider: "deepseek",
         id: "deepseek-v4-pro",
@@ -284,14 +170,12 @@ describe("deepseek provider plugin", () => {
       {},
     );
 
-    expect(readThinking(capturedPayload)?.type).toBe("disabled");
+    expect(capturedPayload).toMatchObject({ thinking: { type: "disabled" } });
     expect(capturedPayload).not.toHaveProperty("reasoning_effort");
 
-    const wrapThinkingXhigh = requireThinkingWrapper(
-      createDeepSeekV4ThinkingWrapper(baseStreamFn as never, "xhigh"),
-      "xhigh",
-    );
-    await wrapThinkingXhigh(
+    const wrapThinkingXhigh = createDeepSeekV4ThinkingWrapper(baseStreamFn as never, "xhigh");
+    expect(wrapThinkingXhigh).toBeDefined();
+    await wrapThinkingXhigh?.(
       {
         provider: "deepseek",
         id: "deepseek-v4-pro",
@@ -301,61 +185,145 @@ describe("deepseek provider plugin", () => {
       {},
     );
 
-    expect(readThinking(capturedPayload)?.type).toBe("enabled");
-    expect(capturedPayload?.reasoning_effort).toBe("max");
+    expect(capturedPayload).toMatchObject({
+      thinking: { type: "enabled" },
+      reasoning_effort: "max",
+    });
   });
 
   it("preserves replayed reasoning_content when DeepSeek V4 thinking is enabled", async () => {
     const capture: PayloadCapture = {};
     const model = deepSeekV4Model("deepseek-v4-flash");
-    const context = deepSeekReasoningToolReplayContext();
+    const context = {
+      messages: [
+        { role: "user", content: "hi", timestamp: 1 },
+        {
+          role: "assistant",
+          api: "openai-completions",
+          provider: "deepseek",
+          model: "deepseek-v4-flash",
+          content: [
+            {
+              type: "thinking",
+              thinking: "call reasoning",
+              thinkingSignature: "reasoning_content",
+            },
+            { type: "toolCall", id: "call_1", name: "read", arguments: {} },
+          ],
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: "toolUse",
+          timestamp: 2,
+        },
+        {
+          role: "toolResult",
+          toolCallId: "call_1",
+          toolName: "read",
+          content: [{ type: "text", text: "ok" }],
+          isError: false,
+          timestamp: 3,
+        },
+      ],
+      tools: [
+        {
+          name: "read",
+          description: "Read data",
+          parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
+        },
+      ],
+    } as Context;
     const baseStreamFn = createPayloadCapturingStream(capture);
 
-    const wrapThinkingHigh = requireThinkingWrapper(
-      createDeepSeekV4ThinkingWrapper(baseStreamFn as never, "high"),
-      "high",
-    );
-    await wrapThinkingHigh(model, context, {});
+    const wrapThinkingHigh = createDeepSeekV4ThinkingWrapper(baseStreamFn as never, "high");
+    expect(wrapThinkingHigh).toBeDefined();
+    await wrapThinkingHigh?.(model, context, {});
 
-    expect(readThinking(capture.payload)?.type).toBe("enabled");
-    expect(capture.payload?.reasoning_effort).toBe("high");
-    const assistantMessage = readPayloadMessage(capture, 1);
-    expect(assistantMessage?.role).toBe("assistant");
-    expect(assistantMessage?.reasoning_content).toBe("call reasoning");
-    const toolCall = readFirstToolCall(assistantMessage);
-    expect(toolCall?.id).toBe("call_1");
-    expect(toolCall?.type).toBe("function");
-    expect(toolCall?.function?.name).toBe("read");
-    expect(toolCall?.function?.arguments).toBe("{}");
+    expect(capture.payload).toMatchObject({
+      thinking: { type: "enabled" },
+      reasoning_effort: "high",
+    });
+    expect((capture.payload?.messages as Array<Record<string, unknown>>)[1]).toMatchObject({
+      role: "assistant",
+      reasoning_content: "call reasoning",
+      tool_calls: [
+        {
+          id: "call_1",
+          type: "function",
+          function: {
+            name: "read",
+            arguments: "{}",
+          },
+        },
+      ],
+    });
   });
 
   it("adds blank reasoning_content for replayed tool calls from non-DeepSeek turns", async () => {
     const capture: PayloadCapture = {};
     const model = deepSeekV4Model("deepseek-v4-pro");
-    const context = readToolReplayContext(
-      replayAssistantMessage({
-        provider: "openai",
-        model: "gpt-5.4",
-        content: [readToolCall],
-        stopReason: "toolUse",
-      }),
-    );
+    const context = {
+      messages: [
+        { role: "user", content: "hi", timestamp: 1 },
+        {
+          role: "assistant",
+          api: "openai-completions",
+          provider: "openai",
+          model: "gpt-5.4",
+          content: [{ type: "toolCall", id: "call_1", name: "read", arguments: {} }],
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: "toolUse",
+          timestamp: 2,
+        },
+        {
+          role: "toolResult",
+          toolCallId: "call_1",
+          toolName: "read",
+          content: [{ type: "text", text: "ok" }],
+          isError: false,
+          timestamp: 3,
+        },
+      ],
+      tools: [
+        {
+          name: "read",
+          description: "Read data",
+          parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
+        },
+      ],
+    } as Context;
     const baseStreamFn = createPayloadCapturingStream(capture);
 
-    const wrapThinkingHigh = requireThinkingWrapper(
-      createDeepSeekV4ThinkingWrapper(baseStreamFn as never, "high"),
-      "high",
-    );
-    await wrapThinkingHigh(model, context, {});
+    const wrapThinkingHigh = createDeepSeekV4ThinkingWrapper(baseStreamFn as never, "high");
+    expect(wrapThinkingHigh).toBeDefined();
+    await wrapThinkingHigh?.(model, context, {});
 
-    const assistantMessage = readPayloadMessage(capture, 1);
-    expect(assistantMessage?.role).toBe("assistant");
-    expect(assistantMessage?.reasoning_content).toBe("");
-    const toolCall = readFirstToolCall(assistantMessage);
-    expect(toolCall?.id).toBe("call_1");
-    expect(toolCall?.type).toBe("function");
-    expect(toolCall?.function?.name).toBe("read");
-    expect(toolCall?.function?.arguments).toBe("{}");
+    expect((capture.payload?.messages as Array<Record<string, unknown>>)[1]).toMatchObject({
+      role: "assistant",
+      reasoning_content: "",
+      tool_calls: [
+        {
+          id: "call_1",
+          type: "function",
+          function: {
+            name: "read",
+            arguments: "{}",
+          },
+        },
+      ],
+    });
   });
 
   it("adds blank reasoning_content for replayed plain assistant messages", async () => {
@@ -364,42 +332,96 @@ describe("deepseek provider plugin", () => {
     const context = {
       messages: [
         { role: "user", content: "hi", timestamp: 1 },
-        replayAssistantMessage({
+        {
+          role: "assistant",
+          api: "openai-completions",
           provider: "openai",
           model: "gpt-5.4",
           content: [{ type: "text", text: "Hello." }],
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
           stopReason: "stop",
-        }),
+          timestamp: 2,
+        },
         { role: "user", content: "next", timestamp: 3 },
       ],
     } as Context;
     const baseStreamFn = createPayloadCapturingStream(capture);
 
-    const wrapThinkingHigh = requireThinkingWrapper(
-      createDeepSeekV4ThinkingWrapper(baseStreamFn as never, "high"),
-      "high",
-    );
-    await wrapThinkingHigh(model, context, {});
+    const wrapThinkingHigh = createDeepSeekV4ThinkingWrapper(baseStreamFn as never, "high");
+    expect(wrapThinkingHigh).toBeDefined();
+    await wrapThinkingHigh?.(model, context, {});
 
-    const assistantMessage = readPayloadMessage(capture, 1);
-    expect(assistantMessage?.role).toBe("assistant");
-    expect(assistantMessage?.content).toBe("Hello.");
-    expect(assistantMessage?.reasoning_content).toBe("");
+    expect((capture.payload?.messages as Array<Record<string, unknown>>)[1]).toMatchObject({
+      role: "assistant",
+      content: "Hello.",
+      reasoning_content: "",
+    });
   });
 
   it("strips replayed reasoning_content when DeepSeek V4 thinking is disabled", async () => {
     const capture: PayloadCapture = {};
     const model = deepSeekV4Model("deepseek-v4-flash");
-    const context = deepSeekReasoningToolReplayContext();
+    const context = {
+      messages: [
+        { role: "user", content: "hi", timestamp: 1 },
+        {
+          role: "assistant",
+          api: "openai-completions",
+          provider: "deepseek",
+          model: "deepseek-v4-flash",
+          content: [
+            {
+              type: "thinking",
+              thinking: "call reasoning",
+              thinkingSignature: "reasoning_content",
+            },
+            { type: "toolCall", id: "call_1", name: "read", arguments: {} },
+          ],
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: "toolUse",
+          timestamp: 2,
+        },
+        {
+          role: "toolResult",
+          toolCallId: "call_1",
+          toolName: "read",
+          content: [{ type: "text", text: "ok" }],
+          isError: false,
+          timestamp: 3,
+        },
+      ],
+      tools: [
+        {
+          name: "read",
+          description: "Read data",
+          parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
+        },
+      ],
+    } as Context;
     const baseStreamFn = createPayloadCapturingStream(capture);
 
-    const wrapThinkingNone = requireThinkingWrapper(
-      createDeepSeekV4ThinkingWrapper(baseStreamFn as never, "none" as never),
-      "none",
+    const wrapThinkingNone = createDeepSeekV4ThinkingWrapper(
+      baseStreamFn as never,
+      "none" as never,
     );
-    await wrapThinkingNone(model, context, {});
+    expect(wrapThinkingNone).toBeDefined();
+    await wrapThinkingNone?.(model, context, {});
 
-    expect(readThinking(capture.payload)?.type).toBe("disabled");
+    expect(capture.payload).toMatchObject({ thinking: { type: "disabled" } });
     expect(capture.payload).not.toHaveProperty("reasoning_effort");
     expect((capture.payload?.messages as Array<Record<string, unknown>>)[1]).not.toHaveProperty(
       "reasoning_content",

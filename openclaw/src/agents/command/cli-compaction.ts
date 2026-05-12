@@ -1,9 +1,7 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { SessionManager } from "@mariozechner/pi-coding-agent";
 import type { SessionEntry } from "../../config/sessions/types.js";
-import type { AgentCompactionMode } from "../../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { ensureContextEnginesInitialized as ensureContextEnginesInitializedImpl } from "../../context-engine/init.js";
 import { resolveContextEngine as resolveContextEngineImpl } from "../../context-engine/registry.js";
 import type { ContextEngine } from "../../context-engine/types.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
@@ -12,10 +10,7 @@ import { runContextEngineMaintenance as runContextEngineMaintenanceImpl } from "
 import { shouldPreemptivelyCompactBeforePrompt as shouldPreemptivelyCompactBeforePromptImpl } from "../pi-embedded-runner/run/preemptive-compaction.js";
 import { resolveLiveToolResultMaxChars as resolveLiveToolResultMaxCharsImpl } from "../pi-embedded-runner/tool-result-truncation.js";
 import { createPreparedEmbeddedPiSettingsManager as createPreparedEmbeddedPiSettingsManagerImpl } from "../pi-project-settings.js";
-import {
-  applyPiAutoCompactionGuard as applyPiAutoCompactionGuardImpl,
-  resolveEffectiveCompactionMode,
-} from "../pi-settings.js";
+import { applyPiAutoCompactionGuard as applyPiAutoCompactionGuardImpl } from "../pi-settings.js";
 import type { SkillSnapshot } from "../skills.js";
 import { recordCliCompactionInStore as recordCliCompactionInStoreImpl } from "./session-store.js";
 
@@ -33,7 +28,6 @@ type SettingsManagerLike = {
 };
 type CliCompactionDeps = {
   openSessionManager: (sessionFile: string) => SessionManagerLike;
-  ensureContextEnginesInitialized: () => void;
   resolveContextEngine: (cfg: OpenClawConfig) => Promise<ContextEngine>;
   createPreparedEmbeddedPiSettingsManager: (params: {
     cwd: string;
@@ -44,7 +38,6 @@ type CliCompactionDeps = {
   applyPiAutoCompactionGuard: (params: {
     settingsManager: SettingsManagerLike;
     contextEngineInfo?: ContextEngine["info"];
-    compactionMode?: AgentCompactionMode;
   }) => unknown;
   shouldPreemptivelyCompactBeforePrompt: typeof shouldPreemptivelyCompactBeforePromptImpl;
   resolveLiveToolResultMaxChars: typeof resolveLiveToolResultMaxCharsImpl;
@@ -56,7 +49,6 @@ const log = createSubsystemLogger("agents/cli-compaction");
 
 const cliCompactionDeps: CliCompactionDeps = {
   openSessionManager: (sessionFile: string) => SessionManager.open(sessionFile),
-  ensureContextEnginesInitialized: ensureContextEnginesInitializedImpl,
   resolveContextEngine: resolveContextEngineImpl,
   createPreparedEmbeddedPiSettingsManager: createPreparedEmbeddedPiSettingsManagerImpl,
   applyPiAutoCompactionGuard: applyPiAutoCompactionGuardImpl,
@@ -73,7 +65,6 @@ export function setCliCompactionTestDeps(overrides: Partial<typeof cliCompaction
 export function resetCliCompactionTestDeps(): void {
   Object.assign(cliCompactionDeps, {
     openSessionManager: (sessionFile: string) => SessionManager.open(sessionFile),
-    ensureContextEnginesInitialized: ensureContextEnginesInitializedImpl,
     resolveContextEngine: resolveContextEngineImpl,
     createPreparedEmbeddedPiSettingsManager: createPreparedEmbeddedPiSettingsManagerImpl,
     applyPiAutoCompactionGuard: applyPiAutoCompactionGuardImpl,
@@ -205,7 +196,6 @@ export async function runCliTurnCompactionLifecycle(params: {
     return params.sessionEntry;
   }
 
-  cliCompactionDeps.ensureContextEnginesInitialized();
   const contextEngine = await cliCompactionDeps.resolveContextEngine(params.cfg);
   const sessionManager = cliCompactionDeps.openSessionManager(sessionFile);
   const settingsManager = await cliCompactionDeps.createPreparedEmbeddedPiSettingsManager({
@@ -217,7 +207,6 @@ export async function runCliTurnCompactionLifecycle(params: {
   await cliCompactionDeps.applyPiAutoCompactionGuard({
     settingsManager,
     contextEngineInfo: contextEngine.info,
-    compactionMode: resolveEffectiveCompactionMode(params.cfg),
   });
 
   const preemptiveCompaction = cliCompactionDeps.shouldPreemptivelyCompactBeforePrompt({

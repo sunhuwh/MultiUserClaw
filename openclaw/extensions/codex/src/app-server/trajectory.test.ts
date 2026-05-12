@@ -8,8 +8,6 @@ import {
   resolveCodexTrajectoryPointerFlags,
 } from "./trajectory.js";
 
-type CodexTrajectoryRecorder = NonNullable<ReturnType<typeof createCodexTrajectoryRecorder>>;
-
 const tempDirs: string[] = [];
 
 function makeTempDir(): string {
@@ -23,16 +21,6 @@ afterEach(() => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
-
-function expectTrajectoryRecorder(
-  recorder: ReturnType<typeof createCodexTrajectoryRecorder>,
-): CodexTrajectoryRecorder {
-  if (recorder === null) {
-    throw new Error("Expected Codex trajectory recorder");
-  }
-  expect(typeof recorder.recordEvent).toBe("function");
-  return recorder;
-}
 
 describe("Codex trajectory recorder", () => {
   it("keeps write flags usable when O_NOFOLLOW is unavailable", () => {
@@ -64,13 +52,13 @@ describe("Codex trajectory recorder", () => {
       env: {},
     });
 
-    const trajectoryRecorder = expectTrajectoryRecorder(recorder);
-    trajectoryRecorder.recordEvent("session.started", {
+    expect(recorder).not.toBeNull();
+    recorder?.recordEvent("session.started", {
       apiKey: "secret",
       headers: [{ name: "Authorization", value: "Bearer sk-test-secret-token" }],
       command: "curl -H 'Authorization: Bearer sk-other-secret-token'",
     });
-    await trajectoryRecorder.flush();
+    await recorder?.flush();
 
     const filePath = path.join(tmpDir, "session.trajectory.jsonl");
     const content = fs.readFileSync(filePath, "utf8");
@@ -94,9 +82,8 @@ describe("Codex trajectory recorder", () => {
       env: { OPENCLAW_TRAJECTORY_DIR: tmpDir },
     });
 
-    const trajectoryRecorder = expectTrajectoryRecorder(recorder);
-    trajectoryRecorder.recordEvent("session.started");
-    await trajectoryRecorder.flush();
+    recorder?.recordEvent("session.started");
+    await recorder?.flush();
 
     expect(fs.existsSync(path.join(tmpDir, "___evil_session.jsonl"))).toBe(true);
   });
@@ -132,9 +119,8 @@ describe("Codex trajectory recorder", () => {
       env: {},
     });
 
-    const trajectoryRecorder = expectTrajectoryRecorder(recorder);
-    trajectoryRecorder.recordEvent("session.started");
-    await trajectoryRecorder.flush();
+    recorder?.recordEvent("session.started");
+    await recorder?.flush();
 
     expect(fs.existsSync(path.join(targetDir, "session.trajectory.jsonl"))).toBe(false);
   });
@@ -151,13 +137,12 @@ describe("Codex trajectory recorder", () => {
       env: {},
     });
 
-    const trajectoryRecorder = expectTrajectoryRecorder(recorder);
-    trajectoryRecorder.recordEvent("context.compiled", {
+    recorder?.recordEvent("context.compiled", {
       fields: Object.fromEntries(
         Array.from({ length: 100 }, (_, index) => [`field-${index}`, "x".repeat(3_000)]),
       ),
     });
-    await trajectoryRecorder.flush();
+    await recorder?.flush();
 
     const parsed = JSON.parse(
       fs.readFileSync(path.join(tmpDir, "session.trajectory.jsonl"), "utf8"),

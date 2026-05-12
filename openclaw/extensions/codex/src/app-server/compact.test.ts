@@ -161,28 +161,21 @@ describe("maybeCompactCodexAppServerSession", () => {
     const fake = createFakeCodexClient();
     __testing.setCodexAppServerClientFactoryForTests(async () => fake.client);
     const sessionFile = await writeTestBinding();
-    const compact = vi.fn(async (_params: unknown) => ({
-      ok: true,
-      compacted: true,
-      result: {
-        summary: "engine summary",
-        firstKeptEntryId: "entry-1",
-        tokensBefore: 55,
-        details: { engine: "lossless-claw" },
-      },
-    }));
-    const maintain = vi.fn(
-      async (_params: Parameters<NonNullable<ContextEngine["maintain"]>>[0]) => ({
-        changed: false,
-        bytesFreed: 0,
-        rewrittenEntries: 0,
-      }),
-    );
+    const maintain = vi.fn(async () => ({ changed: false, bytesFreed: 0, rewrittenEntries: 0 }));
     const contextEngine: ContextEngine = {
       info: { id: "lossless-claw", name: "Lossless Claw", ownsCompaction: true },
       assemble: vi.fn() as never,
       ingest: vi.fn() as never,
-      compact,
+      compact: vi.fn(async () => ({
+        ok: true,
+        compacted: true,
+        result: {
+          summary: "engine summary",
+          firstKeptEntryId: "entry-1",
+          tokensBefore: 55,
+          details: { engine: "lossless-claw" },
+        },
+      })),
       maintain,
     };
 
@@ -225,34 +218,26 @@ describe("maybeCompactCodexAppServerSession", () => {
         },
       },
     });
-    expect(compact).toHaveBeenCalledTimes(1);
-    const [compactCall] = compact.mock.calls[0] ?? [];
-    expect(compactCall).toStrictEqual({
-      sessionId: "session-1",
-      sessionKey: "agent:main:session-1",
-      sessionFile,
-      tokenBudget: 777,
-      currentTokenCount: 123,
-      compactionTarget: "threshold",
-      customInstructions: undefined,
-      force: true,
-      runtimeContext: { workspaceDir: tempDir, provider: "codex" },
-    });
-    expect(maintain).toHaveBeenCalledTimes(1);
-    const [maintainCall] = maintain.mock.calls[0] ?? [];
-    const maintainParams = maintainCall as
-      | {
-          sessionId?: string;
-          sessionKey?: string;
-          sessionFile?: string;
-          runtimeContext?: { workspaceDir?: string; provider?: string };
-        }
-      | undefined;
-    expect(maintainParams?.sessionId).toBe("session-1");
-    expect(maintainParams?.sessionKey).toBe("agent:main:session-1");
-    expect(maintainParams?.sessionFile).toBe(sessionFile);
-    expect(maintainParams?.runtimeContext?.workspaceDir).toBe(tempDir);
-    expect(maintainParams?.runtimeContext?.provider).toBe("codex");
+    expect(contextEngine.compact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tokenBudget: 777,
+        currentTokenCount: 123,
+        compactionTarget: "threshold",
+        force: true,
+        runtimeContext: expect.objectContaining({
+          workspaceDir: tempDir,
+          provider: "codex",
+        }),
+      }),
+    );
+    expect(maintain).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeContext: expect.objectContaining({
+          workspaceDir: tempDir,
+          provider: "codex",
+        }),
+      }),
+    );
   });
 
   it("still runs native compaction when context-engine maintenance fails", async () => {

@@ -1,8 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  resolveWebFetchToolRuntimeContext,
-  resolveWebSearchToolRuntimeContext,
-} from "./web-tool-runtime-context.js";
 
 const mocks = vi.hoisted(() => ({
   getActiveRuntimeWebToolsMetadata: vi.fn(),
@@ -21,14 +17,6 @@ vi.mock("../../secrets/runtime-web-tools-state.js", () => ({
 vi.mock("../../secrets/runtime.js", () => ({
   getActiveSecretsRuntimeSnapshot: mocks.getActiveSecretsRuntimeSnapshot,
 }));
-
-function latestOwnerLookupParams(): Record<string, unknown> {
-  const params = mocks.resolveManifestContractOwnerPluginId.mock.calls.at(-1)?.[0];
-  if (!params || typeof params !== "object") {
-    throw new Error("expected owner lookup params");
-  }
-  return params as Record<string, unknown>;
-}
 
 describe("web tool runtime context", () => {
   beforeEach(() => {
@@ -59,6 +47,7 @@ describe("web tool runtime context", () => {
       },
       diagnostics: [],
     });
+    const { resolveWebSearchToolRuntimeContext } = await import("./web-tool-runtime-context.js");
 
     const resolved = resolveWebSearchToolRuntimeContext({
       config: { tools: { web: { search: { provider: "brave" } } } },
@@ -73,18 +62,20 @@ describe("web tool runtime context", () => {
     });
 
     expect(resolved.config).toBe(runtimeConfig);
-    expect(resolved.runtimeWebSearch?.selectedProvider).toBe("perplexity");
-    const ownerLookup = latestOwnerLookupParams();
-    expect(ownerLookup.contract).toBe("webSearchProviders");
-    expect(ownerLookup.value).toBe("perplexity");
-    expect(ownerLookup.origin).toBe("bundled");
-    expect(ownerLookup.config).toBe(runtimeConfig);
+    expect(resolved.runtimeWebSearch).toMatchObject({ selectedProvider: "perplexity" });
+    expect(mocks.resolveManifestContractOwnerPluginId).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contract: "webSearchProviders",
+        value: "perplexity",
+      }),
+    );
   });
 
   it("falls back to captured search config and runtime metadata when active globals are missing", async () => {
     const capturedConfig = {
       tools: { web: { search: { provider: "brave" } } },
     };
+    const { resolveWebSearchToolRuntimeContext } = await import("./web-tool-runtime-context.js");
 
     const resolved = resolveWebSearchToolRuntimeContext({
       config: capturedConfig,
@@ -99,46 +90,50 @@ describe("web tool runtime context", () => {
     });
 
     expect(resolved.config).toBe(capturedConfig);
-    expect(resolved.runtimeWebSearch?.selectedProvider).toBe("brave");
-    const ownerLookup = latestOwnerLookupParams();
-    expect(ownerLookup.contract).toBe("webSearchProviders");
-    expect(ownerLookup.value).toBe("brave");
-    expect(ownerLookup.origin).toBe("bundled");
-    expect(ownerLookup.config).toBe(capturedConfig);
+    expect(resolved.runtimeWebSearch).toMatchObject({ selectedProvider: "brave" });
+    expect(mocks.resolveManifestContractOwnerPluginId).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contract: "webSearchProviders",
+        value: "brave",
+      }),
+    );
   });
 
-  it("uses configured provider ids when runtime metadata is absent", () => {
+  it("uses configured provider ids when runtime metadata is absent", async () => {
+    const { resolveWebSearchToolRuntimeContext } = await import("./web-tool-runtime-context.js");
+
     resolveWebSearchToolRuntimeContext({
       config: { tools: { web: { search: { provider: "Brave" } } } },
     });
 
-    const ownerLookup = latestOwnerLookupParams();
-    expect(ownerLookup.contract).toBe("webSearchProviders");
-    expect(ownerLookup.value).toBe("brave");
-    expect(ownerLookup.origin).toBe("bundled");
-    expect(ownerLookup.config).toEqual({
-      tools: { web: { search: { provider: "Brave" } } },
-    });
+    expect(mocks.resolveManifestContractOwnerPluginId).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contract: "webSearchProviders",
+        value: "brave",
+      }),
+    );
   });
 
   it("keeps runtime providers disabled for bundled fetch owners", async () => {
     mocks.resolveManifestContractOwnerPluginId.mockReturnValue("firecrawl");
+    const { resolveWebFetchToolRuntimeContext } = await import("./web-tool-runtime-context.js");
 
     const resolved = resolveWebFetchToolRuntimeContext({
       config: { tools: { web: { fetch: { provider: "firecrawl" } } } },
     });
 
     expect(resolved.preferRuntimeProviders).toBe(false);
-    const ownerLookup = latestOwnerLookupParams();
-    expect(ownerLookup.contract).toBe("webFetchProviders");
-    expect(ownerLookup.value).toBe("firecrawl");
-    expect(ownerLookup.origin).toBe("bundled");
-    expect(ownerLookup.config).toEqual({
-      tools: { web: { fetch: { provider: "firecrawl" } } },
-    });
+    expect(mocks.resolveManifestContractOwnerPluginId).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contract: "webFetchProviders",
+        value: "firecrawl",
+      }),
+    );
   });
 
-  it("keeps runtime provider discovery enabled when no provider is selected", () => {
+  it("keeps runtime provider discovery enabled when no provider is selected", async () => {
+    const { resolveWebFetchToolRuntimeContext } = await import("./web-tool-runtime-context.js");
+
     const resolved = resolveWebFetchToolRuntimeContext({
       config: {},
     });

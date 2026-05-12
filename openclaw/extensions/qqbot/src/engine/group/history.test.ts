@@ -157,7 +157,7 @@ describe("engine/group/history", () => {
         entry: entry("A", "hi"),
         limit: 0,
       });
-      expect(entries).toStrictEqual([]);
+      expect(entries).toEqual([]);
       expect(map.size).toBe(0);
     });
 
@@ -301,7 +301,7 @@ describe("engine/group/history", () => {
         limit: 5,
       });
       clearPendingHistory({ historyMap: map, historyKey: "G", limit: 5 });
-      expect(map.get("G")).toStrictEqual([]);
+      expect(map.get("G")).toEqual([]);
     });
 
     it("no-ops when disabled", () => {

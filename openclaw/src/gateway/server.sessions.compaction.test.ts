@@ -144,10 +144,8 @@ test("sessions.compaction.* lists checkpoints and branches or restores from pre-
   expect(branched.payload?.sourceKey).toBe("agent:main:main");
   expect(branched.payload?.entry.parentSessionKey).toBe("agent:main:main");
   const branchedSessionFile = branched.payload?.entry.sessionFile;
-  if (!branchedSessionFile) {
-    throw new Error("expected branched compaction session file");
-  }
-  const branchedSession = SessionManager.open(branchedSessionFile, dir);
+  expect(branchedSessionFile).toBeTruthy();
+  const branchedSession = SessionManager.open(branchedSessionFile!, dir);
   expect(branchedSession.getEntries()).toHaveLength(
     fixture.preCompactionSession.getEntries().length,
   );
@@ -197,10 +195,8 @@ test("sessions.compaction.* lists checkpoints and branches or restores from pre-
   expect(restored.payload?.sessionId).not.toBe(fixture.sessionId);
   expect(restored.payload?.entry.compactionCheckpoints).toHaveLength(1);
   const restoredSessionFile = restored.payload?.entry.sessionFile;
-  if (!restoredSessionFile) {
-    throw new Error("expected restored compaction session file");
-  }
-  const restoredSession = SessionManager.open(restoredSessionFile, dir);
+  expect(restoredSessionFile).toBeTruthy();
+  const restoredSession = SessionManager.open(restoredSessionFile!, dir);
   expect(restoredSession.getEntries()).toHaveLength(
     fixture.preCompactionSession.getEntries().length,
   );

@@ -21,14 +21,6 @@ vi.mock("../version.js", () => ({
   VERSION: "2026.5.2-test",
 }));
 
-function requireDoctorContribution(id: string) {
-  const contribution = resolveDoctorHealthContributions().find((entry) => entry.id === id);
-  if (!contribution) {
-    throw new Error(`expected doctor contribution ${id}`);
-  }
-  return contribution;
-}
-
 describe("doctor health contributions", () => {
   beforeEach(() => {
     mocks.maybeRunConfiguredPluginInstallReleaseStep.mockReset();
@@ -47,16 +39,19 @@ describe("doctor health contributions", () => {
   });
 
   it("keeps release configured plugin installs repair-only", async () => {
-    const contribution = requireDoctorContribution("doctor:release-configured-plugin-installs");
+    const contribution = resolveDoctorHealthContributions().find(
+      (entry) => entry.id === "doctor:release-configured-plugin-installs",
+    );
+    expect(contribution).toBeDefined();
     const ctx = {
       cfg: {},
       configResult: { cfg: {}, sourceLastTouchedVersion: "2026.4.29" },
       sourceConfigValid: true,
       prompter: { shouldRepair: false },
       env: {},
-    } as Parameters<(typeof contribution)["run"]>[0];
+    } as Parameters<NonNullable<typeof contribution>["run"]>[0];
 
-    await contribution.run(ctx);
+    await contribution?.run(ctx);
 
     expect(mocks.maybeRunConfiguredPluginInstallReleaseStep).not.toHaveBeenCalled();
     expect(mocks.note).not.toHaveBeenCalled();
@@ -68,16 +63,19 @@ describe("doctor health contributions", () => {
       warnings: [],
       touchedConfig: true,
     });
-    const contribution = requireDoctorContribution("doctor:release-configured-plugin-installs");
+    const contribution = resolveDoctorHealthContributions().find(
+      (entry) => entry.id === "doctor:release-configured-plugin-installs",
+    );
+    expect(contribution).toBeDefined();
     const ctx = {
       cfg: {},
       configResult: { cfg: {}, sourceLastTouchedVersion: "2026.4.29" },
       sourceConfigValid: true,
       prompter: { shouldRepair: true },
       env: {},
-    } as Parameters<(typeof contribution)["run"]>[0];
+    } as Parameters<NonNullable<typeof contribution>["run"]>[0];
 
-    await contribution.run(ctx);
+    await contribution?.run(ctx);
 
     expect(mocks.maybeRunConfiguredPluginInstallReleaseStep).toHaveBeenCalledWith({
       cfg: {},

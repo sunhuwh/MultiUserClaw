@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listDevicePairingMock = vi.hoisted(() => vi.fn(async () => ({ pending: [] })));
 
@@ -11,11 +11,6 @@ vi.mock("./api.js", () => ({
 }));
 
 import { handleNotifyCommand } from "./notify.js";
-
-afterAll(() => {
-  vi.doUnmock("./api.js");
-  vi.resetModules();
-});
 
 describe("device-pair notify persistence", () => {
   let stateDir: string;
@@ -88,7 +83,7 @@ describe("device-pair notify persistence", () => {
     const persisted = JSON.parse(
       await fs.readFile(path.join(stateDir, "device-pair-notify.json"), "utf8"),
     ) as { subscribers: unknown[] };
-    expect(persisted.subscribers).toStrictEqual([]);
+    expect(persisted.subscribers).toEqual([]);
   });
 
   it("does not remove a different persisted subscriber when notify fields contain pipes", async () => {

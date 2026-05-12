@@ -29,7 +29,6 @@ export type AgentRuntimeFailoverReason =
   | "rate_limit"
   | "overloaded"
   | "billing"
-  | "server_error"
   | "timeout"
   | "model_not_found"
   | "session_expired"
@@ -47,7 +46,7 @@ export type AgentRuntimeModel = {
   provider?: string;
   baseUrl?: string;
   reasoning?: boolean;
-  input?: readonly string[];
+  input?: string[];
   cost?: {
     input: number;
     output: number;
@@ -58,26 +57,6 @@ export type AgentRuntimeModel = {
   maxTokens?: number;
   contextTokens?: number;
   compat?: unknown;
-};
-
-export type AgentRuntimeTextReplacement = {
-  from: string | RegExp;
-  to: string;
-};
-
-export type AgentRuntimeTextTransforms = {
-  input?: AgentRuntimeTextReplacement[];
-  output?: AgentRuntimeTextReplacement[];
-};
-
-export type AgentRuntimeProviderHandle = {
-  provider: string;
-  config?: AgentRuntimeConfig;
-  workspaceDir?: string;
-  env?: NodeJS.ProcessEnv;
-  applyAutoEnable?: boolean;
-  bundledProviderAllowlistCompat?: boolean;
-  bundledProviderVitestCompat?: boolean;
 };
 
 export type AgentRuntimeInteractiveButtonStyle = "primary" | "secondary" | "success" | "danger";
@@ -272,27 +251,12 @@ export type AgentRuntimeAuthPlan = {
 export type AgentRuntimePromptPlan = {
   provider: string;
   modelId: string;
-  textTransforms?: AgentRuntimeTextTransforms;
   resolveSystemPromptContribution(
     context: AgentRuntimeSystemPromptContributionContext,
   ): AgentRuntimeSystemPromptContribution | undefined;
-  transformSystemPrompt(
-    context: AgentRuntimeSystemPromptContributionContext & {
-      systemPrompt: string;
-    },
-  ): string;
-};
-
-// Keep the leaf runtime-plan contract decoupled from plugin metadata internals.
-export type AgentRuntimePreparedMetadataSnapshot = object;
-
-export type PreparedOpenClawToolPlanning = {
-  metadataSnapshot?: AgentRuntimePreparedMetadataSnapshot;
-  loadMetadataSnapshot?: () => AgentRuntimePreparedMetadataSnapshot;
 };
 
 export type AgentRuntimeToolPlan = {
-  preparedPlanning?: PreparedOpenClawToolPlanning;
   normalize<TSchemaType extends TSchema = TSchema, TResult = unknown>(
     tools: AgentTool<TSchemaType, TResult>[],
     params?: {
@@ -342,7 +306,6 @@ export type AgentRuntimeTransportPlan = {
 
 export type AgentRuntimePlan = {
   resolvedRef: AgentRuntimeResolvedRef;
-  providerRuntimeHandle?: AgentRuntimeProviderHandle;
   auth: AgentRuntimeAuthPlan;
   prompt: AgentRuntimePromptPlan;
   tools: AgentRuntimeToolPlan;
@@ -374,7 +337,6 @@ export type BuildAgentRuntimeDeliveryPlanParams = {
   agentDir?: string;
   provider: string;
   modelId: string;
-  providerRuntimeHandle?: AgentRuntimeProviderHandle;
 };
 
 export type BuildAgentRuntimePlanParams = {
@@ -394,5 +356,4 @@ export type BuildAgentRuntimePlanParams = {
   thinkingLevel?: AgentRuntimeThinkLevel;
   extraParamsOverride?: Record<string, unknown>;
   resolvedTransport?: AgentRuntimeTransport;
-  providerRuntimeHandle?: AgentRuntimeProviderHandle;
 };

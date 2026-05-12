@@ -1,22 +1,15 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createSequentialQueue } from "./sequential-queue.js";
 
 function createDeferred() {
-  let resolve: (() => void) | undefined;
+  let resolve!: () => void;
   const promise = new Promise<void>((res) => {
     resolve = res;
   });
-  if (!resolve) {
-    throw new Error("Expected deferred resolver to be initialized");
-  }
   return { promise, resolve };
 }
 
 describe("createSequentialQueue", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   it("serializes tasks for the same key", async () => {
     const enqueue = createSequentialQueue();
     const gate = createDeferred();
@@ -85,7 +78,7 @@ describe("createSequentialQueue", () => {
       ).rejects.toThrow("boom");
 
       await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(unhandled).toStrictEqual([]);
+      expect(unhandled).toEqual([]);
 
       await expect(
         enqueue("feishu:default:chat-1", async () => {
@@ -98,7 +91,6 @@ describe("createSequentialQueue", () => {
   });
 
   it("evicts a stuck task after taskTimeoutMs so newer same-key work proceeds", async () => {
-    vi.useFakeTimers();
     const timeouts: Array<{ key: string; timeoutMs: number }> = [];
     const enqueue = createSequentialQueue({
       taskTimeoutMs: 25,
@@ -121,7 +113,6 @@ describe("createSequentialQueue", () => {
       order.push("follow-up:ran");
     });
 
-    await vi.advanceTimersByTimeAsync(25);
     await followUp;
 
     expect(order).toEqual(["stuck:start", "follow-up:ran"]);
@@ -133,7 +124,6 @@ describe("createSequentialQueue", () => {
   });
 
   it("disables the timeout cap when taskTimeoutMs is 0 (legacy behavior)", async () => {
-    vi.useFakeTimers();
     const timeouts: Array<{ key: string; timeoutMs: number }> = [];
     const enqueue = createSequentialQueue({
       taskTimeoutMs: 0,
@@ -154,9 +144,9 @@ describe("createSequentialQueue", () => {
     });
 
     // Wait long enough that a timeout would have fired if it were active.
-    await vi.advanceTimersByTimeAsync(30);
+    await new Promise((resolve) => setTimeout(resolve, 30));
     expect(order).toEqual(["first:start"]);
-    expect(timeouts).toStrictEqual([]);
+    expect(timeouts).toEqual([]);
 
     gate.resolve();
     await Promise.all([first, second]);

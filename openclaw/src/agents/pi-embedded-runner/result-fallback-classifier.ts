@@ -18,9 +18,6 @@ function isEmbeddedPiRunResult(value: unknown): value is EmbeddedPiRunResult {
 }
 
 function hasDeliberateSilentTerminalReply(result: EmbeddedPiRunResult): boolean {
-  if (result.meta.error?.kind === "hook_block") {
-    return true;
-  }
   return [result.meta.finalAssistantRawText, result.meta.finalAssistantVisibleText].some(
     (text) => typeof text === "string" && isSilentReplyPayloadText(text),
   );

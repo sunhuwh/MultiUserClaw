@@ -45,16 +45,6 @@ function createContainerNetworkRunCommand(calls?: string[]) {
   };
 }
 
-function countMatching<T>(items: readonly T[], predicate: (item: T) => boolean): number {
-  let count = 0;
-  for (const item of items) {
-    if (predicate(item)) {
-      count += 1;
-    }
-  }
-  return count;
-}
-
 describe("matrix harness runtime", () => {
   it("writes a pinned Tuwunel compose file and redacted manifest", async () => {
     const outputDir = await mkdtemp(path.join(os.tmpdir(), "matrix-qa-harness-"));
@@ -190,7 +180,7 @@ describe("matrix harness runtime", () => {
           return {
             ok:
               input === "http://127.0.0.1:28008/_matrix/client/versions" &&
-              countMatching(fetchCalls, (url) => url === input) > 1,
+              fetchCalls.filter((url) => url === input).length > 1,
           };
         }),
         sleepImpl: vi.fn(async () => {}),
@@ -218,7 +208,7 @@ describe("matrix harness runtime", () => {
           return {
             ok:
               input === "http://172.18.0.10:8008/_matrix/client/versions" &&
-              countMatching(fetchCalls, (url) => url === input) > 1,
+              fetchCalls.filter((url) => url === input).length > 1,
           };
         }),
         sleepImpl: vi.fn(async () => {}),

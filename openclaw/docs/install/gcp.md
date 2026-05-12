@@ -7,6 +7,10 @@ read_when:
 title: "GCP"
 ---
 
+# OpenClaw on GCP Compute Engine (Docker, Production VPS Guide)
+
+## Goal
+
 Run a persistent OpenClaw Gateway on a GCP Compute Engine VM using Docker, with durable state, baked-in binaries, and safe restart behavior.
 
 If you want "OpenClaw 24/7 for ~$5-12/mo", this is a reliable setup on Google Cloud.
@@ -220,11 +224,10 @@ For the generic Docker flow, see [Docker](/install/docker).
     XDG_CONFIG_HOME=/home/node/.openclaw
     ```
 
-    Set `OPENCLAW_GATEWAY_TOKEN` when you want to manage the stable gateway
-    token through `.env`; otherwise configure `gateway.auth.token` before
-    relying on clients across restarts. If neither source exists, OpenClaw uses
-    a runtime-only token for that startup. Generate a keyring password and paste
-    it into `GOG_KEYRING_PASSWORD`:
+    Leave `OPENCLAW_GATEWAY_TOKEN` blank unless you explicitly want to
+    manage it through `.env`; OpenClaw writes a random gateway token to
+    config on first start. Generate a keyring password and paste it into
+    `GOG_KEYRING_PASSWORD`:
 
     ```bash
     openssl rand -hex 32

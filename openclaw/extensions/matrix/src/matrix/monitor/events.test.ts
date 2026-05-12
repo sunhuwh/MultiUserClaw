@@ -25,40 +25,6 @@ function getSentNoticeBodies(sendMessage: ReturnType<typeof vi.fn>): string[] {
   return (sendMessage.mock.calls as unknown[][]).map(getSentNoticeBodyFromCall);
 }
 
-function expectBodiesContain(bodies: string[], text: string) {
-  expect(bodies.some((body) => body.includes(text))).toBe(true);
-}
-
-function expectBodiesExclude(bodies: string[], text: string) {
-  expect(bodies.some((body) => body.includes(text))).toBe(false);
-}
-
-function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  expect(typeof value).toBe("object");
-  expect(value).not.toBeNull();
-  if (typeof value !== "object" || value === null) {
-    throw new Error(`${label} was not an object`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function expectRecordFields(record: Record<string, unknown>, fields: Record<string, unknown>) {
-  for (const [key, value] of Object.entries(fields)) {
-    expect(record[key]).toEqual(value);
-  }
-}
-
-function expectWarnContextFields(
-  logger: { warn: ReturnType<typeof vi.fn> },
-  callIndex: number,
-  message: string,
-  fields: Record<string, unknown>,
-) {
-  const call = logger.warn.mock.calls[callIndex - 1] as unknown[];
-  expect(call?.[0]).toBe(message);
-  expectRecordFields(requireRecord(call?.[1], "logger warning context"), fields);
-}
-
 function createHarness(params?: {
   cfg?: CoreConfig;
   accountId?: string;
@@ -309,16 +275,14 @@ describe("registerMatrixMonitorEvents verification routing", () => {
     });
 
     await flushTasks();
-    const roomMessageCalls = onRoomMessage.mock.calls as unknown[][];
-    expect(roomMessageCalls[0]?.[0]).toBe("!room:example.org");
-    expectRecordFields(requireRecord(roomMessageCalls[0]?.[1], "reaction event"), {
-      event_id: "$reaction1",
-      type: EventType.Reaction,
-    });
+    expect(onRoomMessage).toHaveBeenCalledWith(
+      "!room:example.org",
+      expect.objectContaining({ event_id: "$reaction1", type: EventType.Reaction }),
+    );
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
-  it("invalidates direct-room membership cache on room member events", () => {
+  it("invalidates direct-room membership cache on room member events", async () => {
     const { invalidateRoom, roomEventListener } = createHarness();
 
     roomEventListener("!room:example.org", {
@@ -335,7 +299,7 @@ describe("registerMatrixMonitorEvents verification routing", () => {
     expect(invalidateRoom).toHaveBeenCalledWith("!room:example.org");
   });
 
-  it("remembers invite provenance on room invites", () => {
+  it("remembers invite provenance on room invites", async () => {
     const { invalidateRoom, rememberInvite, roomInviteListener } = createHarness();
     if (!roomInviteListener) {
       throw new Error("room.invite listener was not registered");
@@ -357,7 +321,7 @@ describe("registerMatrixMonitorEvents verification routing", () => {
     expect(rememberInvite).toHaveBeenCalledWith("!room:example.org", "@alice:example.org");
   });
 
-  it("ignores lifecycle-only invite events emitted with self sender ids", () => {
+  it("ignores lifecycle-only invite events emitted with self sender ids", async () => {
     const { invalidateRoom, rememberInvite, roomInviteListener } = createHarness();
     if (!roomInviteListener) {
       throw new Error("room.invite listener was not registered");
@@ -378,7 +342,7 @@ describe("registerMatrixMonitorEvents verification routing", () => {
     expect(rememberInvite).not.toHaveBeenCalled();
   });
 
-  it("remembers invite provenance even when Matrix omits the direct invite hint", () => {
+  it("remembers invite provenance even when Matrix omits the direct invite hint", async () => {
     const { invalidateRoom, rememberInvite, roomInviteListener } = createHarness();
     if (!roomInviteListener) {
       throw new Error("room.invite listener was not registered");
@@ -399,7 +363,7 @@ describe("registerMatrixMonitorEvents verification routing", () => {
     expect(rememberInvite).toHaveBeenCalledWith("!room:example.org", "@alice:example.org");
   });
 
-  it("does not synthesize invite provenance from room joins", () => {
+  it("does not synthesize invite provenance from room joins", async () => {
     const { invalidateRoom, rememberInvite, roomJoinListener } = createHarness();
     if (!roomJoinListener) {
       throw new Error("room.join listener was not registered");
@@ -629,8 +593,8 @@ describe("registerMatrixMonitorEvents verification routing", () => {
 
     await flushTasks();
     const bodies = getSentNoticeBodies(sendMessage);
-    expectBodiesContain(bodies, "SAS emoji:");
-    expectBodiesContain(bodies, "SAS decimal: 6158 1986 3513");
+    expect(bodies.some((body) => body.includes("SAS emoji:"))).toBe(true);
+    expect(bodies.some((body) => body.includes("SAS decimal: 6158 1986 3513"))).toBe(true);
   });
 
   it("rehydrates an in-progress DM verification before resolving SAS notices", async () => {
@@ -997,7 +961,7 @@ describe("registerMatrixMonitorEvents verification routing", () => {
 
       await vi.waitFor(() => {
         const bodies = getSentNoticeBodies(sendMessage);
-        expectBodiesContain(bodies, "SAS emoji:");
+        expect(bodies.some((body) => body.includes("SAS emoji:"))).toBe(true);
       });
     } finally {
       vi.useRealTimers();
@@ -1251,9 +1215,11 @@ describe("registerMatrixMonitorEvents verification routing", () => {
     });
 
     await flushTasks();
+    expect(
+      getSentNoticeBodies(sendMessage).some((body) => body.includes("SAS decimal: 6158 1986 3513")),
+    ).toBe(true);
     const bodies = getSentNoticeBodies(sendMessage);
-    expectBodiesContain(bodies, "SAS decimal: 6158 1986 3513");
-    expectBodiesExclude(bodies, "SAS decimal: 1111 2222 3333");
+    expect(bodies.some((body) => body.includes("SAS decimal: 1111 2222 3333"))).toBe(false);
   });
 
   it("preserves strict-room SAS fallback when active DM inspection cannot resolve a room", async () => {
@@ -1355,9 +1321,11 @@ describe("registerMatrixMonitorEvents verification routing", () => {
     });
 
     await flushTasks();
+    expect(
+      getSentNoticeBodies(sendMessage).some((body) => body.includes("SAS decimal: 6158 1986 3513")),
+    ).toBe(true);
     const bodies = getSentNoticeBodies(sendMessage);
-    expectBodiesContain(bodies, "SAS decimal: 6158 1986 3513");
-    expectBodiesExclude(bodies, "SAS decimal: 1111 2222 3333");
+    expect(bodies.some((body) => body.includes("SAS decimal: 1111 2222 3333"))).toBe(false);
   });
 
   it("does not emit SAS notices for cancelled verification events", async () => {
@@ -1511,12 +1479,16 @@ describe("registerMatrixMonitorEvents verification routing", () => {
       new Error("The sender's device has not sent us the keys for this message."),
     );
 
-    expectWarnContextFields(logger, 1, "Failed to decrypt message", {
-      roomId: "!room:example.org",
-      eventId: "$enc-self",
-      sender: "@gumadeiras:matrix.example.org",
-      senderMatchesOwnUser: true,
-    });
+    expect(logger.warn).toHaveBeenNthCalledWith(
+      1,
+      "Failed to decrypt message",
+      expect.objectContaining({
+        roomId: "!room:example.org",
+        eventId: "$enc-self",
+        sender: "@gumadeiras:matrix.example.org",
+        senderMatchesOwnUser: true,
+      }),
+    );
     expect(logger.warn).toHaveBeenNthCalledWith(
       2,
       "matrix: failed to decrypt a message from this same Matrix user. This usually means another Matrix device did not share the room key, or another OpenClaw runtime is using the same account. Check 'openclaw matrix verify status --verbose --account ops' and 'openclaw matrix devices list --account ops'.",
@@ -1550,12 +1522,15 @@ describe("registerMatrixMonitorEvents verification routing", () => {
     );
 
     expect(logger.warn).toHaveBeenCalledTimes(1);
-    expectWarnContextFields(logger, 1, "Failed to decrypt message", {
-      roomId: "!room:example.org",
-      eventId: "$enc-other",
-      sender: "@alice:matrix.example.org",
-      senderMatchesOwnUser: false,
-    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Failed to decrypt message",
+      expect.objectContaining({
+        roomId: "!room:example.org",
+        eventId: "$enc-other",
+        sender: "@alice:matrix.example.org",
+        senderMatchesOwnUser: false,
+      }),
+    );
   });
 
   it("classifies repeated fresh post-healthy-sync decrypt failures separately", async () => {
@@ -1589,32 +1564,43 @@ describe("registerMatrixMonitorEvents verification routing", () => {
         );
       }
 
-      expectWarnContextFields(logger, 1, "Failed to decrypt fresh post-healthy-sync message", {
-        eventId: "$enc-fresh-1",
-        freshAfterHealthySync: true,
-        postHealthySyncFailureCount: 1,
-      });
-      expectWarnContextFields(logger, 2, "Failed to decrypt fresh post-healthy-sync message", {
-        eventId: "$enc-fresh-2",
-        freshAfterHealthySync: true,
-        postHealthySyncFailureCount: 2,
-      });
-      expectWarnContextFields(logger, 3, "Failed to decrypt fresh post-healthy-sync message", {
-        eventId: "$enc-fresh-3",
-        freshAfterHealthySync: true,
-        postHealthySyncFailureCount: 3,
-      });
-      expectWarnContextFields(
-        logger,
+      expect(logger.warn).toHaveBeenNthCalledWith(
+        1,
+        "Failed to decrypt fresh post-healthy-sync message",
+        expect.objectContaining({
+          eventId: "$enc-fresh-1",
+          freshAfterHealthySync: true,
+          postHealthySyncFailureCount: 1,
+        }),
+      );
+      expect(logger.warn).toHaveBeenNthCalledWith(
+        2,
+        "Failed to decrypt fresh post-healthy-sync message",
+        expect.objectContaining({
+          eventId: "$enc-fresh-2",
+          freshAfterHealthySync: true,
+          postHealthySyncFailureCount: 2,
+        }),
+      );
+      expect(logger.warn).toHaveBeenNthCalledWith(
+        3,
+        "Failed to decrypt fresh post-healthy-sync message",
+        expect.objectContaining({
+          eventId: "$enc-fresh-3",
+          freshAfterHealthySync: true,
+          postHealthySyncFailureCount: 3,
+        }),
+      );
+      expect(logger.warn).toHaveBeenNthCalledWith(
         4,
         "matrix: repeated fresh encrypted messages are still failing to decrypt after Matrix resumed healthy sync. This device may still be missing new room keys. Check 'openclaw matrix verify status --verbose --account ops' and 'openclaw matrix devices list --account ops'.",
-        {
+        expect.objectContaining({
           failureCount: 3,
           roomCount: 3,
           senderCount: 3,
           rooms: ["!room-a:example.org", "!room-b:example.org", "!room-c:example.org"],
           sampleEventIds: ["$enc-fresh-1", "$enc-fresh-2", "$enc-fresh-3"],
-        },
+        }),
       );
     } finally {
       vi.useRealTimers();
@@ -1647,10 +1633,13 @@ describe("registerMatrixMonitorEvents verification routing", () => {
       );
 
       expect(logger.warn).toHaveBeenCalledTimes(1);
-      expectWarnContextFields(logger, 1, "Failed to decrypt message", {
-        eventId: "$enc-old",
-        freshAfterHealthySync: false,
-      });
+      expect(logger.warn).toHaveBeenCalledWith(
+        "Failed to decrypt message",
+        expect.objectContaining({
+          eventId: "$enc-old",
+          freshAfterHealthySync: false,
+        }),
+      );
 
       healthySyncSinceMs = Date.now();
 
@@ -1666,11 +1655,15 @@ describe("registerMatrixMonitorEvents verification routing", () => {
         new Error("The sender's device has not sent us the keys for this message."),
       );
 
-      expectWarnContextFields(logger, 2, "Failed to decrypt fresh post-healthy-sync message", {
-        eventId: "$enc-fresh-after-ready",
-        freshAfterHealthySync: true,
-        postHealthySyncFailureCount: 1,
-      });
+      expect(logger.warn).toHaveBeenNthCalledWith(
+        2,
+        "Failed to decrypt fresh post-healthy-sync message",
+        expect.objectContaining({
+          eventId: "$enc-fresh-after-ready",
+          freshAfterHealthySync: true,
+          postHealthySyncFailureCount: 1,
+        }),
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -1709,21 +1702,19 @@ describe("registerMatrixMonitorEvents verification routing", () => {
         }
       }
 
-      expectWarnContextFields(
-        logger,
+      expect(logger.warn).toHaveBeenNthCalledWith(
         4,
         "matrix: repeated fresh encrypted messages are still failing to decrypt after Matrix resumed healthy sync. This device may still be missing new room keys. Check 'openclaw matrix verify status --verbose --account ops' and 'openclaw matrix devices list --account ops'.",
-        {
+        expect.objectContaining({
           sampleEventIds: ["$enc-wave-1-1", "$enc-wave-1-2", "$enc-wave-1-3"],
-        },
+        }),
       );
-      expectWarnContextFields(
-        logger,
+      expect(logger.warn).toHaveBeenNthCalledWith(
         8,
         "matrix: repeated fresh encrypted messages are still failing to decrypt after Matrix resumed healthy sync. This device may still be missing new room keys. Check 'openclaw matrix verify status --verbose --account ops' and 'openclaw matrix devices list --account ops'.",
-        {
+        expect.objectContaining({
           sampleEventIds: ["$enc-wave-2-1", "$enc-wave-2-2", "$enc-wave-2-3"],
-        },
+        }),
       );
     } finally {
       vi.useRealTimers();
@@ -1773,35 +1764,46 @@ describe("registerMatrixMonitorEvents verification routing", () => {
         );
       }
 
-      expectWarnContextFields(logger, 5, "Failed to decrypt fresh post-healthy-sync message", {
-        eventId: "$enc-second-1",
-        freshAfterHealthySync: true,
-        postHealthySyncFailureCount: 1,
-      });
-      expectWarnContextFields(logger, 6, "Failed to decrypt fresh post-healthy-sync message", {
-        eventId: "$enc-second-2",
-        freshAfterHealthySync: true,
-        postHealthySyncFailureCount: 2,
-      });
-      expectWarnContextFields(logger, 7, "Failed to decrypt fresh post-healthy-sync message", {
-        eventId: "$enc-second-3",
-        freshAfterHealthySync: true,
-        postHealthySyncFailureCount: 3,
-      });
-      expectWarnContextFields(
-        logger,
+      expect(logger.warn).toHaveBeenNthCalledWith(
+        5,
+        "Failed to decrypt fresh post-healthy-sync message",
+        expect.objectContaining({
+          eventId: "$enc-second-1",
+          freshAfterHealthySync: true,
+          postHealthySyncFailureCount: 1,
+        }),
+      );
+      expect(logger.warn).toHaveBeenNthCalledWith(
+        6,
+        "Failed to decrypt fresh post-healthy-sync message",
+        expect.objectContaining({
+          eventId: "$enc-second-2",
+          freshAfterHealthySync: true,
+          postHealthySyncFailureCount: 2,
+        }),
+      );
+      expect(logger.warn).toHaveBeenNthCalledWith(
+        7,
+        "Failed to decrypt fresh post-healthy-sync message",
+        expect.objectContaining({
+          eventId: "$enc-second-3",
+          freshAfterHealthySync: true,
+          postHealthySyncFailureCount: 3,
+        }),
+      );
+      expect(logger.warn).toHaveBeenNthCalledWith(
         8,
         "matrix: repeated fresh encrypted messages are still failing to decrypt after Matrix resumed healthy sync. This device may still be missing new room keys. Check 'openclaw matrix verify status --verbose --account ops' and 'openclaw matrix devices list --account ops'.",
-        {
+        expect.objectContaining({
           sampleEventIds: ["$enc-second-1", "$enc-second-2", "$enc-second-3"],
-        },
+        }),
       );
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("logs decrypt guidance when getUserId fails during lookup", async () => {
+  it("does not throw when getUserId fails during decrypt guidance lookup", async () => {
     const { logger, logVerboseMessage, failedDecryptListener } = createHarness({
       accountId: "ops",
       selfUserIdError: new Error("lookup failed"),
@@ -1825,11 +1827,14 @@ describe("registerMatrixMonitorEvents verification routing", () => {
     ).resolves.toBeUndefined();
 
     expect(logger.warn).toHaveBeenCalledTimes(1);
-    expectWarnContextFields(logger, 1, "Failed to decrypt message", {
-      roomId: "!room:example.org",
-      eventId: "$enc-lookup-fail",
-      senderMatchesOwnUser: false,
-    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Failed to decrypt message",
+      expect.objectContaining({
+        roomId: "!room:example.org",
+        eventId: "$enc-lookup-fail",
+        senderMatchesOwnUser: false,
+      }),
+    );
     expect(logVerboseMessage).toHaveBeenCalledWith(
       "matrix: failed resolving self user id for decrypt warning: Error: lookup failed",
     );

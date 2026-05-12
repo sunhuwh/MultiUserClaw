@@ -1,4 +1,4 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import { callGatewayFromCli } from "openclaw/plugin-sdk/gateway-runtime";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 import type { RuntimeLogger } from "openclaw/plugin-sdk/plugin-runtime";
@@ -753,11 +753,10 @@ async function openMeetWithBrowserRequest(params: {
       };
       break;
     }
-    const remainingWaitMs = deadline - Date.now();
-    if (remainingWaitMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, Math.min(750, remainingWaitMs)));
+    if (Date.now() <= deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 750));
     }
-  } while (Date.now() < deadline);
+  } while (Date.now() <= deadline);
   return { launched: true, browser };
 }
 

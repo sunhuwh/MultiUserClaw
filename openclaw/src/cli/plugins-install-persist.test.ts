@@ -123,9 +123,9 @@ describe("persistPluginInstall", () => {
 
     expect(next).toEqual(enabledConfig);
     expect(refreshPluginRegistry).toHaveBeenCalled();
-    expect(runtimeLogs).toEqual(
-      expect.arrayContaining([expect.stringContaining("Plugin runtime cache invalidation failed")]),
-    );
+    expect(
+      runtimeLogs.some((line) => line.includes("Plugin runtime cache invalidation failed")),
+    ).toBe(true);
   });
 
   it("removes a replaced managed install directory before refreshing the registry", async () => {
@@ -388,9 +388,7 @@ describe("persistPluginInstall", () => {
     expect(next).toEqual(enabledConfig);
     expect(refreshPluginRegistry).toHaveBeenCalled();
     expect(clearPluginRegistryLoadCache).toHaveBeenCalledTimes(1);
-    expect(runtimeLogs).toEqual(
-      expect.arrayContaining([expect.stringContaining("Plugin registry refresh failed")]),
-    );
+    expect(runtimeLogs.some((line) => line.includes("Plugin registry refresh failed"))).toBe(true);
   });
 
   it("removes stale denylist entries before enabling installed plugins", async () => {

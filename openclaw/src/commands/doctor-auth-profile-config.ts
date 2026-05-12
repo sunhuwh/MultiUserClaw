@@ -8,12 +8,7 @@ import {
 } from "../shared/string-coerce.js";
 import { isRecord } from "../utils.js";
 
-const AUTH_PROFILE_MODES = new Set<AuthProfileConfig["mode"]>([
-  "api_key",
-  "aws-sdk",
-  "oauth",
-  "token",
-]);
+const AUTH_PROFILE_MODES = new Set<AuthProfileConfig["mode"]>(["api_key", "oauth", "token"]);
 
 export type AuthProfileConfigProtectionResult = {
   config: OpenClawConfig;

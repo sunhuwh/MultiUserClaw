@@ -349,13 +349,10 @@ describe("chrome MCP page parsing", () => {
 
   it("reuses a single pending session for concurrent requests", async () => {
     let factoryCalls = 0;
-    let releaseFactory: (() => void) | undefined;
+    let releaseFactory!: () => void;
     const factoryGate = new Promise<void>((resolve) => {
       releaseFactory = resolve;
     });
-    if (!releaseFactory) {
-      throw new Error("Expected Chrome MCP factory release callback to be initialized");
-    }
 
     const factory: ChromeMcpSessionFactory = async () => {
       factoryCalls += 1;

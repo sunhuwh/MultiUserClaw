@@ -1,18 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { InterpreterInlineEvalHit } from "./inline-eval.js";
 import {
   describeInterpreterInlineEval,
   detectInterpreterInlineEvalArgv,
   isInterpreterLikeAllowlistPattern,
 } from "./inline-eval.js";
-
-function expectInlineEvalDescription(hit: InterpreterInlineEvalHit | null, expected: string) {
-  expect(hit).not.toBeNull();
-  if (hit === null) {
-    throw new Error(`Expected inline eval hit for ${expected}`);
-  }
-  expect(describeInterpreterInlineEval(hit)).toBe(expected);
-}
 
 describe("exec inline eval detection", () => {
   it.each([
@@ -24,7 +15,8 @@ describe("exec inline eval detection", () => {
     { argv: ["gawk", "-F", ",", "{print $1}", "data.csv"], expected: "gawk inline program" },
   ] as const)("detects interpreter eval flags for %j", ({ argv, expected }) => {
     const hit = detectInterpreterInlineEvalArgv([...argv]);
-    expectInlineEvalDescription(hit, expected);
+    expect(hit).not.toBeNull();
+    expect(describeInterpreterInlineEval(hit!)).toBe(expected);
   });
 
   it.each([
@@ -54,7 +46,8 @@ describe("exec inline eval detection", () => {
     { argv: ["sed", "-es/.*/id/e", "/dev/null"], expected: "sed -e" },
   ] as const)("detects command carriers for %j", ({ argv, expected }) => {
     const hit = detectInterpreterInlineEvalArgv([...argv]);
-    expectInlineEvalDescription(hit, expected);
+    expect(hit).not.toBeNull();
+    expect(describeInterpreterInlineEval(hit!)).toBe(expected);
   });
 
   it("ignores normal script execution", () => {

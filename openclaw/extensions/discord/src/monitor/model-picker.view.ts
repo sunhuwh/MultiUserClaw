@@ -143,8 +143,8 @@ function createModelPickerButton(params: DiscordModelPickerButtonOptions): Butto
   class DiscordModelPickerButton extends Button {
     label = params.label;
     customId = params.customId;
-    override style = params.style ?? ButtonStyle.Secondary;
-    override disabled = params.disabled ?? false;
+    style = params.style ?? ButtonStyle.Secondary;
+    disabled = params.disabled ?? false;
   }
   return new DiscordModelPickerButton();
 }
@@ -157,11 +157,11 @@ function createModelSelect(params: {
 }): StringSelectMenu {
   class DiscordModelPickerSelect extends StringSelectMenu {
     customId = params.customId;
-    override options = params.options;
-    override minValues = 1;
-    override maxValues = 1;
-    override placeholder = params.placeholder;
-    override disabled = params.disabled ?? false;
+    options = params.options;
+    minValues = 1;
+    maxValues = 1;
+    placeholder = params.placeholder;
+    disabled = params.disabled ?? false;
   }
   return new DiscordModelPickerSelect();
 }

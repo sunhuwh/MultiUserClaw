@@ -4,7 +4,6 @@ type StringEnumOptions<T extends readonly string[]> = {
   description?: string;
   title?: string;
   default?: T[number];
-  deprecated?: boolean;
 };
 
 // Avoid Type.Union([Type.Literal(...)]) which compiles to anyOf.

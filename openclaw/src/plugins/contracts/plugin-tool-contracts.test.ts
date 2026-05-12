@@ -126,18 +126,12 @@ function splitTopLevelArgs(args: string): string[] {
       continue;
     }
     if (char === "," && depth === 0) {
-      const part = args.slice(start, index).trim();
-      if (part.length > 0) {
-        parts.push(part);
-      }
+      parts.push(args.slice(start, index).trim());
       start = index + 1;
     }
   }
-  const part = args.slice(start).trim();
-  if (part.length > 0) {
-    parts.push(part);
-  }
-  return parts;
+  parts.push(args.slice(start).trim());
+  return parts.filter(Boolean);
 }
 
 function extractStringLiterals(source: string): string[] {
@@ -246,6 +240,6 @@ describe("bundled plugin tool manifest contracts", () => {
       }
     }
 
-    expect(failures).toStrictEqual([]);
+    expect(failures).toEqual([]);
   });
 });

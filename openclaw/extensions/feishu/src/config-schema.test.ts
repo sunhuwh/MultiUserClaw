@@ -7,7 +7,7 @@ function expectSchemaIssue(
 ) {
   expect(result.success).toBe(false);
   if (!result.success) {
-    expect(result.error.issues.map((issue) => issue.path.join("."))).toContain(issuePath);
+    expect(result.error.issues.some((issue) => issue.path.join(".") === issuePath)).toBe(true);
   }
 }
 
@@ -315,7 +315,9 @@ describe("FeishuConfigSchema defaultAccount", () => {
 
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.issues.map((issue) => issue.path.join("."))).toContain("defaultAccount");
+      expect(result.error.issues.some((issue) => issue.path.join(".") === "defaultAccount")).toBe(
+        true,
+      );
     }
   });
 });

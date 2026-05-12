@@ -29,13 +29,11 @@ describe("private-qa-cli", () => {
       path.join(repoRoot, "dist", "plugin-sdk", "qa-lab.js"),
     ]);
     let importedSpecifier: string | undefined;
-    const isQaLabCliAvailable = vi.fn();
-    const registerQaLabCli = vi.fn();
     const importModule = vi.fn(async (specifier: string) => {
       importedSpecifier = specifier;
       return {
-        isQaLabCliAvailable,
-        registerQaLabCli,
+        isQaLabCliAvailable: expect.any(Function),
+        registerQaLabCli: expect.any(Function),
       };
     });
 
@@ -47,11 +45,13 @@ describe("private-qa-cli", () => {
 
     expect(importModule).toHaveBeenCalledTimes(1);
     expect(importedSpecifier).toContain("/dist/plugin-sdk/qa-lab.js");
-    expect(module.isQaLabCliAvailable).toBe(isQaLabCliAvailable);
-    expect(module.registerQaLabCli).toBe(registerQaLabCli);
+    expect(module).toMatchObject({
+      isQaLabCliAvailable: expect.any(Function),
+      registerQaLabCli: expect.any(Function),
+    });
   });
 
-  it("rejects non-source package roots even when private QA is enabled", () => {
+  it("rejects non-source package roots even when private QA is enabled", async () => {
     process.env.OPENCLAW_ENABLE_PRIVATE_QA_CLI = "1";
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-private-qa-"));
     tempDirs.push(root);
@@ -67,7 +67,7 @@ describe("private-qa-cli", () => {
     expect(importModule).not.toHaveBeenCalled();
   });
 
-  it("rejects when the private QA env flag is disabled", () => {
+  it("rejects when the private QA env flag is disabled", async () => {
     delete process.env.OPENCLAW_ENABLE_PRIVATE_QA_CLI;
     const importModule = vi.fn(async () => ({}));
 

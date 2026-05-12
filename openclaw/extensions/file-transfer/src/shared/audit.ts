@@ -11,7 +11,6 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { appendRegularFile } from "openclaw/plugin-sdk/security-runtime";
 
 export type FileTransferAuditOp = "file.fetch" | "dir.list" | "dir.fetch" | "file.write";
 
@@ -87,11 +86,7 @@ export async function appendFileTransferAudit(
       timestamp: new Date().toISOString(),
       ...record,
     })}\n`;
-    await appendRegularFile({
-      filePath: auditFilePath(dir),
-      content: line,
-      rejectSymlinkParents: true,
-    });
+    await fs.appendFile(auditFilePath(dir), line, { mode: 0o600 });
   } catch (e) {
     process.stderr.write(`[file-transfer:audit] append failed: ${String(e)}\n`);
   }

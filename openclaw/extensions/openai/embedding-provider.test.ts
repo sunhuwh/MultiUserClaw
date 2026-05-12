@@ -29,17 +29,6 @@ function createOptions(
   };
 }
 
-function expectFetchRemoteEmbeddingVectorsBody(body: Record<string, unknown>) {
-  expect(mocks.fetchRemoteEmbeddingVectors).toHaveBeenCalledWith({
-    url: "https://embeddings.example/v1/embeddings",
-    headers: { Authorization: "Bearer test" },
-    ssrfPolicy: undefined,
-    fetchImpl: undefined,
-    body,
-    errorPrefix: "openai embeddings failed",
-  });
-}
-
 describe("OpenAI embedding provider", () => {
   beforeEach(() => {
     mocks.fetchRemoteEmbeddingVectors.mockClear();
@@ -53,11 +42,15 @@ describe("OpenAI embedding provider", () => {
 
     await provider.embedQuery("hello");
 
-    expectFetchRemoteEmbeddingVectorsBody({
-      model: "text-embedding-3-small",
-      input: ["hello"],
-      input_type: "query",
-    });
+    expect(mocks.fetchRemoteEmbeddingVectors).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: {
+          model: "text-embedding-3-small",
+          input: ["hello"],
+          input_type: "query",
+        },
+      }),
+    );
   });
 
   it("sends documentInputType on document batch embeddings", async () => {
@@ -67,11 +60,15 @@ describe("OpenAI embedding provider", () => {
 
     await provider.embedBatch(["doc one", "doc two"]);
 
-    expectFetchRemoteEmbeddingVectorsBody({
-      model: "text-embedding-3-small",
-      input: ["doc one", "doc two"],
-      input_type: "document",
-    });
+    expect(mocks.fetchRemoteEmbeddingVectors).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: {
+          model: "text-embedding-3-small",
+          input: ["doc one", "doc two"],
+          input_type: "document",
+        },
+      }),
+    );
   });
 
   it("omits input_type unless configured", async () => {
@@ -79,10 +76,14 @@ describe("OpenAI embedding provider", () => {
 
     await provider.embedBatch(["doc"]);
 
-    expectFetchRemoteEmbeddingVectorsBody({
-      model: "text-embedding-3-small",
-      input: ["doc"],
-    });
+    expect(mocks.fetchRemoteEmbeddingVectors).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: {
+          model: "text-embedding-3-small",
+          input: ["doc"],
+        },
+      }),
+    );
   });
 
   it("sends outputDimensionality as OpenAI dimensions", async () => {
@@ -92,10 +93,14 @@ describe("OpenAI embedding provider", () => {
 
     await provider.embedBatch(["doc"]);
 
-    expectFetchRemoteEmbeddingVectorsBody({
-      model: "text-embedding-3-small",
-      input: ["doc"],
-      dimensions: 512,
-    });
+    expect(mocks.fetchRemoteEmbeddingVectors).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: {
+          model: "text-embedding-3-small",
+          input: ["doc"],
+          dimensions: 512,
+        },
+      }),
+    );
   });
 });

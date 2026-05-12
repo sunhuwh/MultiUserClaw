@@ -80,41 +80,15 @@ describe("qa suite planning helpers", () => {
   it("maps suite work with bounded concurrency while preserving order", async () => {
     let active = 0;
     let maxActive = 0;
-    let releaseStartedTasks = false;
-    let resolveBothStarted: () => void = () => {};
-    const bothStarted = new Promise<void>((resolve) => {
-      resolveBothStarted = resolve;
-    });
-    const taskReleases: Array<() => void> = [];
-    const releaseQueuedTasks = () => {
-      if (!releaseStartedTasks) {
-        return;
-      }
-      let releaseTask: (() => void) | undefined;
-      while ((releaseTask = taskReleases.shift())) {
-        releaseTask();
-      }
-    };
-
-    const resultPromise = mapQaSuiteWithConcurrency([1, 2, 3, 4], 2, async (item) => {
+    const result = await mapQaSuiteWithConcurrency([1, 2, 3, 4], 2, async (item) => {
       active += 1;
       maxActive = Math.max(maxActive, active);
-      if (active === 2) {
-        resolveBothStarted();
-      }
-      await new Promise<void>((resolve) => {
-        taskReleases.push(resolve);
-        releaseQueuedTasks();
-      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
       active -= 1;
       return item * 10;
     });
 
-    await bothStarted;
     expect(maxActive).toBe(2);
-    releaseStartedTasks = true;
-    releaseQueuedTasks();
-    const result = await resultPromise;
     expect(result).toEqual([10, 20, 30, 40]);
   });
 

@@ -1,5 +1,3 @@
-import { hasPersistedIMessageEcho } from "./persisted-echo-cache.js";
-
 type SentMessageLookup = {
   text?: string;
   messageId?: string;
@@ -71,9 +69,6 @@ class DefaultSentMessageCache implements SentMessageCache {
 
   has(scope: string, lookup: SentMessageLookup, skipIdShortCircuit = false): boolean {
     this.cleanup();
-    if (hasPersistedIMessageEcho({ scope, ...lookup })) {
-      return true;
-    }
     const textKey = normalizeEchoTextKey(lookup.text);
     const messageIdKey = normalizeEchoMessageIdKey(lookup.messageId);
     if (messageIdKey) {

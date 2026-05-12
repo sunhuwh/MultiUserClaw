@@ -6,18 +6,24 @@ import {
   MIGRATION_REASON_MISSING_SOURCE_OR_TARGET,
 } from "openclaw/plugin-sdk/migration";
 import type { MigrationItem } from "openclaw/plugin-sdk/plugin-entry";
-import { appendRegularFile, pathExists } from "openclaw/plugin-sdk/security-runtime";
 
 export function resolveHomePath(input: string): string {
-  const trimmed = input.trim();
-  if (!trimmed) {
-    return trimmed;
+  if (input === "~") {
+    return os.homedir();
   }
-  return path.resolve(trimmed.replace(/^~(?=$|[\\/])/u, os.homedir()));
+  if (input.startsWith("~/")) {
+    return path.join(os.homedir(), input.slice(2));
+  }
+  return path.resolve(input);
 }
 
 export async function exists(filePath: string): Promise<boolean> {
-  return await pathExists(filePath);
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function isDirectory(dirPath: string): Promise<boolean> {
@@ -86,11 +92,7 @@ export async function appendItem(item: MigrationItem): Promise<MigrationItem> {
         : path.basename(item.source);
     const header = `\n\n<!-- Imported from Claude: ${label} -->\n\n`;
     await fs.mkdir(path.dirname(item.target), { recursive: true });
-    await appendRegularFile({
-      filePath: item.target,
-      content: `${header}${content.trimEnd()}\n`,
-      rejectSymlinkParents: true,
-    });
+    await fs.appendFile(item.target, `${header}${content.trimEnd()}\n`, "utf8");
     return { ...item, status: "migrated" };
   } catch (err) {
     return markMigrationItemError(item, err instanceof Error ? err.message : String(err));

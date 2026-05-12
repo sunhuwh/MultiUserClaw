@@ -23,6 +23,6 @@ describe("listBundledChannelCatalogEntries discovery failures", () => {
       "./bundled-channel-catalog-read.js?scope=discovery-fail-soft",
     );
 
-    expect(catalog.listBundledChannelCatalogEntries()).toStrictEqual([]);
+    expect(catalog.listBundledChannelCatalogEntries()).toEqual([]);
   });
 });

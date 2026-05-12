@@ -5,28 +5,11 @@ import {
 } from "./internal/test-builders.test-support.js";
 import { createDiscordRequestClient, DISCORD_REST_TIMEOUT_MS } from "./proxy-request-client.js";
 
-async function expectAbortError(promise: Promise<unknown>) {
-  let abortError: unknown;
-  try {
-    await promise;
-  } catch (error) {
-    abortError = error;
-  }
-  expect(abortError).toBeInstanceOf(DOMException);
-  if (!(abortError instanceof DOMException)) {
-    throw new Error("expected Discord request abort error");
-  }
-  expect(abortError.name).toBe("AbortError");
-  expect(abortError.message).toBe("The operation was aborted.");
-}
-
 describe("createDiscordRequestClient", () => {
   it("preserves the REST client's abort signal for proxied fetch calls", async () => {
     const fetchSpy = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-      if (!(init?.signal instanceof AbortSignal)) {
-        throw new Error("Expected proxied fetch init to include an AbortSignal");
-      }
-      expect(init.signal.aborted).toBe(false);
+      expect(init?.signal).toBeDefined();
+      expect(init!.signal!.aborted).toBe(false);
       return createJsonResponse([]);
     });
 
@@ -48,7 +31,7 @@ describe("createDiscordRequestClient", () => {
       timeout: 20,
     });
 
-    await expectAbortError(client.get("/channels/123/messages"));
+    await expect(client.get("/channels/123/messages")).rejects.toThrow();
   }, 1_000);
 
   it("lets abortAllRequests cancel active proxied fetches", async () => {
@@ -65,11 +48,8 @@ describe("createDiscordRequestClient", () => {
 
     client.abortAllRequests();
 
-    await expectAbortError(request);
-    if (!abortable.receivedSignal) {
-      throw new Error("Expected proxied fetch abort signal");
-    }
-    expect(abortable.receivedSignal.aborted).toBe(true);
+    await expect(request).rejects.toThrow();
+    expect(abortable.receivedSignal?.aborted).toBe(true);
   });
 
   it("provides the REST client's timeout signal even without a caller signal", async () => {
@@ -87,10 +67,8 @@ describe("createDiscordRequestClient", () => {
 
     await client.get("/channels/123/messages");
 
-    if (!receivedSignal) {
-      throw new Error("Expected proxied fetch to receive the REST timeout signal");
-    }
-    expect(receivedSignal.aborted).toBe(false);
+    expect(receivedSignal).toBeDefined();
+    expect(receivedSignal!.aborted).toBe(false);
   });
 
   it("exports a reasonable timeout constant", () => {

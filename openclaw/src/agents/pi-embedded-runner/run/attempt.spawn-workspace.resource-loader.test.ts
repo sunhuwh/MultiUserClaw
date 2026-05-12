@@ -24,11 +24,10 @@ describe("runEmbeddedAttempt resource loader wiring", () => {
     });
 
     expect(createAgentSession).toHaveBeenCalledOnce();
-    const calls = createAgentSession.mock.calls as unknown as Array<[{ resourceLoader?: unknown }]>;
-    const options = calls[0]?.[0];
-    if (!options) {
-      throw new Error("Expected createAgentSession options");
-    }
-    expect(options.resourceLoader).toBe(resourceLoader);
+    expect(createAgentSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resourceLoader,
+      }),
+    );
   });
 });

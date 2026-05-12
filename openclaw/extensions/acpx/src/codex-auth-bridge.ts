@@ -1,16 +1,9 @@
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
-import os from "node:os";
 import path from "node:path";
-import { readJsonFileWithFallback } from "openclaw/plugin-sdk/json-store";
-import {
-  extractTrustedCodexProjectPaths,
-  renderIsolatedCodexProjectTrustConfig,
-} from "./codex-trust-config.js";
 import { resolveAcpxPluginRoot } from "./config.js";
 import type { ResolvedAcpxPluginConfig } from "./config.js";
-import { OPENCLAW_ACPX_LEASE_ID_ARG, OPENCLAW_GATEWAY_INSTANCE_ID_ARG } from "./process-lease.js";
 
 const CODEX_ACP_PACKAGE = "@zed-industries/codex-acp";
 const CODEX_ACP_BIN = "codex-acp";
@@ -120,10 +113,7 @@ async function resolveInstalledAcpPackageBinPath(
 ): Promise<string | undefined> {
   try {
     const packageJsonPath = requireFromHere.resolve(`${packageName}/package.json`);
-    const { value: manifest } = await readJsonFileWithFallback<PackageManifest>(
-      packageJsonPath,
-      {},
-    );
+    const manifest = JSON.parse(await fs.readFile(packageJsonPath, "utf8")) as PackageManifest;
     if (manifest.name !== packageName) {
       return undefined;
     }
@@ -162,25 +152,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 ${params.envSetup}
-const openClawWrapperArgs = new Set([
-  ${quoteCommandPart(OPENCLAW_ACPX_LEASE_ID_ARG)},
-  ${quoteCommandPart(OPENCLAW_GATEWAY_INSTANCE_ID_ARG)},
-]);
-
-function stripOpenClawWrapperArgs(args) {
-  const stripped = [];
-  for (let index = 0; index < args.length; index += 1) {
-    const value = args[index];
-    if (openClawWrapperArgs.has(value)) {
-      index += 1;
-      continue;
-    }
-    stripped.push(value);
-  }
-  return stripped;
-}
-
-const configuredArgs = stripOpenClawWrapperArgs(process.argv.slice(2));
+const configuredArgs = process.argv.slice(2);
 
 function resolveNpmCliPath() {
   const candidate = path.resolve(
@@ -222,62 +194,16 @@ if (!command) {
 }
 
 const child = spawn(command, args, {
-  detached: process.platform !== "win32",
   env,
   stdio: "inherit",
   windowsHide: true,
 });
 
-let forceKillTimer;
-let orphanCleanupStarted = false;
-
-function killChildTree(signal, options = {}) {
-  if (!child.pid || (!options.force && child.killed)) {
-    return;
-  }
-  if (process.platform !== "win32") {
-    try {
-      // The adapter can spawn grandchildren; signaling the process group keeps
-      // the generated wrapper from leaving an ACP tree behind.
-      process.kill(-child.pid, signal);
-      return;
-    } catch {
-      // Fall back to direct child signaling below.
-    }
-  }
-  child.kill(signal);
-}
-
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
   process.once(signal, () => {
-    killChildTree(signal);
+    child.kill(signal);
   });
 }
-
-const originalParentPid = process.ppid;
-const parentWatcher =
-  process.platform === "win32"
-    ? undefined
-    : setInterval(() => {
-        if (process.ppid === originalParentPid || process.ppid !== 1) {
-          return;
-        }
-        if (orphanCleanupStarted) {
-          return;
-        }
-        orphanCleanupStarted = true;
-        if (parentWatcher) {
-          clearInterval(parentWatcher);
-        }
-        killChildTree("SIGTERM");
-        // Keep the wrapper alive long enough for stubborn adapters to receive
-        // a forced fallback signal after SIGTERM.
-        forceKillTimer = setTimeout(() => {
-          killChildTree("SIGKILL", { force: true });
-          process.exit(1);
-        }, 1_500);
-      }, 1_000);
-parentWatcher?.unref?.();
 
 child.on("error", (error) => {
   console.error(\`[openclaw] failed to launch ${params.displayName} ACP wrapper: \${error.message}\`);
@@ -285,15 +211,6 @@ child.on("error", (error) => {
 });
 
 child.on("exit", (code, signal) => {
-  if (parentWatcher) {
-    clearInterval(parentWatcher);
-  }
-  if (orphanCleanupStarted) {
-    return;
-  }
-  if (forceKillTimer) {
-    clearTimeout(forceKillTimer);
-  }
   if (code !== null) {
     process.exit(code);
   }
@@ -329,32 +246,12 @@ function buildClaudeAcpWrapperScript(installedBinPath?: string): string {
   });
 }
 
-async function readSourceCodexConfig(codexHome: string): Promise<string | undefined> {
-  try {
-    return await fs.readFile(path.join(codexHome, "config.toml"), "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return undefined;
-    }
-    throw error;
-  }
-}
-
-async function prepareIsolatedCodexHome(params: {
-  baseDir: string;
-  workspaceDir: string;
-}): Promise<string> {
-  const sourceCodexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
-  const sourceConfig = await readSourceCodexConfig(sourceCodexHome);
-  const trustedProjectPaths = [
-    ...(sourceConfig ? extractTrustedCodexProjectPaths(sourceConfig) : []),
-    params.workspaceDir,
-  ];
-  const codexHome = path.join(params.baseDir, "codex-home");
+async function prepareIsolatedCodexHome(baseDir: string): Promise<string> {
+  const codexHome = path.join(baseDir, "codex-home");
   await fs.mkdir(codexHome, { recursive: true });
   await fs.writeFile(
     path.join(codexHome, "config.toml"),
-    renderIsolatedCodexProjectTrustConfig(trustedProjectPaths),
+    "# Generated by OpenClaw for Codex ACP sessions.\n",
     "utf8",
   );
   return codexHome;
@@ -482,10 +379,7 @@ export async function prepareAcpxCodexAuthConfig(params: {
 }): Promise<ResolvedAcpxPluginConfig> {
   void params.logger;
   const codexBaseDir = path.join(params.stateDir, "acpx");
-  await prepareIsolatedCodexHome({
-    baseDir: codexBaseDir,
-    workspaceDir: params.pluginConfig.cwd,
-  });
+  await prepareIsolatedCodexHome(codexBaseDir);
   const installedCodexBinPath = await (
     params.resolveInstalledCodexAcpBinPath ?? resolveInstalledCodexAcpBinPath
   )();

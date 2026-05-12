@@ -113,28 +113,6 @@ function parseInlineDirectivesForTest(body: string) {
   };
 }
 
-function mockCallInput(mock: { mock: { calls: unknown[][] } }, index = 0): Record<string, unknown> {
-  const call = mock.mock.calls[index];
-  expect(call).toBeDefined();
-  const input = call?.[0];
-  expect(typeof input).toBe("object");
-  expect(input).not.toBeNull();
-  return input as Record<string, unknown>;
-}
-
-function expectContinueResult(
-  value: Awaited<ReturnType<typeof resolveReplyDirectives>>,
-  fields: Record<string, unknown>,
-) {
-  expect(value.kind).toBe("continue");
-  if (value.kind !== "continue") {
-    throw new Error(`expected continue result, got ${value.kind}`);
-  }
-  for (const [key, expected] of Object.entries(fields)) {
-    expect(value.result[key as keyof typeof value.result]).toEqual(expected);
-  }
-}
-
 async function resolveHelloWithModelDefaults(params: {
   defaultThinking: "off" | "low";
   defaultReasoning: "on";
@@ -379,20 +357,36 @@ describe("resolveReplyDirectives", () => {
       skillFilter: undefined,
     });
 
-    expect(mockCallInput(mocks.resolveFastModeState).sessionEntry).toBe(targetSessionEntry);
-    const modelSelectionInput = mockCallInput(mocks.createModelSelectionState);
-    expect(modelSelectionInput.sessionEntry).toBe(targetSessionEntry);
-    expect(modelSelectionInput.parentSessionKey).toBe("target-parent");
-    expect(mockCallInput(mocks.applyInlineDirectiveOverrides).sessionEntry).toBe(
-      targetSessionEntry,
+    expect(mocks.resolveFastModeState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionEntry: targetSessionEntry,
+      }),
     );
-    expect(mockCallInput(mocks.resolveReplyExecOverrides).sessionEntry).toBe(targetSessionEntry);
-    expectContinueResult(result, {
-      resolvedThinkLevel: "high",
-      resolvedFastMode: true,
-      resolvedVerboseLevel: "full",
-      resolvedReasoningLevel: "high",
-      resolvedElevatedLevel: "on",
+    expect(mocks.createModelSelectionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionEntry: targetSessionEntry,
+        parentSessionKey: "target-parent",
+      }),
+    );
+    expect(mocks.applyInlineDirectiveOverrides).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionEntry: targetSessionEntry,
+      }),
+    );
+    expect(mocks.resolveReplyExecOverrides).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionEntry: targetSessionEntry,
+      }),
+    );
+    expect(result).toEqual({
+      kind: "continue",
+      result: expect.objectContaining({
+        resolvedThinkLevel: "high",
+        resolvedFastMode: true,
+        resolvedVerboseLevel: "full",
+        resolvedReasoningLevel: "high",
+        resolvedElevatedLevel: "on",
+      }),
     });
   });
 
@@ -460,9 +454,12 @@ describe("resolveReplyDirectives", () => {
       defaultReasoning: "on",
     });
 
-    expectContinueResult(result, {
-      resolvedThinkLevel: "off",
-      resolvedReasoningLevel: "on",
+    expect(result).toEqual({
+      kind: "continue",
+      result: expect.objectContaining({
+        resolvedThinkLevel: "off",
+        resolvedReasoningLevel: "on",
+      }),
     });
     expect(resolveDefaultReasoningLevel).toHaveBeenCalledOnce();
   });
@@ -474,9 +471,12 @@ describe("resolveReplyDirectives", () => {
       sessionEntry: makeSessionEntry({ thinkingLevel: "off" }),
     });
 
-    expectContinueResult(result, {
-      resolvedThinkLevel: "off",
-      resolvedReasoningLevel: "off",
+    expect(result).toEqual({
+      kind: "continue",
+      result: expect.objectContaining({
+        resolvedThinkLevel: "off",
+        resolvedReasoningLevel: "off",
+      }),
     });
     expect(resolveDefaultReasoningLevel).not.toHaveBeenCalled();
   });
@@ -487,9 +487,12 @@ describe("resolveReplyDirectives", () => {
       defaultReasoning: "on",
     });
 
-    expectContinueResult(result, {
-      resolvedThinkLevel: "low",
-      resolvedReasoningLevel: "off",
+    expect(result).toEqual({
+      kind: "continue",
+      result: expect.objectContaining({
+        resolvedThinkLevel: "low",
+        resolvedReasoningLevel: "off",
+      }),
     });
     expect(resolveDefaultReasoningLevel).not.toHaveBeenCalled();
   });
@@ -501,9 +504,12 @@ describe("resolveReplyDirectives", () => {
       agentCfg: { reasoningDefault: "off" },
     });
 
-    expectContinueResult(result, {
-      resolvedThinkLevel: "off",
-      resolvedReasoningLevel: "off",
+    expect(result).toEqual({
+      kind: "continue",
+      result: expect.objectContaining({
+        resolvedThinkLevel: "off",
+        resolvedReasoningLevel: "off",
+      }),
     });
     expect(resolveDefaultReasoningLevel).not.toHaveBeenCalled();
   });
@@ -515,8 +521,11 @@ describe("resolveReplyDirectives", () => {
       agentCfg: { reasoningDefault: "stream" },
     });
 
-    expectContinueResult(result, {
-      resolvedReasoningLevel: "off",
+    expect(result).toEqual({
+      kind: "continue",
+      result: expect.objectContaining({
+        resolvedReasoningLevel: "off",
+      }),
     });
     expect(resolveDefaultReasoningLevel).not.toHaveBeenCalled();
   });
@@ -528,8 +537,11 @@ describe("resolveReplyDirectives", () => {
       defaultReasoning: "on",
     });
 
-    expectContinueResult(result, {
-      resolvedReasoningLevel: "off",
+    expect(result).toEqual({
+      kind: "continue",
+      result: expect.objectContaining({
+        resolvedReasoningLevel: "off",
+      }),
     });
     expect(resolveDefaultReasoningLevel).not.toHaveBeenCalled();
   });
@@ -541,8 +553,11 @@ describe("resolveReplyDirectives", () => {
       sessionEntry: makeSessionEntry({ reasoningLevel: "stream" }),
     });
 
-    expectContinueResult(result, {
-      resolvedReasoningLevel: "off",
+    expect(result).toEqual({
+      kind: "continue",
+      result: expect.objectContaining({
+        resolvedReasoningLevel: "off",
+      }),
     });
     expect(resolveDefaultReasoningLevel).not.toHaveBeenCalled();
   });
@@ -555,8 +570,11 @@ describe("resolveReplyDirectives", () => {
       commandAuthorized: true,
     });
 
-    expectContinueResult(result, {
-      resolvedReasoningLevel: "stream",
+    expect(result).toEqual({
+      kind: "continue",
+      result: expect.objectContaining({
+        resolvedReasoningLevel: "stream",
+      }),
     });
     expect(resolveDefaultReasoningLevel).not.toHaveBeenCalled();
   });
@@ -569,8 +587,11 @@ describe("resolveReplyDirectives", () => {
       ctx: { GatewayClientScopes: ["operator.admin"] },
     });
 
-    expectContinueResult(result, {
-      resolvedReasoningLevel: "stream",
+    expect(result).toEqual({
+      kind: "continue",
+      result: expect.objectContaining({
+        resolvedReasoningLevel: "stream",
+      }),
     });
     expect(resolveDefaultReasoningLevel).not.toHaveBeenCalled();
   });
@@ -583,8 +604,11 @@ describe("resolveReplyDirectives", () => {
       commandAuthorized: true,
     });
 
-    expectContinueResult(result, {
-      resolvedReasoningLevel: "stream",
+    expect(result).toEqual({
+      kind: "continue",
+      result: expect.objectContaining({
+        resolvedReasoningLevel: "stream",
+      }),
     });
     expect(resolveDefaultReasoningLevel).not.toHaveBeenCalled();
   });
@@ -643,8 +667,11 @@ describe("resolveReplyDirectives", () => {
       skillFilter: undefined,
     });
 
-    expectContinueResult(result, {
-      cleanedBody: "",
+    expect(result).toEqual({
+      kind: "continue",
+      result: expect.objectContaining({
+        cleanedBody: "",
+      }),
     });
     expect(sessionCtx.Body).toBe("");
     expect(sessionCtx.BodyForAgent).toBe("");

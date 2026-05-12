@@ -6,7 +6,6 @@ vi.hoisted(() => {
 });
 
 import "./server-context.chrome-test-harness.js";
-import { CDP_JSON_NEW_TIMEOUT_MS } from "./cdp-timeouts.js";
 import * as cdpHelpersModule from "./cdp.helpers.js";
 import * as cdpModule from "./cdp.js";
 import { InvalidBrowserNavigationUrlError } from "./navigation-guard.js";
@@ -37,12 +36,11 @@ function seedRunningProfileState(
 
 async function expectOldManagedTabClose(fetchMock: ReturnType<typeof vi.fn>): Promise<void> {
   await vi.waitFor(() => {
-    expect(fetchCallUrls(fetchMock).some((url) => url.includes("/json/close/OLD1"))).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/json/close/OLD1"),
+      expect.any(Object),
+    );
   });
-}
-
-function fetchCallUrls(fetchMock: ReturnType<typeof vi.fn>): string[] {
-  return fetchMock.mock.calls.map(([url]) => String(url));
 }
 
 function createOldTabCleanupFetchMock(
@@ -194,7 +192,10 @@ describe("browser server-context tab selection state", () => {
     const opened = await openManagedTabWithRunningProfile({ fetchMock });
     expect(opened.targetId).toBe("NEW");
     await expectOldManagedTabClose(fetchMock);
-    expect(fetchCallUrls(fetchMock).some((url) => url.includes("/json/close/NEW"))).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining("/json/close/NEW"),
+      expect.anything(),
+    );
   });
 
   it("does not fail tab open when managed-tab cleanup list fails", async () => {
@@ -252,7 +253,10 @@ describe("browser server-context tab selection state", () => {
 
     const opened = await openclaw.openTab("http://127.0.0.1:3009");
     expect(opened.targetId).toBe("NEW");
-    expect(fetchCallUrls(fetchMock).some((url) => url.includes("/json/close/"))).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining("/json/close/"),
+      expect.anything(),
+    );
   });
 
   it("does not block openTab on slow best-effort cleanup closes", async () => {
@@ -268,17 +272,12 @@ describe("browser server-context tab selection state", () => {
       },
     });
 
-    let timeout: NodeJS.Timeout | undefined;
     const opened = await Promise.race([
       openManagedTabWithRunningProfile({ fetchMock }),
-      new Promise<never>((_, reject) => {
-        timeout = setTimeout(() => reject(new Error("openTab timed out waiting for cleanup")), 300);
-      }),
-    ]).finally(() => {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
-    });
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("openTab timed out waiting for cleanup")), 300),
+      ),
+    ]);
 
     expect(opened.targetId).toBe("NEW");
   });
@@ -317,18 +316,19 @@ describe("browser server-context tab selection state", () => {
 
     const opened = await openclaw.openTab("https://example.com");
     expect(opened.targetId).toBe("NEW");
-    const jsonNewEndpoint = "http://127.0.0.1:18800/json/new?https%3A%2F%2Fexample.com";
-    expect(fetchJson.mock.calls[0]).toEqual([
-      jsonNewEndpoint,
-      CDP_JSON_NEW_TIMEOUT_MS,
+    expect(fetchJson).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining("/json/new"),
+      expect.any(Number),
       { method: "PUT" },
       undefined,
-    ]);
-    expect(fetchJson.mock.calls[1]).toEqual([
-      jsonNewEndpoint,
-      CDP_JSON_NEW_TIMEOUT_MS,
+    );
+    expect(fetchJson).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining("/json/new"),
+      expect.any(Number),
       undefined,
       undefined,
-    ]);
+    );
   });
 });

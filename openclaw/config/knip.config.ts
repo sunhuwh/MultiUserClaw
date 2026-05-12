@@ -9,7 +9,6 @@ const rootEntries = [
   "src/index.ts!",
   "src/entry.ts!",
   "src/cli/daemon-cli.ts!",
-  "src/infra/kysely-node-sqlite.ts!",
   "src/infra/warning-filter.ts!",
   "src/infra/command-explainer/index.ts!",
   bundledPluginFile("telegram", "src/audit.ts", "!"),
@@ -31,12 +30,10 @@ const bundledPluginEntries = [
 
 const bundledPluginIgnoredRuntimeDependencies = [
   "@agentclientprotocol/claude-agent-acp",
-  "@a2ui/lit",
   "@azure/identity",
   "@clawdbot/lobster",
   "@discordjs/opus",
   "@homebridge/ciao",
-  "@lit/context",
   "@matrix-org/matrix-sdk-crypto-wasm",
   "@mozilla/readability",
   "@openai/codex",
@@ -45,7 +42,6 @@ const bundledPluginIgnoredRuntimeDependencies = [
   "@zed-industries/codex-acp",
   "jiti",
   "json5",
-  "lit",
   "linkedom",
   "openclaw",
   "pdfjs-dist",
@@ -78,7 +74,6 @@ const rootBundledPluginRuntimeDependencies = [
 const config = {
   ignoreFiles: [
     "scripts/**",
-    "packages/*/dist/**",
     "**/__tests__/**",
     "src/test-utils/**",
     "**/test-helpers/**",
@@ -139,7 +134,6 @@ const config = {
     bundledPluginFile("msteams", "src/polls-store-memory.ts"),
     bundledPluginFile("voice-call", "src/providers/index.ts"),
   ],
-  ignore: ["packages/*/dist/**"],
   workspaces: {
     ".": {
       entry: rootEntries,
@@ -161,10 +155,6 @@ const config = {
       entry: ["index.html!", "src/main.ts!", "vite.config.ts!", "vitest*.ts!"],
       project: ["src/**/*.{ts,tsx}!"],
     },
-    "packages/sdk": {
-      entry: ["src/index.ts!"],
-      project: ["src/**/*.ts!"],
-    },
     "packages/*": {
       entry: ["index.js!", "scripts/postinstall.js!"],
       project: ["index.js!", "scripts/**/*.js!"],
@@ -173,7 +163,7 @@ const config = {
       // Bundled plugins often load their public surface via string specifiers in
       // `index.ts` contracts, so Knip needs these convention-based entry files.
       entry: bundledPluginEntries,
-      project: ["index.ts!", "src/**/*.{js,mjs,ts}!"],
+      project: ["index.ts!", "src/**/*.ts!"],
       ignoreDependencies: bundledPluginIgnoredRuntimeDependencies,
     },
   },

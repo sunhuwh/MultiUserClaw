@@ -2,7 +2,6 @@ import fs from "node:fs";
 import { resolveContextTokensForModel } from "../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS, DEFAULT_MODEL, DEFAULT_PROVIDER } from "../agents/defaults.js";
 import { resolveModelAuthMode } from "../agents/model-auth.js";
-import { areRuntimeModelRefsEquivalent } from "../agents/model-runtime-aliases.js";
 import {
   buildModelAliasIndex,
   resolveConfiguredModelRef,
@@ -652,17 +651,12 @@ export function buildStatusMessage(args: StatusArgs): string {
     model: selectedModel,
     allowAsyncLoad: false,
   });
-  const explicitRuntimeContextTokens =
-    typeof args.runtimeContextTokens === "number" && args.runtimeContextTokens > 0
-      ? args.runtimeContextTokens
-      : undefined;
-  const activeContextTokens =
-    resolveContextTokensForModel({
-      cfg: contextConfig,
-      ...(contextLookupProvider ? { provider: contextLookupProvider } : {}),
-      model: contextLookupModel,
-      allowAsyncLoad: false,
-    }) ?? explicitRuntimeContextTokens;
+  const activeContextTokens = resolveContextTokensForModel({
+    cfg: contextConfig,
+    ...(contextLookupProvider ? { provider: contextLookupProvider } : {}),
+    model: contextLookupModel,
+    allowAsyncLoad: false,
+  });
   const channelModelNote = resolveChannelModelNote({
     config: args.config,
     entry,
@@ -678,6 +672,10 @@ export function buildStatusMessage(args: StatusArgs): string {
     typeof args.agent?.contextTokens === "number" && args.agent.contextTokens > 0
       ? args.agent.contextTokens
       : undefined;
+  const explicitRuntimeContextTokens =
+    typeof args.runtimeContextTokens === "number" && args.runtimeContextTokens > 0
+      ? args.runtimeContextTokens
+      : undefined;
   const explicitConfiguredContextTokens =
     typeof args.explicitConfiguredContextTokens === "number" &&
     args.explicitConfiguredContextTokens > 0
@@ -689,18 +687,14 @@ export function buildStatusMessage(args: StatusArgs): string {
         ? Math.min(explicitConfiguredContextTokens, activeContextTokens)
         : explicitConfiguredContextTokens
       : undefined;
-  const cappedAgentContextTokens =
-    typeof agentContextTokens === "number"
-      ? typeof activeContextTokens === "number"
-        ? Math.min(agentContextTokens, activeContextTokens)
-        : agentContextTokens
-      : undefined;
   const channelOverrideContextTokens = channelModelNote
     ? (explicitRuntimeContextTokens ??
       cappedConfiguredContextTokens ??
       (typeof activeContextTokens === "number"
-        ? (cappedAgentContextTokens ?? activeContextTokens)
-        : cappedAgentContextTokens))
+        ? typeof agentContextTokens === "number"
+          ? Math.min(agentContextTokens, activeContextTokens)
+          : activeContextTokens
+        : agentContextTokens))
     : undefined;
   // When a fallback model is active, the selected-model context limit that
   // callers keep on the agent config is often stale. Prefer an explicit runtime
@@ -749,11 +743,7 @@ export function buildStatusMessage(args: StatusArgs): string {
         ...(contextLookupProvider ? { provider: contextLookupProvider } : {}),
         model: contextLookupModel,
         contextTokensOverride:
-          channelOverrideContextTokens ??
-          persistedContextTokens ??
-          cappedConfiguredContextTokens ??
-          cappedAgentContextTokens ??
-          explicitRuntimeContextTokens,
+          channelOverrideContextTokens ?? persistedContextTokens ?? agentContextTokens,
         fallbackContextTokens: DEFAULT_CONTEXT_TOKENS,
         allowAsyncLoad: false,
       }) ?? DEFAULT_CONTEXT_TOKENS);
@@ -850,25 +840,17 @@ export function buildStatusMessage(args: StatusArgs): string {
   ];
   const activationLine = activationParts.filter(Boolean).join(" · ");
 
-  const selectedModelLabel = modelRefs.selected.label || "unknown";
-  const runtimeAliasModelEquivalent = areRuntimeModelRefsEquivalent(
-    selectedModelLabel,
-    activeModelLabel,
-  );
   const selectedAuthMode =
     normalizeAuthMode(args.modelAuth) ?? resolveModelAuthMode(selectedProvider, args.config);
-  const rawSelectedAuthLabelValue =
-    selectedAuthMode && selectedAuthMode !== "unknown"
-      ? (args.modelAuth ?? selectedAuthMode)
-      : undefined;
+  const selectedAuthLabelValue =
+    args.modelAuth ??
+    (selectedAuthMode && selectedAuthMode !== "unknown" ? selectedAuthMode : undefined);
   const activeAuthMode =
     normalizeAuthMode(args.activeModelAuth) ?? resolveModelAuthMode(activeProvider, args.config);
   const activeAuthLabelValue =
-    activeAuthMode && activeAuthMode !== "unknown"
-      ? (args.activeModelAuth ?? activeAuthMode)
-      : undefined;
-  const selectedAuthLabelValue =
-    rawSelectedAuthLabelValue ?? (runtimeAliasModelEquivalent ? activeAuthLabelValue : undefined);
+    args.activeModelAuth ??
+    (activeAuthMode && activeAuthMode !== "unknown" ? activeAuthMode : undefined);
+  const selectedModelLabel = modelRefs.selected.label || "unknown";
   const fallbackState = resolveActiveFallbackState({
     selectedModelRef: selectedModelLabel,
     activeModelRef: activeModelLabel,
@@ -878,16 +860,15 @@ export function buildStatusMessage(args: StatusArgs): string {
     ? activeAuthMode
     : (selectedAuthMode ?? activeAuthMode);
   const showCost = effectiveCostAuthMode === "api-key" || effectiveCostAuthMode === "mixed";
+  const costConfig = showCost
+    ? resolveModelCostConfig({
+        provider: activeProvider,
+        model: activeModel,
+        config: args.config,
+        allowPluginNormalization: false,
+      })
+    : undefined;
   const hasUsage = typeof inputTokens === "number" || typeof outputTokens === "number";
-  const costConfig =
-    showCost && hasUsage
-      ? resolveModelCostConfig({
-          provider: activeProvider,
-          model: activeModel,
-          config: args.config,
-          allowPluginNormalization: false,
-        })
-      : undefined;
   const cost =
     showCost && hasUsage
       ? estimateUsageCost({

@@ -135,10 +135,8 @@ describe("DiscordMessageListener", () => {
 
     await expect(listener.handle(fakeEvent("ch-1"), {} as never)).resolves.toBeUndefined();
     await flushAsyncWork();
-    expect(logger.error).toHaveBeenCalledTimes(1);
-    expect(logger.error.mock.calls[0]).toHaveLength(1);
-    expect(String(logger.error.mock.calls[0]?.[0])).toContain(
-      "discord handler failed: Error: boom",
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining("discord handler failed: Error: boom"),
     );
   });
 
@@ -184,10 +182,8 @@ describe("DiscordInteractionListener", () => {
     await listener.handle({ id: "interaction-1" } as never, { handleInteraction } as never);
     await flushAsyncWork();
 
-    expect(logger.error).toHaveBeenCalledTimes(1);
-    expect(logger.error.mock.calls[0]).toHaveLength(1);
-    expect(String(logger.error.mock.calls[0]?.[0])).toContain(
-      "discord interaction handler failed: Error: interaction boom",
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining("discord interaction handler failed: Error: interaction boom"),
     );
   });
 

@@ -53,7 +53,7 @@ describe("plugin compatibility snapshot notices", () => {
       body: `module.exports = { id: "legacy-sidecar", register() {} };\n`,
     });
 
-    expect(buildSnapshotCompatibilityNoticeCodes(plugin)).toStrictEqual([]);
+    expect(buildSnapshotCompatibilityNoticeCodes(plugin)).toEqual([]);
   });
 
   it("does not report startup compatibility warnings for explicit startup-lazy manifests", () => {
@@ -63,6 +63,6 @@ describe("plugin compatibility snapshot notices", () => {
     });
     addStartupActivation(plugin.dir, false);
 
-    expect(buildSnapshotCompatibilityNoticeCodes(plugin)).toStrictEqual([]);
+    expect(buildSnapshotCompatibilityNoticeCodes(plugin)).toEqual([]);
   });
 });

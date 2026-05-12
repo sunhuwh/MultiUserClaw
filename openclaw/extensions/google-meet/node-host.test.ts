@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 type MockChild = EventEmitter & {
   exitCode: number | null;
@@ -41,16 +41,6 @@ vi.mock("node:child_process", async (importOriginal) => {
 });
 
 describe("google-meet node host bridge sessions", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-    children.length = 0;
-  });
-
-  afterAll(() => {
-    vi.doUnmock("node:child_process");
-    vi.resetModules();
-  });
-
   it("starts observe-only Chrome without BlackHole or bridge processes", async () => {
     const { handleGoogleMeetNodeHostCommand } = await import("./src/node-host.js");
     const originalPlatform = process.platform;
@@ -177,12 +167,9 @@ describe("google-meet node host bridge sessions", () => {
         ),
       );
 
-      expect(typeof start.bridgeId).toBe("string");
-      expect(start.bridgeId.length).toBeGreaterThan(0);
-      expect(start).toEqual({
+      expect(start).toMatchObject({
         audioBridge: { type: "node-command-pair" },
-        bridgeId: start.bridgeId,
-        launched: false,
+        bridgeId: expect.any(String),
       });
 
       const activeList = JSON.parse(

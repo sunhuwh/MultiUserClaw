@@ -86,7 +86,7 @@ describe("workspace plugin model auth evidence", () => {
               workspaceDir,
               store,
             }),
-          ).resolves.toEqual({
+          ).resolves.toMatchObject({
             apiKey: "workspace-cloud-local-credentials",
             source: "workspace cloud credentials",
             mode: "api-key",

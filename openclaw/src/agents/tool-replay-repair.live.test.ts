@@ -4,7 +4,7 @@ import { SessionManager } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import { getRuntimeConfig } from "../config/config.js";
-import { resolveDefaultAgentDir } from "./agent-scope.js";
+import { resolveOpenClawAgentDir } from "./agent-paths.js";
 import { isLiveProfileKeyModeEnabled, isLiveTestEnabled } from "./live-test-helpers.js";
 import { getApiKeyForModel, requireApiKey } from "./model-auth.js";
 import { ensureOpenClawModelsJson } from "./models-config.js";
@@ -28,22 +28,20 @@ type TargetModelRef = {
 };
 
 function parseTargetModelRefs(raw: string | undefined): TargetModelRef[] {
-  const refs: TargetModelRef[] = [];
-  for (const item of (raw ?? "").split(",")) {
-    const ref = item.trim();
-    if (!ref) {
-      continue;
-    }
-    const [provider, ...rest] = ref.split("/");
-    const modelId = rest.join("/").trim();
-    if (!provider?.trim() || !modelId) {
-      throw new Error(
-        `Invalid OPENCLAW_LIVE_TOOL_REPLAY_REPAIR_MODELS entry: ${JSON.stringify(ref)}`,
-      );
-    }
-    refs.push({ ref, provider: provider.trim(), modelId });
-  }
-  return refs;
+  return (raw ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((ref) => {
+      const [provider, ...rest] = ref.split("/");
+      const modelId = rest.join("/").trim();
+      if (!provider?.trim() || !modelId) {
+        throw new Error(
+          `Invalid OPENCLAW_LIVE_TOOL_REPLAY_REPAIR_MODELS entry: ${JSON.stringify(ref)}`,
+        );
+      }
+      return { ref, provider: provider.trim(), modelId };
+    });
 }
 
 function logProgress(message: string): void {
@@ -173,23 +171,7 @@ function assistantToolCallIds(message: AgentMessage): string[] {
   if (message.role !== "assistant") {
     return [];
   }
-  const ids: string[] = [];
-  for (const block of message.content) {
-    if (block.type === "toolCall") {
-      ids.push(block.id);
-    }
-  }
-  return ids;
-}
-
-function responseText(content: Awaited<ReturnType<typeof completeSimple<Api>>>["content"]): string {
-  const parts: string[] = [];
-  for (const block of content) {
-    if (block.type === "text") {
-      parts.push(block.text.trim());
-    }
-  }
-  return parts.join(" ").trim();
+  return message.content.filter((block) => block.type === "toolCall").map((block) => block.id);
 }
 
 function isKnownLiveBlocker(errorMessage: string): boolean {
@@ -207,7 +189,7 @@ describeLive("tool replay repair live", () => {
         const cfg = getRuntimeConfig();
         await ensureOpenClawModelsJson(cfg);
 
-        const agentDir = resolveDefaultAgentDir(cfg);
+        const agentDir = resolveOpenClawAgentDir();
         const authStorage = discoverAuthStorage(agentDir);
         const modelRegistry = discoverModels(authStorage, agentDir);
         const model = modelRegistry.find(target.provider, target.modelId) as Model<Api> | null;
@@ -294,7 +276,11 @@ describeLive("tool replay repair live", () => {
           120_000,
         );
 
-        const text = responseText(response.content);
+        const text = response.content
+          .filter((block) => block.type === "text")
+          .map((block) => block.text.trim())
+          .join(" ")
+          .trim();
         const errorMessage =
           typeof (response as { errorMessage?: unknown }).errorMessage === "string"
             ? ((response as { errorMessage?: string }).errorMessage ?? "")
@@ -318,7 +304,7 @@ describeLive("tool replay repair live", () => {
         const cfg = getRuntimeConfig();
         await ensureOpenClawModelsJson(cfg);
 
-        const agentDir = resolveDefaultAgentDir(cfg);
+        const agentDir = resolveOpenClawAgentDir();
         const authStorage = discoverAuthStorage(agentDir);
         const modelRegistry = discoverModels(authStorage, agentDir);
         const model = modelRegistry.find(target.provider, target.modelId) as Model<Api> | null;
@@ -375,7 +361,11 @@ describeLive("tool replay repair live", () => {
           120_000,
         );
 
-        const text = responseText(response.content);
+        const text = response.content
+          .filter((block) => block.type === "text")
+          .map((block) => block.text.trim())
+          .join(" ")
+          .trim();
         const errorMessage =
           typeof (response as { errorMessage?: unknown }).errorMessage === "string"
             ? ((response as { errorMessage?: string }).errorMessage ?? "")

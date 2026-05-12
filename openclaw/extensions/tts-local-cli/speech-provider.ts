@@ -1,16 +1,15 @@
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { runFfmpeg } from "openclaw/plugin-sdk/media-runtime";
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
-import { writeExternalFileWithinRoot } from "openclaw/plugin-sdk/security-runtime";
 import type {
   SpeechProviderConfig,
   SpeechProviderPlugin,
   SpeechSynthesisRequest,
   SpeechTelephonySynthesisRequest,
 } from "openclaw/plugin-sdk/speech-core";
-import { tempWorkspace, resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
+import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
 
 const log = createSubsystemLogger("tts-local-cli");
 
@@ -271,50 +270,36 @@ async function convertAudio(
   outputDir: string,
   target: OutputFormat,
 ): Promise<Buffer> {
-  const outputFileName = `converted${getFileExt(target)}`;
-  const outputPath = path.join(outputDir, outputFileName);
+  const outputPath = path.join(outputDir, `converted${getFileExt(target)}`);
   const args = ["-y", "-i", inputPath];
   if (target === "opus") {
-    args.push("-c:a", "libopus", "-b:a", "64k", "-f", "opus");
+    args.push("-c:a", "libopus", "-b:a", "64k", outputPath);
   } else if (target === "wav") {
-    args.push("-c:a", "pcm_s16le", "-f", "wav");
+    args.push("-c:a", "pcm_s16le", outputPath);
   } else {
-    args.push("-c:a", "libmp3lame", "-b:a", "128k", "-f", "mp3");
+    args.push("-c:a", "libmp3lame", "-b:a", "128k", outputPath);
   }
-  await writeExternalFileWithinRoot({
-    rootDir: outputDir,
-    path: outputFileName,
-    write: async (tempPath) => {
-      await runFfmpeg([...args, tempPath]);
-    },
-  });
+  await runFfmpeg(args);
   return readFileSync(outputPath);
 }
 
 async function convertToRawPcm(inputPath: string, outputDir: string): Promise<Buffer> {
   // Output raw 16kHz mono 16-bit little-endian PCM (no WAV headers)
-  const outputFileName = "telephony.pcm";
-  const outputPath = path.join(outputDir, outputFileName);
-  await writeExternalFileWithinRoot({
-    rootDir: outputDir,
-    path: outputFileName,
-    write: async (tempPath) => {
-      await runFfmpeg([
-        "-y",
-        "-i",
-        inputPath,
-        "-c:a",
-        "pcm_s16le",
-        "-ar",
-        "16000",
-        "-ac",
-        "1",
-        "-f",
-        "s16le",
-        tempPath,
-      ]);
-    },
-  });
+  const outputPath = path.join(outputDir, "telephony.pcm");
+  await runFfmpeg([
+    "-y",
+    "-i",
+    inputPath,
+    "-c:a",
+    "pcm_s16le",
+    "-ar",
+    "16000",
+    "-ac",
+    "1",
+    "-f",
+    "s16le",
+    outputPath,
+  ]);
   return readFileSync(outputPath);
 }
 
@@ -341,11 +326,7 @@ export function buildCliSpeechProvider(): SpeechProviderPlugin {
 
       log.debug(`synthesize: text=${req.text.slice(0, 50)}...`);
 
-      const temp = await tempWorkspace({
-        rootDir: resolvePreferredOpenClawTmpDir(),
-        prefix: "openclaw-cli-tts-",
-      });
-      const tempDir = temp.dir;
+      const tempDir = mkdtempSync(path.join(resolvePreferredOpenClawTmpDir(), "openclaw-cli-tts-"));
 
       try {
         const result = await runCli({
@@ -370,7 +351,7 @@ export function buildCliSpeechProvider(): SpeechProviderPlugin {
             const inputFile =
               result.audioPath ?? path.join(tempDir, `input${getFileExt(result.actualFormat)}`);
             if (!result.audioPath) {
-              await temp.write(`input${getFileExt(result.actualFormat)}`, result.buffer);
+              writeFileSync(inputFile, result.buffer);
             }
             buffer = await convertAudio(inputFile, tempDir, "opus");
             format = "opus";
@@ -384,7 +365,7 @@ export function buildCliSpeechProvider(): SpeechProviderPlugin {
             const inputFile =
               result.audioPath ?? path.join(tempDir, `input${getFileExt(result.actualFormat)}`);
             if (!result.audioPath) {
-              await temp.write(`input${getFileExt(result.actualFormat)}`, result.buffer);
+              writeFileSync(inputFile, result.buffer);
             }
             buffer = await convertAudio(inputFile, tempDir, desired);
             format = desired;
@@ -402,7 +383,9 @@ export function buildCliSpeechProvider(): SpeechProviderPlugin {
           voiceCompatible: req.target === "voice-note" && format === "opus",
         };
       } finally {
-        await temp.cleanup();
+        try {
+          rmSync(tempDir, { recursive: true, force: true });
+        } catch {}
       }
     },
 
@@ -414,11 +397,7 @@ export function buildCliSpeechProvider(): SpeechProviderPlugin {
 
       log.debug(`synthesizeTelephony: text=${req.text.slice(0, 50)}...`);
 
-      const temp = await tempWorkspace({
-        rootDir: resolvePreferredOpenClawTmpDir(),
-        prefix: "openclaw-cli-tts-",
-      });
-      const tempDir = temp.dir;
+      const tempDir = mkdtempSync(path.join(resolvePreferredOpenClawTmpDir(), "openclaw-cli-tts-"));
 
       try {
         const result = await runCli({
@@ -436,7 +415,7 @@ export function buildCliSpeechProvider(): SpeechProviderPlugin {
         const inputFile =
           result.audioPath ?? path.join(tempDir, `input${getFileExt(result.actualFormat)}`);
         if (!result.audioPath) {
-          await temp.write(`input${getFileExt(result.actualFormat)}`, result.buffer);
+          writeFileSync(inputFile, result.buffer);
         }
 
         // Convert to raw 16kHz mono PCM for telephony (no WAV headers)
@@ -448,7 +427,9 @@ export function buildCliSpeechProvider(): SpeechProviderPlugin {
           sampleRate: 16000,
         };
       } finally {
-        await temp.cleanup();
+        try {
+          rmSync(tempDir, { recursive: true, force: true });
+        } catch {}
       }
     },
   };

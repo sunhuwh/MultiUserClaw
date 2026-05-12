@@ -22,19 +22,6 @@ const moduleLoaderParams = vi.hoisted(
     }>,
 );
 
-function pluginIds(plugins: ReturnType<typeof listReadOnlyChannelPluginsForConfig>): string[] {
-  return plugins.map((entry) => entry.id);
-}
-
-function expectRecordFields(record: unknown, expected: Record<string, unknown>) {
-  expect(record).toBeDefined();
-  const actual = record as Record<string, unknown>;
-  for (const [key, value] of Object.entries(expected)) {
-    expect(actual[key]).toEqual(value);
-  }
-  return actual;
-}
-
 vi.mock("../../plugins/bundled-dir.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../plugins/bundled-dir.js")>();
   return {
@@ -486,7 +473,7 @@ describe("listReadOnlyChannelPluginsForConfig", () => {
       },
     );
 
-    expect(pluginIds(plugins)).not.toContain("external-chat");
+    expect(plugins.some((entry) => entry.id === "external-chat")).toBe(false);
     expect(fs.existsSync(setupMarker)).toBe(false);
     expect(fs.existsSync(fullMarker)).toBe(false);
   });
@@ -593,8 +580,8 @@ describe("listReadOnlyChannelPluginsForConfig", () => {
           "alpha-chat": { token: "alpha-token" },
           "beta-chat": { token: "beta-token" },
         },
-      } as never).token,
-    ).toBe("beta-token");
+      } as never),
+    ).toMatchObject({ token: "beta-token" });
     expect(fs.existsSync(setupMarker)).toBe(true);
     expect(fs.existsSync(fullMarker)).toBe(false);
   });
@@ -623,7 +610,7 @@ describe("listReadOnlyChannelPluginsForConfig", () => {
       },
     );
 
-    expect(pluginIds(plugins)).not.toContain("alpha-chat");
+    expect(plugins.some((entry) => entry.id === "alpha-chat")).toBe(false);
     const betaPlugin = plugins.find((entry) => entry.id === "beta-chat");
     expect(betaPlugin?.meta.id).toBe("beta-chat");
     expect(
@@ -636,8 +623,8 @@ describe("listReadOnlyChannelPluginsForConfig", () => {
         channels: {
           "beta-chat": { token: "beta-token" },
         },
-      } as never).token,
-    ).toBe("beta-token");
+      } as never),
+    ).toMatchObject({ token: "beta-token" });
     expect(fs.existsSync(setupMarker)).toBe(true);
     expect(fs.existsSync(fullMarker)).toBe(false);
   });
@@ -727,24 +714,26 @@ describe("listReadOnlyChannelPluginsForConfig", () => {
     expect(plugin?.meta.label).toBe("External Chat Manifest");
     expect(plugin?.meta.blurb).toBe("manifest config");
     expect(plugin?.meta.preferOver).toEqual(["legacy-external-chat"]);
-    const schema = plugin?.configSchema?.schema as
-      | { properties?: Record<string, { type?: string }> }
-      | undefined;
-    expect(schema?.properties?.token?.type).toBe("string");
-    expectRecordFields(plugin?.configSchema?.uiHints?.token, {
+    expect(plugin?.configSchema?.schema).toMatchObject({
+      properties: {
+        token: { type: "string" },
+      },
+    });
+    expect(plugin?.configSchema?.uiHints?.token).toMatchObject({
       label: "Token",
       sensitive: true,
     });
     expect(
       plugin?.config.listAccountIds({ channels: { "external-chat": { token: "t" } } } as never),
     ).toEqual(["default"]);
-    const account = plugin?.config.resolveAccount({
-      channels: { "external-chat": { token: "configured" } },
-    } as never);
-    const accountFields = expectRecordFields(account, {
+    expect(
+      plugin?.config.resolveAccount({
+        channels: { "external-chat": { token: "configured" } },
+      } as never),
+    ).toMatchObject({
       accountId: "default",
+      config: { token: "configured" },
     });
-    expectRecordFields(accountFields.config, { token: "configured" });
     expect(fs.existsSync(setupMarker)).toBe(false);
     expect(fs.existsSync(fullMarker)).toBe(false);
   });
@@ -803,7 +792,7 @@ describe("listReadOnlyChannelPluginsForConfig", () => {
       },
     );
 
-    expect(pluginIds(plugins)).not.toContain(unsafeChannelId);
+    expect(plugins.some((entry) => entry.id === unsafeChannelId)).toBe(false);
     expect(fs.existsSync(setupMarker)).toBe(false);
     expect(fs.existsSync(fullMarker)).toBe(false);
   });
@@ -837,15 +826,13 @@ describe("listReadOnlyChannelPluginsForConfig", () => {
     }).find((entry) => entry.id === "external-chat");
 
     expect(plugin?.config.listAccountIds(cfg)).toEqual(["default", "named"]);
-    const defaultAccount = plugin?.config.resolveAccount(cfg, "__proto__");
-    const defaultFields = expectRecordFields(defaultAccount, {
+    expect(plugin?.config.resolveAccount(cfg, "__proto__")).toMatchObject({
       accountId: "default",
+      config: { token: "default-token" },
     });
-    expectRecordFields(defaultFields.config, { token: "default-token" });
-    const inheritedAccount = plugin?.config.resolveAccount(cfg, "inherited") as
-      | { config?: { token?: string } }
-      | undefined;
-    expect(inheritedAccount?.config?.token).not.toBe("prototype-token");
+    expect(plugin?.config.resolveAccount(cfg, "inherited")).not.toMatchObject({
+      config: { token: "prototype-token" },
+    });
   });
 
   it("keeps setup-entry precedence when channel config descriptors are not runtime cutoffs", () => {
@@ -920,7 +907,7 @@ describe("listReadOnlyChannelPluginsForConfig", () => {
       },
     );
 
-    expect(pluginIds(plugins)).not.toContain("external-chat");
+    expect(plugins.some((entry) => entry.id === "external-chat")).toBe(false);
     expect(fs.existsSync(setupMarker)).toBe(false);
     expect(fs.existsSync(fullMarker)).toBe(false);
   });
@@ -940,7 +927,7 @@ describe("listReadOnlyChannelPluginsForConfig", () => {
       },
     );
 
-    expect(pluginIds(plugins)).not.toContain(channelId);
+    expect(plugins.some((entry) => entry.id === channelId)).toBe(false);
     expect(fs.existsSync(setupMarker)).toBe(false);
     expect(fs.existsSync(fullMarker)).toBe(false);
   });
@@ -966,7 +953,7 @@ describe("listReadOnlyChannelPluginsForConfig", () => {
       },
     );
 
-    expect(pluginIds(plugins)).not.toContain(channelId);
+    expect(plugins.some((entry) => entry.id === channelId)).toBe(false);
     expect(fs.existsSync(setupMarker)).toBe(false);
     expect(fs.existsSync(fullMarker)).toBe(false);
   });
@@ -1109,8 +1096,8 @@ describe("listReadOnlyChannelPluginsForConfig", () => {
       },
     );
 
-    expect(pluginIds(plugins)).not.toContain("spoofed-chat");
-    expect(pluginIds(plugins)).not.toContain("external-chat");
+    expect(plugins.some((entry) => entry.id === "spoofed-chat")).toBe(false);
+    expect(plugins.some((entry) => entry.id === "external-chat")).toBe(false);
     expect(fs.existsSync(setupMarker)).toBe(true);
     expect(fs.existsSync(fullMarker)).toBe(false);
   });

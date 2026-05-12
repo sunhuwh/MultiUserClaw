@@ -1,43 +1,61 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { resolveAgentHarnessPolicy } from "./harness/policy.js";
-import { resolveDefaultModelForAgent } from "./model-selection.js";
+import { normalizeAgentId } from "../routing/session-key.js";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
+import { resolveAgentRuntimePolicy } from "./agent-runtime-policy.js";
+import { listAgentEntries } from "./agent-scope.js";
+import {
+  normalizeEmbeddedAgentRuntime,
+  type EmbeddedAgentRuntime,
+} from "./pi-embedded-runner/runtime.js";
 
 type AgentRuntimeMetadata = {
   id: string;
-  source: "implicit" | "model" | "provider";
+  source: "env" | "agent" | "defaults" | "implicit";
 };
 
-export function resolveAgentRuntimeMetadata(
-  _cfg: OpenClawConfig,
-  _agentId: string,
-  _env: NodeJS.ProcessEnv = process.env,
-): AgentRuntimeMetadata {
-  return {
-    id: "auto",
-    source: "implicit",
-  };
+function normalizeRuntimeValue(value: unknown): EmbeddedAgentRuntime | undefined {
+  const normalized = typeof value === "string" ? normalizeLowercaseStringOrEmpty(value) : "";
+  return normalized ? normalizeEmbeddedAgentRuntime(normalized) : undefined;
 }
 
-export function resolveModelAgentRuntimeMetadata(params: {
-  cfg: OpenClawConfig;
-  agentId: string;
-  provider?: string;
-  model?: string;
-  sessionKey?: string;
-}): AgentRuntimeMetadata {
-  const resolved =
-    params.provider && params.model
-      ? { provider: params.provider, model: params.model }
-      : resolveDefaultModelForAgent({ cfg: params.cfg, agentId: params.agentId });
-  const policy = resolveAgentHarnessPolicy({
-    provider: resolved.provider,
-    modelId: resolved.model,
-    config: params.cfg,
-    agentId: params.agentId,
-    sessionKey: params.sessionKey,
-  });
+export function resolveAgentRuntimeMetadata(
+  cfg: OpenClawConfig,
+  agentId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): AgentRuntimeMetadata {
+  const envRuntime = normalizeRuntimeValue(env.OPENCLAW_AGENT_RUNTIME);
+  const normalizedAgentId = normalizeAgentId(agentId);
+  const agentEntry = listAgentEntries(cfg).find(
+    (entry) => normalizeAgentId(entry.id) === normalizedAgentId,
+  );
+  const agentPolicy = resolveAgentRuntimePolicy(agentEntry);
+  const defaultsPolicy = resolveAgentRuntimePolicy(cfg.agents?.defaults);
+
+  if (envRuntime) {
+    return {
+      id: envRuntime,
+      source: "env",
+    };
+  }
+
+  const agentRuntime = normalizeRuntimeValue(agentPolicy?.id);
+  if (agentRuntime) {
+    return {
+      id: agentRuntime,
+      source: "agent",
+    };
+  }
+
+  const defaultsRuntime = normalizeRuntimeValue(defaultsPolicy?.id);
+  if (defaultsRuntime) {
+    return {
+      id: defaultsRuntime,
+      source: "defaults",
+    };
+  }
+
   return {
-    id: policy.runtime,
-    source: policy.runtimeSource ?? "implicit",
+    id: "pi",
+    source: "implicit",
   };
 }

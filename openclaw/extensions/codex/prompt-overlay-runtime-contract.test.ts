@@ -16,10 +16,10 @@ describe("Codex prompt overlay runtime contract", () => {
 
     expect(contribution?.stablePrefix).toContain("<persona_latch>");
     expect(contribution?.sectionOverrides?.interaction_style).toContain(
-      "Live chat tone: short, natural, human.",
+      "This is a live chat, not a memo.",
     );
     expect(contribution?.sectionOverrides?.interaction_style).not.toContain(
-      "Use heartbeats to create useful proactive progress",
+      "The purpose of heartbeats is to make you feel magical and proactive.",
     );
   });
 
@@ -33,7 +33,7 @@ describe("Codex prompt overlay runtime contract", () => {
     );
 
     expect(contribution?.stablePrefix).toContain("<persona_latch>");
-    expect(contribution?.sectionOverrides).toStrictEqual({});
+    expect(contribution?.sectionOverrides).toEqual({});
   });
 
   it("does not add the shared GPT-5 overlay to non-GPT-5 Codex provider runs", () => {

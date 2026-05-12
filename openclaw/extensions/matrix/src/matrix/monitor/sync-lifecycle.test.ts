@@ -36,26 +36,6 @@ function createSyncLifecycleHarness(options?: { withStopping?: boolean }) {
   };
 }
 
-function statusCalls(setStatus: ReturnType<typeof vi.fn>): Record<string, unknown>[] {
-  return setStatus.mock.calls.map(([status]) => status as Record<string, unknown>);
-}
-
-function lastStatus(setStatus: ReturnType<typeof vi.fn>): Record<string, unknown> {
-  const status = statusCalls(setStatus).at(-1);
-  expect(status).toBeDefined();
-  return status ?? {};
-}
-
-function expectLastStatusFields(
-  setStatus: ReturnType<typeof vi.fn>,
-  fields: Record<string, unknown>,
-): void {
-  const status = lastStatus(setStatus);
-  for (const [key, value] of Object.entries(fields)) {
-    expect(status[key]).toEqual(value);
-  }
-}
-
 describe("createMatrixMonitorSyncLifecycle", () => {
   it("rejects the channel wait on unexpected sync errors", async () => {
     const { client, lifecycle, setStatus } = createSyncLifecycleHarness();
@@ -64,11 +44,13 @@ describe("createMatrixMonitorSyncLifecycle", () => {
     client.emit("sync.unexpected_error", new Error("sync exploded"));
 
     await expect(waitPromise).rejects.toThrow("sync exploded");
-    expectLastStatusFields(setStatus, {
-      accountId: "default",
-      healthState: "error",
-      lastError: "sync exploded",
-    });
+    expect(setStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: "default",
+        healthState: "error",
+        lastError: "sync exploded",
+      }),
+    );
   });
 
   it("ignores STOPPED emitted during intentional shutdown", async () => {
@@ -82,10 +64,12 @@ describe("createMatrixMonitorSyncLifecycle", () => {
     lifecycle.dispose();
 
     await expect(waitPromise).resolves.toBeUndefined();
-    expectLastStatusFields(setStatus, {
-      accountId: "default",
-      healthState: "stopped",
-    });
+    expect(setStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: "default",
+        healthState: "stopped",
+      }),
+    );
   });
 
   it("marks unexpected STOPPED sync as an error state", async () => {
@@ -95,11 +79,13 @@ describe("createMatrixMonitorSyncLifecycle", () => {
     client.emit("sync.state", "STOPPED", "SYNCING", undefined);
 
     await expect(waitPromise).rejects.toThrow("Matrix sync stopped unexpectedly");
-    expectLastStatusFields(setStatus, {
-      accountId: "default",
-      healthState: "error",
-      lastError: "Matrix sync stopped unexpectedly",
-    });
+    expect(setStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: "default",
+        healthState: "error",
+        lastError: "Matrix sync stopped unexpectedly",
+      }),
+    );
   });
 
   it("ignores unexpected sync errors emitted during intentional shutdown", async () => {
@@ -113,11 +99,12 @@ describe("createMatrixMonitorSyncLifecycle", () => {
     lifecycle.dispose();
 
     await expect(waitPromise).resolves.toBeUndefined();
-    expect(
-      statusCalls(setStatus).some(
-        (status) => status.accountId === "default" && status.healthState === "error",
-      ),
-    ).toBe(false);
+    expect(setStatus).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: "default",
+        healthState: "error",
+      }),
+    );
   });
 
   it("ignores non-terminal sync states emitted during intentional shutdown", async () => {
@@ -133,11 +120,13 @@ describe("createMatrixMonitorSyncLifecycle", () => {
     statusController.markStopped();
 
     await expect(waitPromise).resolves.toBeUndefined();
-    expectLastStatusFields(setStatus, {
-      accountId: "default",
-      healthState: "stopped",
-      lastError: null,
-    });
+    expect(setStatus).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        accountId: "default",
+        healthState: "stopped",
+        lastError: null,
+      }),
+    );
   });
 
   it("only refreshes transport liveness for successful sync responses", async () => {
@@ -148,16 +137,28 @@ describe("createMatrixMonitorSyncLifecycle", () => {
       setStatus.mockClear();
 
       client.emit("sync.state", "PREPARED", null, undefined);
-      expect(lastStatus(setStatus).lastTransportActivityAt).toBeUndefined();
+      expect(setStatus).toHaveBeenLastCalledWith(
+        expect.not.objectContaining({
+          lastTransportActivityAt: expect.any(Number),
+        }),
+      );
 
       await vi.advanceTimersByTimeAsync(2_000);
       client.emit("sync.state", "SYNCING", "PREPARED", undefined);
       const syncAt = Date.now();
-      expect(lastStatus(setStatus).lastTransportActivityAt).toBe(syncAt);
+      expect(setStatus).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          lastTransportActivityAt: syncAt,
+        }),
+      );
 
       await vi.advanceTimersByTimeAsync(3_000);
       client.emit("sync.state", "CATCHUP", "SYNCING", undefined);
-      expect(lastStatus(setStatus).lastTransportActivityAt).toBe(syncAt);
+      expect(setStatus).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          lastTransportActivityAt: syncAt,
+        }),
+      );
     } finally {
       lifecycle.dispose();
       vi.useRealTimers();
@@ -179,11 +180,13 @@ describe("createMatrixMonitorSyncLifecycle", () => {
     lifecycle.dispose();
     statusController.markStopped();
 
-    expectLastStatusFields(setStatus, {
-      accountId: "default",
-      healthState: "error",
-      lastError: "sync exploded",
-    });
+    expect(setStatus).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        accountId: "default",
+        healthState: "error",
+        lastError: "sync exploded",
+      }),
+    );
   });
 
   it("ignores follow-up sync states after a fatal sync error", async () => {
@@ -196,11 +199,13 @@ describe("createMatrixMonitorSyncLifecycle", () => {
     client.emit("sync.state", "RECONNECTING", "SYNCING", new Error("late reconnect"));
     lifecycle.dispose();
 
-    expectLastStatusFields(setStatus, {
-      accountId: "default",
-      healthState: "error",
-      lastError: "sync exploded",
-    });
+    expect(setStatus).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        accountId: "default",
+        healthState: "error",
+        lastError: "sync exploded",
+      }),
+    );
   });
 
   it("rejects a second concurrent fatal-stop waiter", async () => {

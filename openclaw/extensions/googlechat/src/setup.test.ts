@@ -11,7 +11,7 @@ import {
 } from "openclaw/plugin-sdk/plugin-test-runtime";
 import type { WizardPrompter } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk/setup";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../runtime-api.js";
 import {
   listGoogleChatAccountIds,
@@ -82,11 +82,6 @@ describe("googlechat setup", () => {
   afterEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
-  });
-
-  afterAll(() => {
-    vi.doUnmock("./channel.runtime.js");
-    vi.resetModules();
   });
 
   it("rejects env auth for non-default accounts", () => {

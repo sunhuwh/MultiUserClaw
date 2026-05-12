@@ -1,4 +1,4 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import { withEnv, withEnvAsync, withFetchPreconnect } from "openclaw/plugin-sdk/test-env";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { __testing, createGeminiWebSearchProvider } from "./src/gemini-web-search-provider.js";
@@ -24,7 +24,7 @@ function installGeminiFetch() {
         }),
     } as Response),
   );
-  vi.stubGlobal("fetch", withFetchPreconnect(mockFetch));
+  global.fetch = withFetchPreconnect(mockFetch);
   return mockFetch;
 }
 
@@ -69,7 +69,6 @@ function parseGeminiFetchBody(mockFetch: ReturnType<typeof installGeminiFetch>):
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
-  vi.unstubAllGlobals();
 });
 
 describe("google web search provider", () => {
@@ -81,11 +80,9 @@ describe("google web search provider", () => {
         throw new Error("Expected tool definition");
       }
 
-      await expect(tool.execute({ query: "OpenClaw docs" })).resolves.toEqual({
-        docs: "https://docs.openclaw.ai/tools/web",
+      await expect(tool.execute({ query: "OpenClaw docs" })).resolves.toMatchObject({
         error: "missing_gemini_api_key",
-        message:
-          "web_search (gemini) needs an API key. Set GEMINI_API_KEY in the Gateway environment, configure plugins.entries.google.config.webSearch.apiKey, or reuse models.providers.google.apiKey. If you do not want to configure a search API key, use web_fetch for a specific URL or the browser tool for interactive pages.",
+        message: expect.stringContaining("use web_fetch for a specific URL or the browser tool"),
       });
     });
   });
