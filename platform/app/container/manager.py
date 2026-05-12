@@ -293,6 +293,7 @@ async def create_container(db: AsyncSession, user_id: str) -> Container | None:
         "DEPLOY_VERSION": settings.deploy_version,
         "TZ": settings.container_tz,
         "BRIDGE_ENABLE_CHANNELS": "1",
+        "OPENCLAW_ALLOW_ROOT": "1",
     }
     # if sso_token:
     #     container_env["SSO_TOKEN"] = sso_token
